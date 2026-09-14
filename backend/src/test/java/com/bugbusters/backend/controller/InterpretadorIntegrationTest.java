@@ -207,4 +207,53 @@ class InterpretadorIntegrationTest {
 
         mockServer.verify();
     }
+
+    @Test
+    @DisplayName("Cenário C: Deve apontar pendência de ambiguidade para cargo 150 e não preencher descriCargo automaticamente")
+    void deveTratarAmbiguidadeCargo150SemAutoPreenchimento() throws Exception {
+        String respostaSimuladaPython = """
+            {
+              "canal": null,
+              "codMarca": 10,
+              "descrMarca": "PRETO",
+              "codCargo": 150,
+              "descriCargo": null,
+              "codLoja": null,
+              "taxa": 0.0100,
+              "dataInicio": "2026-09-01",
+              "dataFim": "2026-09-30",
+              "confianca": 0.70,
+              "pendencias": [
+                "Cargo 150 possui múltiplas funções (GERENTE DE LOJA, GERENTE QUIOSQUE). Favor especificar o cargo exato."
+              ]
+            }
+            """;
+
+        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.contexto.ano_referencia").exists())
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.contexto.dicionario_dimensoes.cargos").exists())
+                .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
+
+        String requestBody = """
+            {
+              "texto": "Quero comissão de 1% para gerentes da marca preto",
+              "contexto": {}
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/interpretador/extrair-regra")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.codMarca").value(10))
+                .andExpect(jsonPath("$.descrMarca").value("PRETO"))
+                .andExpect(jsonPath("$.codCargo").value(150))
+                .andExpect(jsonPath("$.descriCargo").doesNotExist())
+                .andExpect(jsonPath("$.pendencias", org.hamcrest.Matchers.hasItem(
+                        org.hamcrest.Matchers.containsString("Cargo 150 possui múltiplas funções")
+                )));
+
+        mockServer.verify();
+    }
 }

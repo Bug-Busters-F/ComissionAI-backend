@@ -1,4 +1,73 @@
 -- =============================================================================
+-- 0. TABELAS DE DOMÍNIO E ENUMS
+-- =============================================================================
+CREATE TABLE tb_status_regra (
+    codigo VARCHAR(50) PRIMARY KEY,
+    descricao VARCHAR(100) NOT NULL
+);
+
+INSERT INTO tb_status_regra (codigo, descricao) VALUES
+    ('DRAFT', 'Rascunho de regra em elaboração'),
+    ('PENDENTE_APROVACAO', 'Regra aguardando aprovação'),
+    ('ATIVA', 'Regra ativa e vigente'),
+    ('INATIVA', 'Regra inativada ou desativada');
+
+CREATE TABLE tb_estado_campanha (
+    codigo VARCHAR(50) PRIMARY KEY,
+    descricao VARCHAR(100) NOT NULL
+);
+
+INSERT INTO tb_estado_campanha (codigo, descricao) VALUES
+    ('DRAFT', 'Rascunho de campanha em elaboração'),
+    ('ATIVA', 'Campanha ativa e em vigência'),
+    ('INATIVA', 'Campanha desativada ou inativa'),
+    ('CONCLUIDA', 'Campanha finalizada'),
+    ('CANCELADA', 'Campanha cancelada');
+
+CREATE TABLE tb_severidade_inconsistencia (
+    codigo VARCHAR(20) PRIMARY KEY,
+    descricao VARCHAR(100) NOT NULL
+);
+
+INSERT INTO tb_severidade_inconsistencia (codigo, descricao) VALUES
+    ('IMPEDITIVO', 'Inconsistência impeditiva para processamento'),
+    ('AVISO', 'Alerta ou inconsistência não impeditiva');
+
+CREATE TABLE tb_tipo_base (
+    codigo VARCHAR(50) PRIMARY KEY,
+    descricao VARCHAR(100) NOT NULL
+);
+
+INSERT INTO tb_tipo_base (codigo, descricao) VALUES
+    ('RH', 'Base de Recursos Humanos'),
+    ('VENDAS', 'Base de Transações de Vendas'),
+    ('TAXAS_BASE', 'Tabela de Taxas Base por Marca e Cargo');
+
+CREATE TABLE tb_status_envio (
+    codigo VARCHAR(50) PRIMARY KEY,
+    descricao VARCHAR(100) NOT NULL
+);
+
+INSERT INTO tb_status_envio (codigo, descricao) VALUES
+    ('SUCESSO', 'Processamento concluído com sucesso total'),
+    ('REJEITADO', 'Rejeitado integralmente por falha impeditiva'),
+    ('PROCESSADO_COM_AVISOS', 'Processado com apontamento de avisos');
+
+CREATE TABLE tb_marca (
+    cod_marca INT PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL UNIQUE,
+    descricao VARCHAR(150)
+);
+
+INSERT INTO tb_marca (cod_marca, nome, descricao) VALUES
+    (10, 'PRETO', 'Marca Confidencial Preto'),
+    (20, 'BRANCO', 'Marca Confidencial Branco'),
+    (30, 'AZUL', 'Marca Confidencial Azul'),
+    (40, 'VERMELHO', 'Marca Confidencial Vermelho'),
+    (50, 'AMARELO', 'Marca Confidencial Amarelo'),
+    (60, 'CINZA', 'Marca Confidencial Cinza');
+
+-- =============================================================================
 -- 1. CAMPANHAS E REGRAS DE NEGÓCIO
 -- =============================================================================
 CREATE TABLE tb_campanha (
@@ -7,7 +76,7 @@ CREATE TABLE tb_campanha (
     texto_original TEXT NOT NULL,
     data_inicio DATE NOT NULL,
     data_fim DATE NOT NULL,
-    estado VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    estado VARCHAR(50) NOT NULL DEFAULT 'DRAFT' REFERENCES tb_estado_campanha(codigo),
     removido_em TIMESTAMP WITH TIME ZONE,
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     atualizado_em TIMESTAMP WITH TIME ZONE
@@ -17,17 +86,25 @@ CREATE TABLE tb_regra (
     id BIGSERIAL PRIMARY KEY,
     campanha_id BIGINT REFERENCES tb_campanha(id),
     nome VARCHAR(255) NOT NULL,
-    canal VARCHAR(100) NOT NULL,
+    canal VARCHAR(100),
+    cod_marca INT,
+    descr_marca VARCHAR(150),
+    cod_loja INT,
+    cod_cargo INT,
+    descri_cargo VARCHAR(150),
+    matricula VARCHAR(50),
     taxa NUMERIC(6, 4) NOT NULL,
     data_inicio DATE NOT NULL,
     data_fim DATE NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'ATIVA',
+    status VARCHAR(50) NOT NULL DEFAULT 'ATIVA' REFERENCES tb_status_regra(codigo),
     removido_em TIMESTAMP WITH TIME ZONE,
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     atualizado_em TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX idx_regra_vigencia_canal ON tb_regra (canal, data_inicio, data_fim) 
+    WHERE removido_em IS NULL;
+CREATE INDEX idx_regra_publico_alvo ON tb_regra (cod_marca, cod_loja, cod_cargo, matricula) 
     WHERE removido_em IS NULL;
 
 -- =============================================================================
@@ -36,9 +113,9 @@ CREATE INDEX idx_regra_vigencia_canal ON tb_regra (canal, data_inicio, data_fim)
 CREATE TABLE tb_envio_arquivo (
     id BIGSERIAL PRIMARY KEY,
     nome_arquivo VARCHAR(255) NOT NULL,
-    tipo_base VARCHAR(50) NOT NULL, -- 'RH', 'VENDAS', 'TAXAS_BASE'
+    tipo_base VARCHAR(50) NOT NULL REFERENCES tb_tipo_base(codigo),
     hash_conteudo VARCHAR(64) NOT NULL,
-    status VARCHAR(50) NOT NULL,    -- 'SUCESSO', 'REJEITADO', 'PROCESSADO_COM_AVISOS'
+    status VARCHAR(50) NOT NULL REFERENCES tb_status_envio(codigo),
     total_linhas INT NOT NULL DEFAULT 0,
     linhas_validas INT NOT NULL DEFAULT 0,
     rejeicao_integral BOOLEAN NOT NULL DEFAULT FALSE,
@@ -53,7 +130,7 @@ CREATE TABLE tb_inconsistencia_importacao (
     linha INT NOT NULL,
     campo VARCHAR(100),
     motivo TEXT NOT NULL,
-    severidade VARCHAR(20) NOT NULL -- 'IMPEDITIVO', 'AVISO'
+    severidade VARCHAR(20) NOT NULL REFERENCES tb_severidade_inconsistencia(codigo)
 );
 
 CREATE INDEX idx_inconsistencia_envio ON tb_inconsistencia_importacao (envio_id);
@@ -109,7 +186,7 @@ CREATE TABLE tb_taxa_marca_cargo (
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE UNIQUE INDEX uk_taxa_marca_cargo ON tb_taxa_marca_cargo (cod_marca, cod_cargo);
+CREATE UNIQUE INDEX uk_taxa_marca_cargo ON tb_taxa_marca_cargo (cod_marca, cod_cargo, descri_cargo);
 
 -- =============================================================================
 -- 4. RESULTADOS DE CÁLCULO E LOGS IMUTÁVEIS

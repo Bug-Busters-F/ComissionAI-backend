@@ -21,8 +21,26 @@ public class Regra {
     @Column(nullable = false)
     private String nome;
 
-    @Column(nullable = false, length = 100)
+    @Column(length = 100)
     private String canal;
+
+    @Column(name = "cod_marca")
+    private Integer codMarca;
+
+    @Column(name = "descr_marca", length = 150)
+    private String descrMarca;
+
+    @Column(name = "cod_loja")
+    private Integer codLoja;
+
+    @Column(name = "cod_cargo")
+    private Integer codCargo;
+
+    @Column(name = "descri_cargo", length = 150)
+    private String descriCargo;
+
+    @Column(length = 50)
+    private String matricula;
 
     @Column(nullable = false, precision = 6, scale = 4)
     private BigDecimal taxa;
@@ -58,6 +76,30 @@ public class Regra {
         this.status = StatusRegra.ATIVA;
     }
 
+    public Regra(Campanha campanha, String nome, String canal, Integer codMarca, Integer codLoja,
+                 Integer codCargo, String descriCargo, String matricula, BigDecimal taxa,
+                 LocalDate dataInicio, LocalDate dataFim) {
+        this(campanha, nome, canal, codMarca, null, codLoja, codCargo, descriCargo, matricula, taxa, dataInicio, dataFim);
+    }
+
+    public Regra(Campanha campanha, String nome, String canal, Integer codMarca, String descrMarca,
+                 Integer codLoja, Integer codCargo, String descriCargo, String matricula,
+                 BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim) {
+        this.campanha = campanha;
+        this.nome = nome;
+        this.canal = canal;
+        this.codMarca = codMarca;
+        this.descrMarca = descrMarca;
+        this.codLoja = codLoja;
+        this.codCargo = codCargo;
+        this.descriCargo = descriCargo;
+        this.matricula = matricula;
+        this.taxa = taxa;
+        this.dataInicio = dataInicio;
+        this.dataFim = dataFim;
+        this.status = StatusRegra.ATIVA;
+    }
+
     @PrePersist
     public void prePersist() {
         if (this.criadoEm == null) {
@@ -77,6 +119,24 @@ public class Regra {
 
     public String getCanal() { return canal; }
     public void setCanal(String canal) { this.canal = canal; }
+
+    public Integer getCodMarca() { return codMarca; }
+    public void setCodMarca(Integer codMarca) { this.codMarca = codMarca; }
+
+    public String getDescrMarca() { return descrMarca; }
+    public void setDescrMarca(String descrMarca) { this.descrMarca = descrMarca; }
+
+    public Integer getCodLoja() { return codLoja; }
+    public void setCodLoja(Integer codLoja) { this.codLoja = codLoja; }
+
+    public Integer getCodCargo() { return codCargo; }
+    public void setCodCargo(Integer codCargo) { this.codCargo = codCargo; }
+
+    public String getDescriCargo() { return descriCargo; }
+    public void setDescriCargo(String descriCargo) { this.descriCargo = descriCargo; }
+
+    public String getMatricula() { return matricula; }
+    public void setMatricula(String matricula) { this.matricula = matricula; }
 
     public BigDecimal getTaxa() { return taxa; }
     public void setTaxa(BigDecimal taxa) { this.taxa = taxa; }

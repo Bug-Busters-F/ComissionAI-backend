@@ -44,7 +44,13 @@ public class CampanhaService {
         Regra regra = new Regra();
         regra.setCampanha(campanhaSalva);
         regra.setNome("Regra - " + request.titulo());
-        regra.setCanal(request.canal().toUpperCase().trim());
+        regra.setCanal(request.canal() != null ? request.canal().toUpperCase().trim() : null);
+        regra.setCodMarca(request.codMarca());
+        regra.setDescrMarca(request.descrMarca());
+        regra.setCodLoja(request.codLoja());
+        regra.setCodCargo(request.codCargo());
+        regra.setDescriCargo(request.descriCargo());
+        regra.setMatricula(request.matricula());
         regra.setTaxa(request.taxa());
         regra.setDataInicio(periodo.inicio());
         regra.setDataFim(periodo.fim());
@@ -101,7 +107,13 @@ public class CampanhaService {
                 });
 
         regra.setNome("Regra - " + request.titulo());
-        regra.setCanal(request.canal().toUpperCase().trim());
+        regra.setCanal(request.canal() != null ? request.canal().toUpperCase().trim() : null);
+        regra.setCodMarca(request.codMarca());
+        regra.setDescrMarca(request.descrMarca());
+        regra.setCodLoja(request.codLoja());
+        regra.setCodCargo(request.codCargo());
+        regra.setDescriCargo(request.descriCargo());
+        regra.setMatricula(request.matricula());
         regra.setTaxa(request.taxa());
         regra.setDataInicio(periodo.inicio());
         regra.setDataFim(periodo.fim());
@@ -145,6 +157,12 @@ public class CampanhaService {
                 r.getId(),
                 r.getNome(),
                 r.getCanal(),
+                r.getCodMarca(),
+                r.getDescrMarca(),
+                r.getCodLoja(),
+                r.getCodCargo(),
+                r.getDescriCargo(),
+                r.getMatricula(),
                 r.getTaxa(),
                 r.getDataInicio(),
                 r.getDataFim(),

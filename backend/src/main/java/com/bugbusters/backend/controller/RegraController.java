@@ -39,8 +39,9 @@ public class RegraController {
     public ResponseEntity<RegraResponse> criarRegra(@Valid @RequestBody RegraRequest request) {
         LocalDate fimCalculado = request.dataFim() != null ? request.dataFim() : request.dataInicio().plusDays(30);
         RegraResponse response = new RegraResponse(
-            1L, request.nome(), request.canal(), request.taxa(),
-            request.dataInicio(), fimCalculado, StatusRegra.ATIVA, OffsetDateTime.now()
+            1L, request.nome(), request.canal(), request.codMarca(), request.descrMarca(), request.codLoja(),
+            request.codCargo(), request.descriCargo(), request.matricula(),
+            request.taxa(), request.dataInicio(), fimCalculado, StatusRegra.ATIVA, OffsetDateTime.now()
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
