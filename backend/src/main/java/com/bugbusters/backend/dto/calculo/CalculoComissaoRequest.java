@@ -3,6 +3,7 @@ package com.bugbusters.backend.dto.calculo;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+import com.bugbusters.backend.model.Marca;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -26,6 +27,9 @@ public record CalculoComissaoRequest(
     @Schema(description = "Código da marca da venda", example = "10")
     Integer codMarca,
 
+    @Schema(description = "Descrição/cor da marca confidencial (ex: Vermelho, PRETO)", example = "VERMELHO")
+    String descrMarca,
+
     @Schema(description = "Código da loja da venda", example = "75")
     Integer codLoja,
 
@@ -36,5 +40,17 @@ public record CalculoComissaoRequest(
         if (canal == null || canal.isBlank()) {
             canal = "PADRAO";
         }
+        if (descrMarca != null && !descrMarca.isBlank()) {
+            descrMarca = Marca.padronizar(descrMarca);
+            if (codMarca == null) {
+                codMarca = Marca.buscarPorNome(descrMarca).map(Marca::getCodigo).orElse(null);
+            }
+        } else if (codMarca != null) {
+            descrMarca = Marca.buscarPorCodigo(codMarca).map(Marca::getDescricao).orElse(null);
+        }
+    }
+
+    public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
+        this(matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
     }
 }

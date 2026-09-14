@@ -2,6 +2,7 @@ package com.bugbusters.backend.service;
 
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraRequest;
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraResponse;
+import com.bugbusters.backend.model.Marca;
 import com.bugbusters.backend.service.client.AiServiceClient;
 import org.springframework.stereotype.Service;
 
@@ -36,7 +37,6 @@ public class InterpretadorService {
     );
 
     public static final Map<String, Object> DICIONARIO_CAMPOS_RECONHECIDOS = Map.of(
-            "dimensoes_suportadas", List.of("canal", "cod_marca", "descr_marca", "cod_cargo", "descri_cargo", "cod_loja"),
             "marcas", MARCAS_CONHECIDAS,
             "cargos", CARGOS_CONHECIDOS,
             "canais", CANAIS_CONHECIDOS
@@ -58,6 +58,7 @@ public class InterpretadorService {
         if (request.contexto() != null) {
             contextoEnriquecido.putAll(request.contexto());
         }
+        contextoEnriquecido.putIfAbsent("ano_referencia", LocalDate.now().getYear());
         contextoEnriquecido.putIfAbsent("dicionario_dimensoes", DICIONARIO_CAMPOS_RECONHECIDOS);
         InterpretacaoRegraRequest requestPreparado = new InterpretacaoRegraRequest(request.texto(), contextoEnriquecido);
 
@@ -75,17 +76,15 @@ public class InterpretadorService {
 
         // Validação e normalização de Marca (codMarca / descrMarca)
         Integer codMarca = respostaBruta.codMarca();
-        String descrMarca = respostaBruta.descrMarca() != null ? respostaBruta.descrMarca().trim().toUpperCase() : null;
+        String descrMarca = Marca.padronizar(respostaBruta.descrMarca());
         if (descrMarca != null && codMarca == null) {
-            for (var entry : MARCAS_CONHECIDAS.entrySet()) {
-                if (entry.getValue().equalsIgnoreCase(descrMarca)) {
-                    codMarca = entry.getKey();
-                    descrMarca = entry.getValue();
-                    break;
-                }
+            var marcaOpt = Marca.buscarPorNome(descrMarca);
+            if (marcaOpt.isPresent()) {
+                codMarca = marcaOpt.get().getCodigo();
+                descrMarca = marcaOpt.get().getDescricao();
             }
         } else if (codMarca != null && descrMarca == null) {
-            descrMarca = MARCAS_CONHECIDAS.get(codMarca);
+            descrMarca = Marca.buscarPorCodigo(codMarca).map(Marca::getDescricao).orElse(null);
         }
 
         // Validação e normalização de Cargo (codCargo / descriCargo)
@@ -103,7 +102,14 @@ public class InterpretadorService {
                 codCargo = 150;
             }
         } else if (codCargo != null && descriCargo == null) {
-            descriCargo = CARGOS_CONHECIDOS.get(codCargo);
+            if (codCargo != 150) {
+                descriCargo = CARGOS_CONHECIDOS.get(codCargo);
+            } else {
+                boolean jaTemPendenciaCargo = pendencias.stream().anyMatch(p -> p.contains("150") || p.toLowerCase().contains("cargo"));
+                if (!jaTemPendenciaCargo) {
+                    pendencias.add("Cargo 150 possui múltiplas funções (GERENTE DE LOJA, GERENTE QUIOSQUE). Favor especificar o cargo exato.");
+                }
+            }
         }
 
         // Validação de Loja (codLoja)
@@ -120,7 +126,7 @@ public class InterpretadorService {
                 || codLoja != null;
 
         if (!temAlgumaDimensao) {
-            pendencias.add("Canal de vendas não identificado no texto. Favor selecionar manualmente.");
+            pendencias.add("Nenhuma dimensão de público-alvo (marca, loja, cargo ou canal) identificada no texto. Favor selecionar manualmente.");
         }
 
         // Validação de taxa decimal

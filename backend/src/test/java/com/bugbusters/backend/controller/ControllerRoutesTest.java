@@ -89,6 +89,96 @@ class ControllerRoutesTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/regras - Deve criar regra válida com dimensões de público-alvo e sem canal")
+    void deveCriarRegraComDimensoesPublicoAlvoSemCanal() throws Exception {
+        String payload = """
+            {
+                "nome": "Comissão Gerentes Marca Preto",
+                "codMarca": 10,
+                "codLoja": 75,
+                "codCargo": 150,
+                "descriCargo": "GERENTE DE LOJA",
+                "matricula": "MATRIC-888",
+                "taxa": 0.0100,
+                "dataInicio": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/regras")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.nome").value("Comissão Gerentes Marca Preto"))
+                .andExpect(jsonPath("$.canal").doesNotExist())
+                .andExpect(jsonPath("$.codMarca").value(10))
+                .andExpect(jsonPath("$.codLoja").value(75))
+                .andExpect(jsonPath("$.codCargo").value(150))
+                .andExpect(jsonPath("$.descriCargo").value("GERENTE DE LOJA"))
+                .andExpect(jsonPath("$.matricula").value("MATRIC-888"))
+                .andExpect(jsonPath("$.taxa").value(0.0100))
+                .andExpect(jsonPath("$.status").value("ATIVA"))
+                .andExpect(jsonPath("$.dataFim").value("2026-12-01"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/regras - Deve padronizar empresa/marca case-insensitively (Vermelho e vermelho -> VERMELHO)")
+    void devePadronizarNomeEmpresaCaseInsensitive() throws Exception {
+        // Teste 1: Enviando 'Vermelho' com inicial maiúscula
+        String payload1 = """
+            {
+                "nome": "Regra Marca Vermelho Maiúscula",
+                "descrMarca": "Vermelho",
+                "taxa": 0.0500,
+                "dataInicio": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/regras")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload1))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.descrMarca").value("VERMELHO"))
+                .andExpect(jsonPath("$.codMarca").value(40));
+
+        // Teste 2: Enviando 'vermelho' em minúsculas
+        String payload2 = """
+            {
+                "nome": "Regra Marca vermelho Minúscula",
+                "descrMarca": "vermelho",
+                "taxa": 0.0500,
+                "dataInicio": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/regras")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload2))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.descrMarca").value("VERMELHO"))
+                .andExpect(jsonPath("$.codMarca").value(40));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/regras - Deve permitir e padronizar nova cor de empresa sem bloquear")
+    void devePermitirNovaCorDeEmpresa() throws Exception {
+        String payload = """
+            {
+                "nome": "Regra Nova Empresa Roxo",
+                "descrMarca": "  roxo  ",
+                "taxa": 0.0350,
+                "dataInicio": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/regras")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.descrMarca").value("ROXO"));
+    }
+
+    @Test
     @DisplayName("POST /api/v1/regras - Deve rejeitar payload inválido com 400 e lista de validações")
     void deveRejeitarRegraInvalida() throws Exception {
         String payload = """
@@ -276,6 +366,59 @@ class ControllerRoutesTest {
                 .andExpect(jsonPath("$.regra.canal").value("ECOMMERCE"))
                 .andExpect(jsonPath("$.regra.taxa").value(0.0500))
                 .andExpect(jsonPath("$.regra.status").value("DRAFT"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve cadastrar campanha com dimensões de público-alvo e sem canal")
+    void deveCriarCampanhaComDimensoesPublicoAlvoSemCanal() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Gerente Quiosque Marca Azul",
+                "textoOriginal": "Comissão de 0.75% para gerente quiosque da marca azul loja 30",
+                "codMarca": 30,
+                "codLoja": 30,
+                "codCargo": 150,
+                "descriCargo": "GERENTE QUIOSQUE",
+                "matricula": "MATRIC-999",
+                "taxa": 0.0075,
+                "dataInicio": "2026-11-01",
+                "dataFim": "2026-11-30"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.titulo").value("Campanha Gerente Quiosque Marca Azul"))
+                .andExpect(jsonPath("$.regra.canal").doesNotExist())
+                .andExpect(jsonPath("$.regra.codMarca").value(30))
+                .andExpect(jsonPath("$.regra.codLoja").value(30))
+                .andExpect(jsonPath("$.regra.codCargo").value(150))
+                .andExpect(jsonPath("$.regra.descriCargo").value("GERENTE QUIOSQUE"))
+                .andExpect(jsonPath("$.regra.matricula").value("MATRIC-999"))
+                .andExpect(jsonPath("$.regra.taxa").value(0.0075));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve padronizar empresa case-insensitively ao criar campanha")
+    void devePadronizarEmpresaEmCampanhaCaseInsensitive() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Empresa Vermelho",
+                "textoOriginal": "Comissão de 4% para a empresa vermelho",
+                "descrMarca": "  veRmelho  ",
+                "taxa": 0.0400,
+                "dataInicio": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.regra.descrMarca").value("VERMELHO"))
+                .andExpect(jsonPath("$.regra.codMarca").value(40));
     }
 
     @Test

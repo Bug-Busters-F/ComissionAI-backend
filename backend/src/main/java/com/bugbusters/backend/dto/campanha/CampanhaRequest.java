@@ -1,5 +1,6 @@
 package com.bugbusters.backend.dto.campanha;
 
+import com.bugbusters.backend.model.Marca;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -17,9 +18,26 @@ public record CampanhaRequest(
         @NotBlank(message = "O texto original da campanha é obrigatório")
         String textoOriginal,
 
-        @Schema(description = "Canal de aplicação da regra (dimensão própria)", example = "ECOMMERCE")
-        @NotBlank(message = "O canal da regra é obrigatório")
+        @Schema(description = "Canal de aplicação da regra (dimensão própria, opcional)", example = "ECOMMERCE")
         String canal,
+
+        @Schema(description = "Código numérico da marca", example = "10")
+        Integer codMarca,
+
+        @Schema(description = "Descrição textual / cor da empresa confidencial (ex: Vermelho, PRETO)", example = "VERMELHO")
+        String descrMarca,
+
+        @Schema(description = "Código numérico da loja", example = "75")
+        Integer codLoja,
+
+        @Schema(description = "Código numérico do cargo", example = "100")
+        Integer codCargo,
+
+        @Schema(description = "Descrição textual do cargo", example = "VENDEDOR LOJA")
+        String descriCargo,
+
+        @Schema(description = "Matrícula individual do vendedor", example = "MATRIC-56")
+        String matricula,
 
         @Schema(description = "Taxa decimal de comissão (ex: 0.0500 = 5%)", example = "0.0500")
         @NotNull(message = "A taxa de comissão é obrigatória")
@@ -31,4 +49,25 @@ public record CampanhaRequest(
 
         @Schema(description = "Data final da vigência. Se ausente, aplica-se automaticamente 30 dias a partir da data atual.", example = "2026-10-31")
         LocalDate dataFim
-) {}
+) {
+    public CampanhaRequest {
+        if (descrMarca != null && !descrMarca.isBlank()) {
+            descrMarca = Marca.padronizar(descrMarca);
+            if (codMarca == null) {
+                codMarca = Marca.buscarPorNome(descrMarca).map(Marca::getCodigo).orElse(null);
+            }
+        } else if (codMarca != null) {
+            descrMarca = Marca.buscarPorCodigo(codMarca).map(Marca::getDescricao).orElse(null);
+        }
+    }
+
+    public CampanhaRequest(String titulo, String textoOriginal, String canal, BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim) {
+        this(titulo, textoOriginal, canal, null, null, null, null, null, null, taxa, dataInicio, dataFim);
+    }
+
+    public CampanhaRequest(String titulo, String textoOriginal, String canal, Integer codMarca,
+                           Integer codLoja, Integer codCargo, String descriCargo, String matricula,
+                           BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim) {
+        this(titulo, textoOriginal, canal, codMarca, null, codLoja, codCargo, descriCargo, matricula, taxa, dataInicio, dataFim);
+    }
+}
