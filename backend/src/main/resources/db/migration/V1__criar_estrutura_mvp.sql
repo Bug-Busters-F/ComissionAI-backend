@@ -63,7 +63,7 @@ CREATE INDEX idx_inconsistencia_envio ON tb_inconsistencia_importacao (envio_id)
 -- =============================================================================
 CREATE TABLE tb_base_rh (
     id BIGSERIAL PRIMARY KEY,
-    envio_id BIGINT NOT NULL REFERENCES tb_envio_arquivo(id),
+    envio_id BIGINT REFERENCES tb_envio_arquivo(id),
     data_ref DATE NOT NULL,
     cod_marca INT NOT NULL,
     descr_marca VARCHAR(150) NOT NULL,
@@ -82,29 +82,29 @@ CREATE INDEX idx_rh_matricula ON tb_base_rh (matricula);
 
 CREATE TABLE tb_base_vendas (
     id BIGSERIAL PRIMARY KEY,
-    envio_id BIGINT NOT NULL REFERENCES tb_envio_arquivo(id),
-    id_venda_externo VARCHAR(100),
+    envio_id BIGINT REFERENCES tb_envio_arquivo(id),
     data_venda DATE NOT NULL,
     cod_marca INT NOT NULL,
-    descr_marca VARCHAR(150) NOT NULL,
+    descr_marca VARCHAR(150),
     cod_loja INT NOT NULL,
-    descr_loja VARCHAR(150) NOT NULL,
+    descr_loja VARCHAR(150),
     matricula VARCHAR(50) NOT NULL,
-    canal VARCHAR(100) NOT NULL DEFAULT 'PADRAO',
+    canal VARCHAR(100) DEFAULT 'LOJA_FISICA',
     valor_venda NUMERIC(15, 2) NOT NULL,
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE INDEX idx_vendas_data_canal ON tb_base_vendas (data_venda, canal);
 CREATE INDEX idx_vendas_matricula ON tb_base_vendas (matricula);
+CREATE INDEX idx_vendas_chave_negocio ON tb_base_vendas (matricula, data_venda, cod_loja, cod_marca, valor_venda);
 
 CREATE TABLE tb_taxa_marca_cargo (
     id BIGSERIAL PRIMARY KEY,
-    envio_id BIGINT NOT NULL REFERENCES tb_envio_arquivo(id),
+    envio_id BIGINT REFERENCES tb_envio_arquivo(id),
     cod_marca INT NOT NULL,
-    descr_marca VARCHAR(150) NOT NULL,
+    descr_marca VARCHAR(150),
     cod_cargo INT NOT NULL,
-    descri_cargo VARCHAR(150) NOT NULL,
+    descri_cargo VARCHAR(150),
     percentual_comissao NUMERIC(6, 4) NOT NULL,
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
@@ -117,10 +117,12 @@ CREATE UNIQUE INDEX uk_taxa_marca_cargo ON tb_taxa_marca_cargo (cod_marca, cod_c
 CREATE TABLE tb_resultado_calculo (
     id BIGSERIAL PRIMARY KEY,
     protocolo_calculo UUID NOT NULL UNIQUE,
-    id_venda_externo VARCHAR(100) NOT NULL,
+    matricula VARCHAR(50) NOT NULL,
+    cod_marca INT,
+    cod_loja INT,
+    cod_cargo INT,
     regra_id BIGINT REFERENCES tb_regra(id),
-    matricula VARCHAR(50),
-    competencia DATE NOT NULL,
+    data_venda DATE NOT NULL,
     valor_venda NUMERIC(15, 2) NOT NULL,
     taxa_aplicada NUMERIC(6, 4) NOT NULL,
     valor_comissao NUMERIC(15, 2) NOT NULL,
@@ -128,21 +130,25 @@ CREATE TABLE tb_resultado_calculo (
     calculado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE UNIQUE INDEX uk_resultado_calculo_venda_regra ON tb_resultado_calculo (id_venda_externo, competencia, regra_id);
+CREATE UNIQUE INDEX uk_resultado_calculo_venda_regra ON tb_resultado_calculo (matricula, data_venda, regra_id);
 
 CREATE TABLE tb_log_calculo_imutavel (
     id UUID PRIMARY KEY,
     protocolo UUID NOT NULL,
-    id_venda VARCHAR(100) NOT NULL,
-    id_regra BIGINT NOT NULL,
-    valor_original NUMERIC(15, 2) NOT NULL,
+    matricula VARCHAR(50) NOT NULL,
+    cod_cargo INT,
+    cod_loja INT,
+    cod_marca INT,
+    valor_venda NUMERIC(15, 2) NOT NULL,
     taxa_aplicada NUMERIC(6, 4) NOT NULL,
     valor_comissao NUMERIC(15, 2) NOT NULL,
-    canal VARCHAR(100) NOT NULL,
+    id_regra BIGINT NOT NULL,
+    data_venda DATE NOT NULL,
+    canal VARCHAR(100),
     origem_execucao VARCHAR(50) NOT NULL DEFAULT 'MOTOR_PRODUCAO',
     usuario_executor VARCHAR(100) DEFAULT 'SISTEMA',
     executado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE INDEX idx_log_protocolo ON tb_log_calculo_imutavel (protocolo);
-CREATE INDEX idx_log_venda ON tb_log_calculo_imutavel (id_venda);
+CREATE INDEX idx_log_matricula ON tb_log_calculo_imutavel (matricula);

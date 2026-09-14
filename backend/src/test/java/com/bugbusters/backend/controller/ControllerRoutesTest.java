@@ -140,7 +140,7 @@ class ControllerRoutesTest {
     void deveCalcularComissao() throws Exception {
         String payload = """
             {
-                "idVenda": "VENDA-1234",
+                "matricula": "MATRIC-1234",
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
                 "dataVenda": "2026-10-05"
@@ -152,9 +152,10 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty())
-                .andExpect(jsonPath("$.idVenda").value("VENDA-1234"))
+                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
                 .andExpect(jsonPath("$.valorOriginal").value(1000.00))
-                .andExpect(jsonPath("$.valorComissao").value(100.00));
+                .andExpect(jsonPath("$.valorComissao").value(100.00))
+                .andExpect(jsonPath("$.dataCalculo").isNotEmpty());
     }
 
     @Test
@@ -163,7 +164,7 @@ class ControllerRoutesTest {
         mockMvc.perform(get("/api/v1/logs-calculo"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(greaterThan(0))))
-                .andExpect(jsonPath("$[0].idVenda").value("V1001"));
+                .andExpect(jsonPath("$[0].matricula").value("MATRIC-1"));
     }
 
     // ==========================================
@@ -232,7 +233,7 @@ class ControllerRoutesTest {
                 "arquivo",
                 "vendas_outubro.csv",
                 "text/csv",
-                "idVenda,valor,canal\nV1,500,ECOMMERCE".getBytes()
+                "matricula,valor_venda,canal\nMATRIC-1,500,ECOMMERCE".getBytes()
         );
 
         mockMvc.perform(multipart("/api/v1/importacoes/upload")

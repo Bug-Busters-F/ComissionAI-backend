@@ -160,4 +160,51 @@ class InterpretadorIntegrationTest {
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.validacoes[0].campo").value("texto"));
     }
+
+    @Test
+    @DisplayName("Deve extrair e normalizar dimensões reais (marca, cargo, loja) sem descartar parâmetros válidos")
+    void deveInterpretarDimensoesReaisComSucesso() throws Exception {
+        String respostaSimuladaPython = """
+            {
+              "canal": "loja_fisica",
+              "codMarca": 10,
+              "descrMarca": "preto",
+              "codCargo": 100,
+              "descriCargo": "vendedor loja",
+              "codLoja": 75,
+              "taxa": 0.0250,
+              "dataInicio": "2025-12-01",
+              "dataFim": "2025-12-31",
+              "confianca": 0.95,
+              "pendencias": []
+            }
+            """;
+
+        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
+
+        String requestBody = """
+            {
+              "texto": "Comissão de 2.5% para vendedor loja da marca preto na loja 75 em dezembro",
+              "contexto": {}
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/interpretador/extrair-regra")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.canal").value("LOJA_FISICA"))
+                .andExpect(jsonPath("$.codMarca").value(10))
+                .andExpect(jsonPath("$.descrMarca").value("PRETO"))
+                .andExpect(jsonPath("$.codCargo").value(100))
+                .andExpect(jsonPath("$.descriCargo").value("VENDEDOR LOJA"))
+                .andExpect(jsonPath("$.codLoja").value(75))
+                .andExpect(jsonPath("$.taxa").value(0.025))
+                .andExpect(jsonPath("$.dataInicio").value("2025-12-01"))
+                .andExpect(jsonPath("$.dataFim").value("2025-12-31"));
+
+        mockServer.verify();
+    }
 }
