@@ -38,7 +38,7 @@ public class CalculoController {
         BigDecimal comissao = request.valorVenda().multiply(taxaExemplo).setScale(2, RoundingMode.HALF_UP);
 
         return ResponseEntity.ok(new CalculoComissaoResponse(
-            UUID.randomUUID(), request.idVenda(), 1L, taxaExemplo, request.valorVenda(), comissao
+            UUID.randomUUID(), request.matricula(), 1L, taxaExemplo, request.valorVenda(), comissao, OffsetDateTime.now()
         ));
     }
 
@@ -46,7 +46,7 @@ public class CalculoController {
     @GetMapping("/logs-calculo")
     public ResponseEntity<List<LogCalculoResponse>> listarLogs() {
         return ResponseEntity.ok(List.of(
-            new LogCalculoResponse(UUID.randomUUID(), "V1001", 1L, new BigDecimal("1000.00"), new BigDecimal("100.00"), new BigDecimal("0.1000"), OffsetDateTime.now())
+            new LogCalculoResponse(UUID.randomUUID(), "MATRIC-1", 1L, new BigDecimal("1000.00"), new BigDecimal("0.1000"), new BigDecimal("100.00"), OffsetDateTime.now())
         ));
     }
 }
