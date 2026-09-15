@@ -2,6 +2,7 @@ package com.bugbusters.backend.model;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -15,14 +16,20 @@ public class LogCalculoImutavel {
     @Column(nullable = false)
     private UUID protocolo;
 
-    @Column(name = "id_venda", nullable = false, length = 100)
-    private String idVenda;
+    @Column(nullable = false, length = 50)
+    private String matricula;
 
-    @Column(name = "id_regra", nullable = false)
-    private Long idRegra;
+    @Column(name = "cod_cargo")
+    private Integer codCargo;
 
-    @Column(name = "valor_original", nullable = false, precision = 15, scale = 2)
-    private BigDecimal valorOriginal;
+    @Column(name = "cod_loja")
+    private Integer codLoja;
+
+    @Column(name = "cod_marca")
+    private Integer codMarca;
+
+    @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
+    private BigDecimal valorVenda;
 
     @Column(name = "taxa_aplicada", nullable = false, precision = 6, scale = 4)
     private BigDecimal taxaAplicada;
@@ -30,7 +37,13 @@ public class LogCalculoImutavel {
     @Column(name = "valor_comissao", nullable = false, precision = 15, scale = 2)
     private BigDecimal valorComissao;
 
-    @Column(nullable = false, length = 100)
+    @Column(name = "id_regra", nullable = false)
+    private Long idRegra;
+
+    @Column(name = "data_venda", nullable = false)
+    private LocalDate dataVenda;
+
+    @Column(length = 100)
     private String canal;
 
     @Column(name = "origem_execucao", nullable = false, length = 50)
@@ -54,17 +67,23 @@ public class LogCalculoImutavel {
         }
     }
 
-    public LogCalculoImutavel(UUID protocolo, String idVenda, Long idRegra, BigDecimal valorOriginal,
-                              BigDecimal taxaAplicada, BigDecimal valorComissao, String canal, String origemExecucao) {
+    public LogCalculoImutavel(UUID protocolo, String matricula, Integer codCargo, Integer codLoja,
+                              Integer codMarca, BigDecimal valorVenda, BigDecimal taxaAplicada,
+                              BigDecimal valorComissao, Long idRegra, LocalDate dataVenda,
+                              String canal, String origemExecucao) {
         this.id = UUID.randomUUID();
         this.protocolo = protocolo;
-        this.idVenda = idVenda;
-        this.idRegra = idRegra;
-        this.valorOriginal = valorOriginal;
+        this.matricula = matricula;
+        this.codCargo = codCargo;
+        this.codLoja = codLoja;
+        this.codMarca = codMarca;
+        this.valorVenda = valorVenda;
         this.taxaAplicada = taxaAplicada;
         this.valorComissao = valorComissao;
+        this.idRegra = idRegra;
+        this.dataVenda = dataVenda;
         this.canal = canal;
-        this.origemExecucao = origemExecucao;
+        this.origemExecucao = origemExecucao != null ? origemExecucao : "MOTOR_PRODUCAO";
         this.usuarioExecutor = "SISTEMA";
         this.executadoEm = OffsetDateTime.now();
     }
@@ -74,15 +93,25 @@ public class LogCalculoImutavel {
 
     public UUID getProtocolo() { return protocolo; }
 
-    public String getIdVenda() { return idVenda; }
-    
-    public Long getIdRegra() { return idRegra; }
+    public String getMatricula() { return matricula; }
 
-    public BigDecimal getValorOriginal() { return valorOriginal; }
+    public Integer getCodCargo() { return codCargo; }
+
+    public Integer getCodLoja() { return codLoja; }
+
+    public Integer getCodMarca() { return codMarca; }
+
+    public BigDecimal getValorVenda() { return valorVenda; }
+
+    public BigDecimal getValorOriginal() { return valorVenda; }
 
     public BigDecimal getTaxaAplicada() { return taxaAplicada; }
 
     public BigDecimal getValorComissao() { return valorComissao; }
+
+    public Long getIdRegra() { return idRegra; }
+
+    public LocalDate getDataVenda() { return dataVenda; }
 
     public String getCanal() { return canal; }
 

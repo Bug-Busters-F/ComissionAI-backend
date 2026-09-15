@@ -22,9 +22,25 @@ public record CampanhaResponse(
             Long id,
             String nome,
             String canal,
+            Integer codMarca,
+            String descrMarca,
+            Integer codLoja,
+            Integer codCargo,
+            String descriCargo,
+            String matricula,
             BigDecimal taxa,
             LocalDate dataInicio,
             LocalDate dataFim,
             StatusRegra status
-    ) {}
+    ) {
+        public RegraVinculadaDTO(Long id, String nome, String canal, BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim, StatusRegra status) {
+            this(id, nome, canal, null, null, null, null, null, null, taxa, dataInicio, dataFim, status);
+        }
+
+        public RegraVinculadaDTO(Long id, String nome, String canal, Integer codMarca, Integer codLoja,
+                                 Integer codCargo, String descriCargo, String matricula,
+                                 BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim, StatusRegra status) {
+            this(id, nome, canal, codMarca, null, codLoja, codCargo, descriCargo, matricula, taxa, dataInicio, dataFim, status);
+        }
+    }
 }
