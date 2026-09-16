@@ -1,0 +1,9 @@
+package com.bugbusters.backend.brand;
+
+import java.util.UUID;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface BrandRepository extends JpaRepository<Brand, UUID>{
+    
+}
