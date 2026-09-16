@@ -1,17 +1,17 @@
-package com.bugbusters.backend.dto.importacao;
+package com.bugbusters.backend.importbase;
 
-import java.time.OffsetDateTime;
-import java.util.List;
+// import java.time.OffsetDateTime;
+// import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
 @Schema(description = "Relatório de validação e processamento de upload de planilhas/CSVs")
-public record RelatorioImportacaoResponse(
+public record ImportResponse(
     @Schema(description = "Nome do arquivo submetido", example = "BASE_VENDAS_OUT25.csv")
     String nomeArquivo,
 
     @Schema(description = "Tipo de base", example = "VENDAS")
-    String tipoBase,
+    ImportType tipoBase,
 
     @Schema(description = "Status consolidado: SUCESSO, REJEITADO, PROCESSADO_COM_AVISOS", example = "REJEITADO")
     String status,
@@ -23,12 +23,12 @@ public record RelatorioImportacaoResponse(
     int linhasValidas,
 
     @Schema(description = "Indica se houve rejeição integral por falha impeditiva", example = "true")
-    boolean rejeicaoIntegral,
+    boolean rejeicaoIntegral
 
-    @Schema(description = "Lista detalhada de inconsistencias apontando linha, campo e gravidade")
-    List<ItemInconsistenciaDTO> inconsistencias,
+    // @Schema(description = "Lista detalhada de inconsistencias apontando linha, campo e gravidade")
+    // List<ItemInconsistenciaDTO> inconsistencias,
 
-    OffsetDateTime processadoEm
+    // OffsetDateTime processadoEm
 ) {
     public record ItemInconsistenciaDTO(
         @Schema(description = "Número da linha no arquivo", example = "42")
@@ -41,6 +41,6 @@ public record RelatorioImportacaoResponse(
         String motivo,
 
         @Schema(description = "Severidade da falha", example = "IMPEDITIVO")
-        SeveridadeInconsistencia severidade
+        ImportInconsistencySeverity severidade
     ) {}
 }
