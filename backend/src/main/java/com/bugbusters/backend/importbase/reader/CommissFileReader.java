@@ -26,9 +26,9 @@ public class CommissFileReader implements FileReader<CommissFileRow> {
         this.mapper = mapper;
     }
 
+    @Override 
     public List<CommissFileRow> read(InputStream input){
         List<CommissFileRow> rows = new ArrayList<CommissFileRow>();
-
 
         try (Workbook workbook = WorkbookFactory.create(input)) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -46,5 +46,5 @@ public class CommissFileReader implements FileReader<CommissFileRow> {
             log.error("Erro ao processar arquivo de Comissão Final", e);
             throw new RuntimeException("Erro ao processar arquivo", e);
         }
-    };
+    }
 }

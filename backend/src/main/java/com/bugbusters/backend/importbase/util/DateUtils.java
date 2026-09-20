@@ -20,11 +20,27 @@ public class DateUtils {
             Map.entry("dez", Month.DECEMBER));
 
     public static LocalDate parseMonthYear(String valor) {
-        String[] slices = valor.toLowerCase().split("-");
-
-        Month month = MESES.get(slices[0]);
-        int year = 2000 + Integer.parseInt(slices[1]);
-
-        return LocalDate.of(year, month, 1);
+    if (valor == null || valor.isBlank()) {
+        throw new IllegalArgumentException("Data de referência vazia");
     }
+
+    String[] slices = valor.trim().toLowerCase().split("-");
+    if (slices.length != 2) {
+        throw new IllegalArgumentException("Formato de data inválido, esperado 'mmm-aa': " + valor);
+    }
+
+    Month month = MESES.get(slices[0]);
+    if (month == null) {
+        throw new IllegalArgumentException("Mês não reconhecido: " + slices[0]);
+    }
+
+    int year;
+    try {
+        year = 2000 + Integer.parseInt(slices[1]);
+    } catch (NumberFormatException e) {
+        throw new IllegalArgumentException("Ano inválido: " + slices[1]);
+    }
+
+    return LocalDate.of(year, month, 1);
+}
 }

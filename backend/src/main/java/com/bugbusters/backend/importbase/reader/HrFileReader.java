@@ -27,6 +27,7 @@ public class HrFileReader implements FileReader<HrFileRow> {
         this.mapper = mapper;
     }
 
+    @Override
     public List<HrFileRow> read(InputStream input) {
         List<HrFileRow> rows = new ArrayList<>();
 
@@ -38,8 +39,13 @@ public class HrFileReader implements FileReader<HrFileRow> {
                 if (row.getRowNum() == 0 || ExcelUtils.isEmptyRow(row)) {
                     continue;
                 }
-
-                rows.add(mapper.toHrFileRow(row));
+                // rows.add(mapper.toHrFileRow(row));
+                try {
+                    rows.add(mapper.toHrFileRow(row));
+                } catch (Exception e) {
+                    log.error("FALHOU na linha do Excel número: {}", row.getRowNum() + 1); // +1 porque POI é 0-indexed
+                    throw e; // por enquanto, deixa propagar pra você ver no log
+                }
             }
 
             return rows;

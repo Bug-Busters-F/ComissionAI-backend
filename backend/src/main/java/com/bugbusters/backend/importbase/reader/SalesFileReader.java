@@ -18,7 +18,7 @@ import com.bugbusters.backend.importbase.util.ExcelUtils;
 
 @Component
 public class SalesFileReader implements FileReader<SalesFileRow> {
-    private SalesFileRowMapper mapper;
+    private final SalesFileRowMapper mapper;
 
     private static final Logger log = LoggerFactory.getLogger(SalesFileReader.class);
 
@@ -26,6 +26,7 @@ public class SalesFileReader implements FileReader<SalesFileRow> {
         this.mapper = mapper;
     }
 
+    @Override 
     public List<SalesFileRow> read(InputStream input) {
         List<SalesFileRow> rows = new ArrayList<>();
 
@@ -44,5 +45,5 @@ public class SalesFileReader implements FileReader<SalesFileRow> {
             log.error("Erro ao processar arquivo de vendas", e);
             throw new RuntimeException("Erro ao processar arquivo", e);
         }
-    };
+    }
 }
