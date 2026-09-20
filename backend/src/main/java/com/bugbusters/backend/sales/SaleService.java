@@ -138,7 +138,7 @@ public class SaleService {
                 sale.getBrand(),
                 sale.getStore(),
                 sale.getSaleDate(),
-                valor,
+                sale.getValue(),
                 sale.getSaleChannel(),
                 sale.getCreatedAt());
     }
