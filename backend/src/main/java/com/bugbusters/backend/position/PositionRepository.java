@@ -6,5 +6,5 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface PositionRepository extends JpaRepository<Position, UUID> {
-    public Optional<Position> findByCode(String code);
+    public Optional<Position> findByCode(Integer code);
 }

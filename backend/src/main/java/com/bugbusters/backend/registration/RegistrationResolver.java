@@ -1,6 +1,6 @@
 package com.bugbusters.backend.registration;
 
-import java.util.Date;
+import java.time.LocalDate;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.store.Store;
 
-@Component 
+@Component
 public class RegistrationResolver {
     private final RegistrationRepository repository;
 
@@ -20,9 +20,8 @@ public class RegistrationResolver {
             Position position,
             Store store,
             String registrationString,
-            Date admiss_date,
-            Date demissDate
-        ) {
+            LocalDate admiss_date,
+            LocalDate demissDate) {
         try {
             Registration newRecord = new Registration();
             newRecord.setPosition(position);
@@ -39,17 +38,17 @@ public class RegistrationResolver {
     public Registration resolve(String registrationString) {
         return repository.findByRegistration(registrationString)
                 .orElseThrow(() -> new RuntimeException(
-                        "Matrícula não encontrada: " + registrationString
-                ));
+                        "Matrícula não encontrada: " + registrationString));
     }
 
-    public Registration resolveOrCreate(Position position,
+    public Registration resolveOrCreate(
+            Position position,
             Store store,
             String registrationString,
-            Date admiss_date,
-            Date demissDate
-        ) {
-            return repository.findByRegistration(registrationString).orElseGet(() -> createSafely(position, store, registrationString, admiss_date, demissDate));
+            LocalDate admiss_date,
+            LocalDate demissDate) {
+        return repository.findByRegistration(registrationString)
+                .orElseGet(() -> createSafely(position, store, registrationString, admiss_date, demissDate));
     }
 
 }

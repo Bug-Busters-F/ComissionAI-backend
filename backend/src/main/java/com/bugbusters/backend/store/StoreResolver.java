@@ -6,16 +6,16 @@ import org.springframework.stereotype.Component;
 @Component 
 public class StoreResolver {
     private final StoreRepository repository;
+    private final StoreMapper mapper;
 
-    public StoreResolver(StoreRepository repository) {
+    public StoreResolver(StoreRepository repository, StoreMapper mapper) {
         this.repository = repository;
+        this.mapper = mapper;
     }
 
     private Store createSafely(Integer code, String description){
         try {
-            Store newRecord = new Store();
-            newRecord.setCode(code);
-            newRecord.setDescription(description);
+            Store newRecord = mapper.toEntity(code, description);
             return repository.save(newRecord);
         } catch (DataIntegrityViolationException e) {
             return repository.findByCode(code).orElseThrow(() -> e);

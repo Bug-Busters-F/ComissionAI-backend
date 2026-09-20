@@ -17,7 +17,7 @@ public class Position {
     private UUID id;
 
     @Column(nullable = false, unique = true)
-    private String code;
+    private Integer code;
 
     @Column(nullable = false)
     private String description;
@@ -26,7 +26,7 @@ public class Position {
         return id;
     }
 
-    public String getCode() {
+    public Integer getCode() {
         return code;
     }
 
@@ -34,7 +34,7 @@ public class Position {
         return description;
     }
 
-    public void setCode(String code) {
+    public void setCode(Integer code) {
         this.code = code;
     }
 

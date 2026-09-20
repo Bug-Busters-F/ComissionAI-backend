@@ -2,6 +2,7 @@ package com.bugbusters.backend.sales;
 
 import jakarta.persistence.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -11,9 +12,12 @@ import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.store.Store;
 
 @Entity
-@Table(name = "tb-sales")
+@Table(
+        name = "tb-sales"
+)
 public class Sale {
     @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @ManyToOne
@@ -28,16 +32,13 @@ public class Sale {
     @JoinColumn (name = "brand_id", nullable = false)
     private Brand brand;
 
-    @Column(name = "valor_venda", nullable = false)
-    private Double value;
+    @Column(nullable = false, precision = 15, scale = 2)
+    private BigDecimal value;
 
-    @Column(nullable = false, length = 150)
+    @Column(nullable = false)
     private LocalDate saleDate;
 
-    @Column(nullable = true, length = 150)
-    private String referencemonth;
-
-    @Column(name = "canal", nullable = false)
+    @Column(nullable = true)
     private String saleChannel;
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -84,12 +85,12 @@ public class Sale {
     }
 
 
-    public Double getValue() {
+    public BigDecimal getValue() {
         return value;
     }
 
 
-    public void setValue(Double value) {
+    public void setValue(BigDecimal value) {
         this.value = value;
     }
 
@@ -102,17 +103,6 @@ public class Sale {
     public void setSaleDate(LocalDate saleDate) {
         this.saleDate = saleDate;
     }
-
-
-    public String getReferencemonth() {
-        return referencemonth;
-    }
-
-
-    public void setReferencemonth(String referencemonth) {
-        this.referencemonth = referencemonth;
-    }
-
 
     public String getSaleChannel() {
         return saleChannel;
