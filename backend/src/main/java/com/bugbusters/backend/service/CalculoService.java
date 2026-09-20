@@ -21,6 +21,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.bugbusters.backend.model.Regra;
+import com.bugbusters.backend.repository.RegraRepository;
+import java.time.LocalDate;
+
 @Service
 public class CalculoService {
 
@@ -30,11 +34,14 @@ public class CalculoService {
 
     private final ResultadoCalculoRepository resultadoCalculoRepository;
     private final LogCalculoRepository logCalculoRepository;
+    private final RegraRepository regraRepository;
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
-                          LogCalculoRepository logCalculoRepository) {
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
+        this.regraRepository = regraRepository;
     }
 
     /**
@@ -51,6 +58,8 @@ public class CalculoService {
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
         Long idRegra = REGRA_PADRAO_ID;
         BigDecimal taxaAplicada = TAXA_PADRAO;
+
+        garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
         // 1. Verifica se já existe um cálculo para essa chave estável de negócio (matrícula, data da venda e regra)
         Optional<ResultadoCalculo> existenteOpt = resultadoCalculoRepository
@@ -172,5 +181,20 @@ public class CalculoService {
                 logItem.getValorComissao(),
                 logItem.getExecutadoEm()
         )).toList();
+    }
+
+    private void garantirRegraPadraoExistente(Long idRegra, BigDecimal taxa) {
+        if (regraRepository != null && !regraRepository.existsById(idRegra)) {
+            Regra defaultRegra = new Regra(
+                    null,
+                    "Regra Geral Padrão",
+                    "PADRAO",
+                    taxa,
+                    LocalDate.of(2020, 1, 1),
+                    LocalDate.of(2035, 12, 31)
+            );
+            defaultRegra.setId(idRegra);
+            regraRepository.save(defaultRegra);
+        }
     }
 }

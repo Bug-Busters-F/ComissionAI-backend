@@ -28,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import com.bugbusters.backend.repository.RegraRepository;
+
 @ExtendWith(MockitoExtension.class)
 class CalculoServiceTest {
 
@@ -36,6 +38,9 @@ class CalculoServiceTest {
 
     @Mock
     private LogCalculoRepository logCalculoRepository;
+
+    @Mock
+    private RegraRepository regraRepository;
 
     @InjectMocks
     private CalculoService calculoService;
@@ -47,6 +52,8 @@ class CalculoServiceTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(regraRepository.existsById(anyLong())).thenReturn(true);
+
         requestPadrao = new CalculoComissaoRequest(
                 MATRICULA,
                 VALOR_VENDA,
