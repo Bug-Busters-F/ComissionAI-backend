@@ -12,12 +12,9 @@ import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.store.Store;
 
 @Entity
-@Table(
-        name = "tb-sales"
-)
+@Table(name = "tb_sales")
 public class Sale {
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @ManyToOne
@@ -32,13 +29,13 @@ public class Sale {
     @JoinColumn (name = "brand_id", nullable = false)
     private Brand brand;
 
-    @Column(nullable = false, precision = 15, scale = 2)
+    @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
     private BigDecimal value;
 
     @Column(nullable = false)
     private LocalDate saleDate;
 
-    @Column(nullable = true)
+    @Column(name = "canal", nullable = true)
     private String saleChannel;
 
     @Column(name = "created_at", nullable = false, updatable = false)

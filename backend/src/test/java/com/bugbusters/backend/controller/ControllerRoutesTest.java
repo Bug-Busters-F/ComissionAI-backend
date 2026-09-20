@@ -63,9 +63,9 @@ class ControllerRoutesTest {
             s.setDescription("LOJA 62");
             storeRepository.save(s);
         }
-        if (positionRepository.findByCode("150").isEmpty()) {
+        if (positionRepository.findByCode(150).isEmpty()) {
             com.bugbusters.backend.position.Position p = new com.bugbusters.backend.position.Position();
-            p.setCode("150");
+            p.setCode(150);
             p.setDescription("VENDEDOR");
             positionRepository.save(p);
         }
@@ -73,8 +73,8 @@ class ControllerRoutesTest {
             com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
             r.setRegistration("MAT-00456");
             r.setStore(storeRepository.findByCode(62).get());
-            r.setPosition(positionRepository.findByCode("150").get());
-            r.setAdmissDate(new java.util.Date());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now());
             registrationRepository.save(r);
         }
     }

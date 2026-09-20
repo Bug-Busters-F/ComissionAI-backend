@@ -73,7 +73,7 @@ public class SaleService {
         sale.setRegistration(registration);
         sale.setBrand(brand);
         sale.setStore(store);
-        sale.setValue(request.value().doubleValue());
+        sale.setValue(request.value());
         sale.setSaleDate(request.saleDate());
         sale.setSaleChannel(request.saleChannel());
 
@@ -101,7 +101,7 @@ public class SaleService {
         }
 
         if (existente.getValue() != null &&
-                BigDecimal.valueOf(existente.getValue()).compareTo(request.value()) != 0) {
+                existente.getValue().compareTo(request.value()) != 0) {
             divergente = true;
         }
 
@@ -126,7 +126,7 @@ public class SaleService {
     private SaleResponseDTO mapearParaResponse(Sale sale) {
 
         BigDecimal valor = sale.getValue() != null
-                ? BigDecimal.valueOf(sale.getValue()).setScale(2, RoundingMode.HALF_UP)
+                ? sale.getValue().setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
         return new SaleResponseDTO(

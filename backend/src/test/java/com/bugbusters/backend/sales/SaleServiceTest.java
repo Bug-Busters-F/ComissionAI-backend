@@ -121,7 +121,7 @@ class SaleServiceTest {
         existente.setRegistration(mockRegistration);
         existente.setBrand(mockBrand);
         existente.setStore(mockStore);
-        existente.setValue(VALOR.doubleValue());
+        existente.setValue(VALOR);
         existente.setSaleDate(DATA_VENDA);
         existente.setSaleChannel("ECOMMERCE");
 
@@ -159,7 +159,7 @@ class SaleServiceTest {
         existente.setRegistration(mockRegistration);
         existente.setBrand(mockBrand);
         existente.setStore(mockStore);
-        existente.setValue(VALOR.doubleValue());
+        existente.setValue(VALOR);
         existente.setSaleDate(DATA_VENDA);
         existente.setSaleChannel("ECOMMERCE");
 
