@@ -6,16 +6,16 @@ import org.springframework.stereotype.Component;
 @Component 
 public class BrandResolver {
     private final BrandRepository repository;
+    private final BrandMapper mapper;
 
-    public BrandResolver(BrandRepository repository) {
+    public BrandResolver(BrandRepository repository, BrandMapper mapper) {
         this.repository = repository;
+        this.mapper = mapper;
     }
 
     public Brand createSafely(Integer brandCode, String brandDescription) {
         try {
-            Brand newRecord = new Brand();
-            newRecord.setCode(brandCode);
-            newRecord.setDescription(brandDescription);
+            Brand newRecord = mapper.toEntity(brandCode, brandDescription);
             return repository.save(newRecord);
         } catch (DataIntegrityViolationException e) {
             return repository.findByCode(brandCode).orElseThrow(() -> e);

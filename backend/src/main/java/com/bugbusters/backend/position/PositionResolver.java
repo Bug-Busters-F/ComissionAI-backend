@@ -1,26 +1,29 @@
 package com.bugbusters.backend.position;
 
-import org.springframework.dao.DataIntegrityViolationException;
 
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Component;
+
+@Component 
 public class PositionResolver {
     private final PositionRepository repository;
+    private final PositionMapper mapper;
 
-    public PositionResolver(PositionRepository repository) {
+    public PositionResolver(PositionRepository repository, PositionMapper mapper) {
         this.repository = repository;
+        this.mapper = mapper;
     }
 
-    private Position createSafely(String code, String description){
+    private Position createSafely(Integer code, String description){
         try {
-            Position newRecord = new Position();
-            newRecord.setCode(code);
-            newRecord.setDescription(description);
+            Position newRecord = mapper.toEntity(code, description);
             return repository.save(newRecord);
         } catch (DataIntegrityViolationException e) {
             return repository.findByCode(code).orElseThrow(() -> e);
         }
     }
 
-    public Position resolveOrCreate(String code, String description){
+    public Position resolveOrCreate(Integer code, String description){
         return repository.findByCode(code).orElseGet(() -> createSafely(code, description));
     }
 }

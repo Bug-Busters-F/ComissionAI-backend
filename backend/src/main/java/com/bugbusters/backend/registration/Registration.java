@@ -1,6 +1,6 @@
 package com.bugbusters.backend.registration;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.UUID;
 
 import com.bugbusters.backend.position.Position;
@@ -34,10 +34,10 @@ public class Registration {
     private String registration;
 
     @Column (nullable = false)
-    private Date admissDate;
+    private LocalDate admissDate;
 
     @Column (nullable = true)
-    private Date demissDate;
+    private LocalDate demissDate;
 
     public Store getStore() {
         return store;
@@ -63,19 +63,19 @@ public class Registration {
         this.registration = registration;
     }
 
-    public Date getAdmissDate() {
+    public LocalDate getAdmissDate() {
         return admissDate;
     }
 
-    public void setAdmissDate(Date admissDate) {
+    public void setAdmissDate(LocalDate admissDate) {
         this.admissDate = admissDate;
     }
 
-    public Date getDemissDate() {
+    public LocalDate getDemissDate() {
         return demissDate;
     }
 
-    public void setDemissDate(Date demissDate) {
+    public void setDemissDate(LocalDate demissDate) {
         this.demissDate = demissDate;
     }
 }
