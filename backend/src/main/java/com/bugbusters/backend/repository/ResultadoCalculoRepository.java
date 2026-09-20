@@ -13,6 +13,11 @@ import java.util.UUID;
 public interface ResultadoCalculoRepository extends JpaRepository<ResultadoCalculo, Long> {
 
     /**
+     * Busca o resultado do cálculo pelo identificador único da venda (UUID da Sale).
+     */
+    Optional<ResultadoCalculo> findByIdVenda(UUID idVenda);
+
+    /**
      * Busca o resultado do cálculo pela chave única de negócio (matrícula, data da venda e regra aplicada).
      * Utilizado para garantir a idempotência e proteção contra recálculos duplicados.
      */

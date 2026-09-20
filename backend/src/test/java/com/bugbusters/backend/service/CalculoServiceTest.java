@@ -212,7 +212,95 @@ class CalculoServiceTest {
     }
 
     @Test
-    @DisplayName("5. Deve listar logs reais quando existirem registros")
+    @DisplayName("5. Deve identificar cálculo existente por idVenda (UUID) quando reenvio idêntico")
+    void deveIdentificarCalculoExistentePorIdVendaUUIDQuandoReenvioIdentico() {
+        UUID idVenda = UUID.randomUUID();
+        UUID protocoloOriginal = UUID.randomUUID();
+
+        CalculoComissaoRequest requestComUUID = new CalculoComissaoRequest(
+                idVenda,
+                MATRICULA,
+                VALOR_VENDA,
+                DATA_VENDA,
+                10,
+                75,
+                "ECOMMERCE"
+        );
+
+        ResultadoCalculo calculoExistente = new ResultadoCalculo(
+                protocoloOriginal,
+                idVenda,
+                MATRICULA,
+                10,
+                75,
+                null,
+                1L,
+                DATA_VENDA,
+                VALOR_VENDA,
+                new BigDecimal("0.1000"),
+                new BigDecimal("100.00"),
+                "INDIVIDUAL"
+        );
+
+        when(resultadoCalculoRepository.findByIdVenda(idVenda))
+                .thenReturn(Optional.of(calculoExistente));
+
+        CalculoComissaoResponse response = calculoService.calcularComissao(requestComUUID);
+
+        assertNotNull(response);
+        assertEquals(protocoloOriginal, response.protocoloCalculo());
+        assertEquals(VALOR_VENDA, response.valorOriginal());
+
+        verify(resultadoCalculoRepository, never()).save(any());
+        verify(logCalculoRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("6. Deve rejeitar reenvio com idVenda (UUID) e valor divergente")
+    void deveRejeitarReenvioComIdVendaUUIDEDadosDivergentes() {
+        UUID idVenda = UUID.randomUUID();
+
+        CalculoComissaoRequest requestComUUIDDivergente = new CalculoComissaoRequest(
+                idVenda,
+                MATRICULA,
+                new BigDecimal("2500.00"),
+                DATA_VENDA,
+                10,
+                75,
+                "ECOMMERCE"
+        );
+
+        ResultadoCalculo calculoExistente = new ResultadoCalculo(
+                UUID.randomUUID(),
+                idVenda,
+                MATRICULA,
+                10,
+                75,
+                null,
+                1L,
+                DATA_VENDA,
+                new BigDecimal("1000.00"),
+                new BigDecimal("0.1000"),
+                new BigDecimal("100.00"),
+                "INDIVIDUAL"
+        );
+
+        when(resultadoCalculoRepository.findByIdVenda(idVenda))
+                .thenReturn(Optional.of(calculoExistente));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                calculoService.calcularComissao(requestComUUIDDivergente)
+        );
+
+        assertTrue(ex.getMessage().contains("dados divergentes"));
+        assertTrue(ex.getMessage().contains(idVenda.toString()));
+
+        verify(resultadoCalculoRepository, never()).save(any());
+        verify(logCalculoRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("7. Deve listar logs reais quando existirem registros")
     void deveListarLogsExistentes() {
         LogCalculoImutavel log = new LogCalculoImutavel(
                 UUID.randomUUID(),

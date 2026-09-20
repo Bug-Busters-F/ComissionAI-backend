@@ -48,11 +48,11 @@ public class CalculoService {
      * Processa o cálculo de comissão garantindo proteção contra cálculo duplicado (idempotência).
      *
      * Regras aplicadas:
-     * 1. Se a mesma solicitação já foi calculada com os mesmos dados, retorna o resultado pré-existente
-     *    sem gerar novos cálculos e sem registrar novos logs imutáveis.
-     * 2. Se a mesma solicitação for reenviada com dados divergentes (ex: valor da venda diferente),
+     * 1. Se a mesma venda (por UUID idVenda ou chave de negócio matrícula + dataVenda + regraId)
+     *    já foi calculada com dados idênticos, retorna o resultado pré-existente sem gerar novos cálculos e sem novos logs.
+     * 2. Se a mesma venda for reenviada com dados divergentes (ex: valor da venda diferente),
      *    rejeita a operação com BusinessException.
-     * 3. Trata chamadas concorrentes para impedir duplicidade no banco via constraint única.
+     * 3. Trata concorrência para impedir duplicidade via constraints e transações.
      */
     @Transactional
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
@@ -61,9 +61,15 @@ public class CalculoService {
 
         garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
-        // 1. Verifica se já existe um cálculo para essa chave estável de negócio (matrícula, data da venda e regra)
-        Optional<ResultadoCalculo> existenteOpt = resultadoCalculoRepository
-                .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra);
+        // 1. Verifica se já existe cálculo pelo UUID da venda (se informado) ou pela chave de negócio
+        Optional<ResultadoCalculo> existenteOpt = Optional.empty();
+        if (request.idVenda() != null) {
+            existenteOpt = resultadoCalculoRepository.findByIdVenda(request.idVenda());
+        }
+        if (existenteOpt.isEmpty()) {
+            existenteOpt = resultadoCalculoRepository
+                    .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra);
+        }
 
         if (existenteOpt.isPresent()) {
             ResultadoCalculo existente = existenteOpt.get();
@@ -76,6 +82,7 @@ public class CalculoService {
 
         ResultadoCalculo novoResultado = new ResultadoCalculo(
                 protocolo,
+                request.idVenda(),
                 request.matricula(),
                 request.codMarca(),
                 request.codLoja(),
@@ -94,6 +101,7 @@ public class CalculoService {
             // Grava o log imutável de auditoria apenas na primeira execução com sucesso
             LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                     resultadoSalvo.getProtocoloCalculo(),
+                    request.idVenda(),
                     request.matricula(),
                     null,
                     request.codLoja(),
@@ -118,12 +126,20 @@ public class CalculoService {
                     resultadoSalvo.getCalculadoEm()
             );
         } catch (DataIntegrityViolationException ex) {
-            log.warn("Violação de integridade por concorrência detectada para matrícula {} na data {}. Recuperando cálculo existente.",
-                    request.matricula(), request.dataVenda());
+            log.warn("Violação de integridade por concorrência detectada para venda/matrícula {}. Recuperando cálculo existente.",
+                    request.matricula());
             // Concorrência: outra thread salvou no mesmo instante; recupera e valida idempotência
-            ResultadoCalculo concorrente = resultadoCalculoRepository
-                    .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra)
-                    .orElseThrow(() -> ex);
+            ResultadoCalculo concorrente;
+            if (request.idVenda() != null) {
+                concorrente = resultadoCalculoRepository.findByIdVenda(request.idVenda())
+                        .orElseGet(() -> resultadoCalculoRepository
+                                .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra)
+                                .orElseThrow(() -> ex));
+            } else {
+                concorrente = resultadoCalculoRepository
+                        .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra)
+                        .orElseThrow(() -> ex);
+            }
 
             return tratarResultadoExistente(request, concorrente);
         }
@@ -132,9 +148,12 @@ public class CalculoService {
     private CalculoComissaoResponse tratarResultadoExistente(CalculoComissaoRequest request, ResultadoCalculo existente) {
         // Valida se os dados da venda são idênticos aos gravados anteriormente
         if (request.valorVenda().compareTo(existente.getValorVenda()) != 0) {
+            String identificador = request.idVenda() != null
+                    ? "ID '" + request.idVenda() + "'"
+                    : String.format("matrícula '%s' na data '%s'", request.matricula(), request.dataVenda());
             throw new BusinessException(String.format(
-                    "Solicitação rejeitada por duplicidade com dados divergentes. A venda para a matrícula '%s' na data '%s' já foi calculada com valor %s (valor recebido: %s).",
-                    request.matricula(), request.dataVenda(), existente.getValorVenda(), request.valorVenda()
+                    "Solicitação rejeitada por duplicidade com dados divergentes. A venda para %s já foi calculada com valor %s (valor recebido: %s).",
+                    identificador, existente.getValorVenda(), request.valorVenda()
             ));
         }
 

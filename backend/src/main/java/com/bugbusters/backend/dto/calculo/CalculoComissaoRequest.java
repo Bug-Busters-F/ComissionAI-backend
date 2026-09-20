@@ -2,6 +2,7 @@ package com.bugbusters.backend.dto.calculo;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.UUID;
 
 import com.bugbusters.backend.model.Marca;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -11,6 +12,9 @@ import jakarta.validation.constraints.Positive;
 
 @Schema(description = "Entrada para apuração de comissão sobre uma venda")
 public record CalculoComissaoRequest(
+    @Schema(description = "Identificador único da venda (UUID)", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+    UUID idVenda,
+
     @Schema(description = "Matrícula cadastral do colaborador (chave de vínculo com o RH)", example = "MATRIC-1")
     @NotBlank(message = "A matrícula é obrigatória")
     String matricula,
@@ -51,6 +55,14 @@ public record CalculoComissaoRequest(
     }
 
     public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
-        this(matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
+        this(null, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
+    }
+
+    public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, String descrMarca, Integer codLoja, String canal) {
+        this(null, matricula, valorVenda, dataVenda, codMarca, descrMarca, codLoja, canal);
+    }
+
+    public CalculoComissaoRequest(UUID idVenda, String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
+        this(idVenda, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
     }
 }

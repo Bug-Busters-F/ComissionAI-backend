@@ -17,6 +17,9 @@ public class ResultadoCalculo {
     @Column(name = "protocolo_calculo", nullable = false, unique = true)
     private UUID protocoloCalculo;
 
+    @Column(name = "id_venda")
+    private UUID idVenda;
+
     @Column(nullable = false, length = 50)
     private String matricula;
 
@@ -65,10 +68,11 @@ public class ResultadoCalculo {
         }
     }
 
-    public ResultadoCalculo(UUID protocoloCalculo, String matricula, Integer codMarca, Integer codLoja,
+    public ResultadoCalculo(UUID protocoloCalculo, UUID idVenda, String matricula, Integer codMarca, Integer codLoja,
                             Integer codCargo, Long regraId, LocalDate dataVenda, BigDecimal valorVenda,
                             BigDecimal taxaAplicada, BigDecimal valorComissao, String tipoCalculo) {
         this.protocoloCalculo = protocoloCalculo != null ? protocoloCalculo : UUID.randomUUID();
+        this.idVenda = idVenda;
         this.matricula = matricula;
         this.codMarca = codMarca;
         this.codLoja = codLoja;
@@ -80,6 +84,12 @@ public class ResultadoCalculo {
         this.valorComissao = valorComissao;
         this.tipoCalculo = tipoCalculo != null ? tipoCalculo : "INDIVIDUAL";
         this.calculadoEm = OffsetDateTime.now();
+    }
+
+    public ResultadoCalculo(UUID protocoloCalculo, String matricula, Integer codMarca, Integer codLoja,
+                            Integer codCargo, Long regraId, LocalDate dataVenda, BigDecimal valorVenda,
+                            BigDecimal taxaAplicada, BigDecimal valorComissao, String tipoCalculo) {
+        this(protocoloCalculo, null, matricula, codMarca, codLoja, codCargo, regraId, dataVenda, valorVenda, taxaAplicada, valorComissao, tipoCalculo);
     }
 
     public Long getId() {
@@ -96,6 +106,14 @@ public class ResultadoCalculo {
 
     public void setProtocoloCalculo(UUID protocoloCalculo) {
         this.protocoloCalculo = protocoloCalculo;
+    }
+
+    public UUID getIdVenda() {
+        return idVenda;
+    }
+
+    public void setIdVenda(UUID idVenda) {
+        this.idVenda = idVenda;
     }
 
     public String getMatricula() {
