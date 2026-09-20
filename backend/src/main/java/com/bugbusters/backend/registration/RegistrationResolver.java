@@ -1,6 +1,7 @@
 package com.bugbusters.backend.registration;
 
 import java.time.LocalDate;
+import java.util.Optional;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
@@ -35,10 +36,9 @@ public class RegistrationResolver {
         }
     }
 
-    public Registration resolve(String registrationString) {
-        return repository.findByRegistration(registrationString)
-                .orElseThrow(() -> new RuntimeException(
-                        "Matrícula não encontrada: " + registrationString));
+    // TODO: AVALIAR DECISÃO DE IGNORAR LINHA AO NÃO ENCOTRAR REGISTRATION
+    public Optional<Registration> resolve(String registrationString) {
+        return repository.findByRegistration(registrationString);
     }
 
     public Registration resolveOrCreate(

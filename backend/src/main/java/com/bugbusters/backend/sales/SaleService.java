@@ -1,7 +1,5 @@
 package com.bugbusters.backend.sales;
 
-import java.math.BigDecimal;
-
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,7 +34,9 @@ public class SaleService {
     @Transactional
     public SaleResponseDTO registrarVenda(SaleRequestDTO request) {
 
-        Registration registration = registrationResolver.resolve(request.registrationCode());
+        Registration registration = registrationResolver.resolve(request.registrationCode())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Matrícula não encontrada: " + request.registrationCode()));
 
         Brand brand = brandResolver.resolve(request.brandCode());
 
@@ -47,7 +47,7 @@ public class SaleService {
         sale.setRegistration(registration);
         sale.setBrand(brand);
         sale.setStore(store);
-        sale.setValue(request.value().doubleValue());
+        sale.setValue(request.value());
         sale.setSaleDate(request.saleDate());
         sale.setSaleChannel(request.saleChannel());
 
@@ -58,15 +58,13 @@ public class SaleService {
 
     private SaleResponseDTO mapearParaResponse(Sale sale) {
 
-        BigDecimal valor = BigDecimal.valueOf(sale.getValue());
-
         return new SaleResponseDTO(
                 sale.getId(),
                 sale.getRegistration(),
                 sale.getBrand(),
                 sale.getStore(),
                 sale.getSaleDate(),
-                valor,
+                sale.getValue(),
                 sale.getSaleChannel(),
                 sale.getCreatedAt());
     }

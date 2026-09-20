@@ -1,5 +1,7 @@
 package com.bugbusters.backend.sales;
 
+import java.util.Optional;
+
 import org.springframework.stereotype.Component;
 
 import com.bugbusters.backend.brand.Brand;
@@ -24,12 +26,18 @@ public class SaleMapper {
     }
 
     public Sale toEntity(SalesFileRow row) {
-        Registration registration = registrationResolver.resolve(row.getRegistration());
+        Optional<Registration> registrationOpt = registrationResolver.resolve(row.getRegistration());
+
+        if (registrationOpt.isEmpty()) {
+            return null;
+        }
+
+        Registration registration = registrationOpt.get();
+
         Store store = storeResolver.resolveOrCreate(row.getStoreCode(), row.getStoreDescription());
         Brand brand = brandResolver.resolveOrCreate(row.getBrandCode(), row.getBrandDescription());
 
         Sale saleEntity = new Sale();
-
         saleEntity.setRegistration(registration);
         saleEntity.setStore(store);
         saleEntity.setBrand(brand);

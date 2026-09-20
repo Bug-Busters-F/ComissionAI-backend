@@ -13,7 +13,7 @@ import com.bugbusters.backend.store.Store;
 
 @Entity
 @Table(
-        name = "tb-sales"
+        name = "tb_sales"
 )
 public class Sale {
     @Id
