@@ -50,6 +50,9 @@ public class Sale {
 
     @PrePersist
     public void prePersist() {
+        if (this.id == null) {
+            this.id = UUID.randomUUID();
+        }
         if (this.createdAt == null) {
             this.createdAt = OffsetDateTime.now();
         }
@@ -134,5 +137,8 @@ public class Sale {
     public UUID getId() {
         return id;
     }
-   
+
+    public void setId(UUID id) {
+        this.id = id;
+    }
 }
