@@ -17,7 +17,7 @@ public class Brand {
     private UUID id;
 
     @Column(nullable = false, unique = true)
-    private String code;
+    private Integer code;
 
     @Column(nullable = false)
     private String description;
@@ -26,11 +26,19 @@ public class Brand {
         return id;
     }
 
-    public String getCode() {
+    public Integer getCode() {
         return code;
     }
 
     public String getDescription() {
         return description;
     }
+
+    public void setCode(Integer code) {
+        this.code = code;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }    
 }
