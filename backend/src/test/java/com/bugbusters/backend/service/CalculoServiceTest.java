@@ -46,6 +46,7 @@ class CalculoServiceTest {
     private CalculoService calculoService;
 
     private CalculoComissaoRequest requestPadrao;
+    private final UUID ID_VENDA = UUID.randomUUID();
     private final String MATRICULA = "MATRIC-123";
     private final LocalDate DATA_VENDA = LocalDate.of(2026, 10, 15);
     private final BigDecimal VALOR_VENDA = new BigDecimal("1000.00");
@@ -55,6 +56,7 @@ class CalculoServiceTest {
         lenient().when(regraRepository.existsById(anyLong())).thenReturn(true);
 
         requestPadrao = new CalculoComissaoRequest(
+                ID_VENDA,
                 MATRICULA,
                 VALOR_VENDA,
                 DATA_VENDA,
@@ -68,7 +70,9 @@ class CalculoServiceTest {
     @Test
     @DisplayName("1. Deve calcular comissão na primeira vez e gerar exatamente 1 log imutável")
     void deveCalcularComissaoPrimeiraVezEGerarLog() {
-        // Cenário: Nenhum cálculo prévio registrado
+        // Cenário: Nenhum cálculo prévio registrado para o ID da venda
+        when(resultadoCalculoRepository.findByIdVenda(ID_VENDA))
+                .thenReturn(Optional.empty());
         when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
                 .thenReturn(Optional.empty());
 
@@ -94,10 +98,11 @@ class CalculoServiceTest {
     @Test
     @DisplayName("2. Deve retornar resultado pré-existente e NÃO gerar novo log quando houver reenvio com mesmos dados (Idempotência)")
     void deveRetornarResultadoExistenteSemGerarNovoLogQuandoReenvioIdentico() {
-        // Cenário: Já existe um cálculo concluído com os mesmos dados
+        // Cenário: Já existe um cálculo concluído com o mesmo ID e mesmos dados
         UUID protocoloOriginal = UUID.randomUUID();
         ResultadoCalculo calculoExistente = new ResultadoCalculo(
                 protocoloOriginal,
+                ID_VENDA,
                 MATRICULA,
                 10,
                 75,
@@ -110,7 +115,7 @@ class CalculoServiceTest {
                 "INDIVIDUAL"
         );
 
-        when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
+        when(resultadoCalculoRepository.findByIdVenda(ID_VENDA))
                 .thenReturn(Optional.of(calculoExistente));
 
         // Execução do reenvio idêntico
@@ -131,9 +136,10 @@ class CalculoServiceTest {
     @Test
     @DisplayName("3. Deve rejeitar solicitação com BusinessException quando houver reaproveitamento com dados divergentes")
     void deveRejeitarReenvioComDadosDivergentes() {
-        // Cenário: Venda já calculada anteriormente com valor de R$ 1000.00
+        // Cenário: Venda com ID já calculada anteriormente com valor de R$ 1000.00
         ResultadoCalculo calculoExistente = new ResultadoCalculo(
                 UUID.randomUUID(),
+                ID_VENDA,
                 MATRICULA,
                 10,
                 75,
@@ -146,11 +152,12 @@ class CalculoServiceTest {
                 "INDIVIDUAL"
         );
 
-        when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
+        when(resultadoCalculoRepository.findByIdVenda(ID_VENDA))
                 .thenReturn(Optional.of(calculoExistente));
 
-        // Nova requisição para a mesma matrícula e data, porém com valor diferente (R$ 1500.00)
+        // Nova requisição para a mesma venda com ID, porém com valor diferente (R$ 1500.00)
         CalculoComissaoRequest requestDivergente = new CalculoComissaoRequest(
+                ID_VENDA,
                 MATRICULA,
                 new BigDecimal("1500.00"),
                 DATA_VENDA,
@@ -168,6 +175,7 @@ class CalculoServiceTest {
         assertTrue(ex.getMessage().contains("dados divergentes"));
         assertTrue(ex.getMessage().contains("1000.00"));
         assertTrue(ex.getMessage().contains("1500.00"));
+        assertTrue(ex.getMessage().contains(ID_VENDA.toString()));
 
         // Nenhuma alteração persistida
         verify(resultadoCalculoRepository, never()).save(any());
@@ -177,11 +185,12 @@ class CalculoServiceTest {
     @Test
     @DisplayName("4. Deve tratar concorrência via DataIntegrityViolationException recuperando o cálculo vencedor")
     void deveTratarConcorrenciaQuandoOcorreDataIntegrityViolation() {
-        // Cenário: Thread 1 e Thread 2 verificam ao mesmo tempo (Optional.empty)
-        when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
+        // Cenário: Concorrência ao tentar salvar
+        when(resultadoCalculoRepository.findByIdVenda(ID_VENDA))
                 .thenReturn(Optional.empty()) // primeira checagem
                 .thenReturn(Optional.of(new ResultadoCalculo( // segunda checagem após o catch
                         UUID.randomUUID(),
+                        ID_VENDA,
                         MATRICULA,
                         10,
                         75,
@@ -194,7 +203,9 @@ class CalculoServiceTest {
                         "INDIVIDUAL"
                 )));
 
-        // Ao tentar salvar, o banco dispara violação de chave única
+        when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
+                .thenReturn(Optional.empty());
+
         when(resultadoCalculoRepository.save(any(ResultadoCalculo.class)))
                 .thenThrow(new DataIntegrityViolationException("Duplicate key error"));
 
@@ -212,98 +223,11 @@ class CalculoServiceTest {
     }
 
     @Test
-    @DisplayName("5. Deve identificar cálculo existente por idVenda (UUID) quando reenvio idêntico")
-    void deveIdentificarCalculoExistentePorIdVendaUUIDQuandoReenvioIdentico() {
-        UUID idVenda = UUID.randomUUID();
-        UUID protocoloOriginal = UUID.randomUUID();
-
-        CalculoComissaoRequest requestComUUID = new CalculoComissaoRequest(
-                idVenda,
-                MATRICULA,
-                VALOR_VENDA,
-                DATA_VENDA,
-                10,
-                75,
-                "ECOMMERCE"
-        );
-
-        ResultadoCalculo calculoExistente = new ResultadoCalculo(
-                protocoloOriginal,
-                idVenda,
-                MATRICULA,
-                10,
-                75,
-                null,
-                1L,
-                DATA_VENDA,
-                VALOR_VENDA,
-                new BigDecimal("0.1000"),
-                new BigDecimal("100.00"),
-                "INDIVIDUAL"
-        );
-
-        when(resultadoCalculoRepository.findByIdVenda(idVenda))
-                .thenReturn(Optional.of(calculoExistente));
-
-        CalculoComissaoResponse response = calculoService.calcularComissao(requestComUUID);
-
-        assertNotNull(response);
-        assertEquals(protocoloOriginal, response.protocoloCalculo());
-        assertEquals(VALOR_VENDA, response.valorOriginal());
-
-        verify(resultadoCalculoRepository, never()).save(any());
-        verify(logCalculoRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("6. Deve rejeitar reenvio com idVenda (UUID) e valor divergente")
-    void deveRejeitarReenvioComIdVendaUUIDEDadosDivergentes() {
-        UUID idVenda = UUID.randomUUID();
-
-        CalculoComissaoRequest requestComUUIDDivergente = new CalculoComissaoRequest(
-                idVenda,
-                MATRICULA,
-                new BigDecimal("2500.00"),
-                DATA_VENDA,
-                10,
-                75,
-                "ECOMMERCE"
-        );
-
-        ResultadoCalculo calculoExistente = new ResultadoCalculo(
-                UUID.randomUUID(),
-                idVenda,
-                MATRICULA,
-                10,
-                75,
-                null,
-                1L,
-                DATA_VENDA,
-                new BigDecimal("1000.00"),
-                new BigDecimal("0.1000"),
-                new BigDecimal("100.00"),
-                "INDIVIDUAL"
-        );
-
-        when(resultadoCalculoRepository.findByIdVenda(idVenda))
-                .thenReturn(Optional.of(calculoExistente));
-
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                calculoService.calcularComissao(requestComUUIDDivergente)
-        );
-
-        assertTrue(ex.getMessage().contains("dados divergentes"));
-        assertTrue(ex.getMessage().contains(idVenda.toString()));
-
-        verify(resultadoCalculoRepository, never()).save(any());
-        verify(logCalculoRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("7. Deve listar logs reais quando existirem registros")
+    @DisplayName("5. Deve listar logs reais quando existirem registros")
     void deveListarLogsExistentes() {
         LogCalculoImutavel log = new LogCalculoImutavel(
                 UUID.randomUUID(),
+                ID_VENDA,
                 MATRICULA,
                 null,
                 75,

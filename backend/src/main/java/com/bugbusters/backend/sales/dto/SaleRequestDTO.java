@@ -11,7 +11,8 @@ import java.util.UUID;
 
 @Schema(description = "Payload para registro de uma venda individual")
 public record SaleRequestDTO(
-        @Schema(description = "Identificador único da venda (UUID opcional para proteção contra duplicidade)", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+        @Schema(description = "Identificador único da venda (UUID obrigatório)", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+        @NotNull(message = "O ID da venda é obrigatório")
         UUID id,
 
         @Schema(description = "Matrícula do funcionário responsável pela venda", example = "MAT-00456")
@@ -44,8 +45,4 @@ public record SaleRequestDTO(
         @Schema(description = "Canal de venda (ex: ECOMMERCE, LOJA_FISICA)", example = "ECOMMERCE")
         @NotBlank(message = "O canal de venda é obrigatório")
         String saleChannel
-) {
-    public SaleRequestDTO(String registrationCode, Integer brandCode, Integer storeCode, BigDecimal value, LocalDate saleDate, String saleChannel) {
-        this(null, registrationCode, brandCode, storeCode, value, saleDate, saleChannel);
-    }
-}
+) {}

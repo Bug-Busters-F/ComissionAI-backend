@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import com.bugbusters.backend.model.Marca;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -12,8 +13,10 @@ import jakarta.validation.constraints.Positive;
 
 @Schema(description = "Entrada para apuração de comissão sobre uma venda")
 public record CalculoComissaoRequest(
-    @Schema(description = "Identificador único da venda (UUID)", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-    UUID idVenda,
+    @Schema(description = "Identificador único da venda (UUID da Sale)", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+    @NotNull(message = "O ID da venda é obrigatório")
+    @JsonAlias({"idVenda", "saleId"})
+    UUID id,
 
     @Schema(description = "Matrícula cadastral do colaborador (chave de vínculo com o RH)", example = "MATRIC-1")
     @NotBlank(message = "A matrícula é obrigatória")
@@ -54,15 +57,15 @@ public record CalculoComissaoRequest(
         }
     }
 
-    public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
-        this(null, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
+    public UUID idVenda() {
+        return id;
     }
 
-    public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, String descrMarca, Integer codLoja, String canal) {
-        this(null, matricula, valorVenda, dataVenda, codMarca, descrMarca, codLoja, canal);
+    public CalculoComissaoRequest(UUID id, String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
+        this(id, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
     }
 
-    public CalculoComissaoRequest(UUID idVenda, String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
-        this(idVenda, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
+    public CalculoComissaoRequest(UUID id, String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, String descrMarca, Integer codLoja, String canal) {
+        this(id, matricula, valorVenda, dataVenda, codMarca, descrMarca, codLoja, canal);
     }
 }

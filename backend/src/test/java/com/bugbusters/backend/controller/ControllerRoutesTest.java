@@ -269,6 +269,7 @@ class ControllerRoutesTest {
     void deveCalcularComissao() throws Exception {
         String payload = """
             {
+                "id": "11111111-1111-1111-1111-111111111111",
                 "matricula": "MATRIC-1234",
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
@@ -288,10 +289,32 @@ class ControllerRoutesTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve rejeitar cálculo sem ID com 400 Bad Request")
+    void deveRejeitarCalculoSemIdCom400BadRequest() throws Exception {
+        String payloadSemId = """
+            {
+                "matricula": "MATRIC-SEM-ID",
+                "valorVenda": 1000.00,
+                "canal": "ECOMMERCE",
+                "dataVenda": "2026-10-05"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadSemId))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.validacoes[0].campo").value("id"))
+                .andExpect(jsonPath("$.validacoes[0].motivo").value("O ID da venda é obrigatório"));
+    }
+
+    @Test
     @DisplayName("POST /api/v1/comissoes/calcular - Deve retornar resultado idêntico sem duplicar logs em caso de reenvio (Idempotência)")
     void deveRetornarMesmoResultadoEmReenvioIdentico() throws Exception {
         String payload = """
             {
+                "id": "22222222-2222-2222-2222-222222222222",
                 "matricula": "MATRIC-IDEMPOTENTE",
                 "valorVenda": 2000.00,
                 "canal": "LOJA_FISICA",
@@ -325,6 +348,7 @@ class ControllerRoutesTest {
     void deveRejeitarReenvioComDadosDivergentes() throws Exception {
         String payloadOriginal = """
             {
+                "id": "33333333-3333-3333-3333-333333333333",
                 "matricula": "MATRIC-CONFLITO",
                 "valorVenda": 500.00,
                 "canal": "APP",
@@ -334,6 +358,7 @@ class ControllerRoutesTest {
 
         String payloadDivergente = """
             {
+                "id": "33333333-3333-3333-3333-333333333333",
                 "matricula": "MATRIC-CONFLITO",
                 "valorVenda": 750.00,
                 "canal": "APP",

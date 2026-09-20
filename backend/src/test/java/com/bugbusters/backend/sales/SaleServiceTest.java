@@ -67,7 +67,9 @@ class SaleServiceTest {
     @Test
     @DisplayName("1. Deve registrar nova venda individual com sucesso")
     void deveRegistrarNovaVendaComSucesso() {
+        UUID saleId = UUID.randomUUID();
         SaleRequestDTO request = new SaleRequestDTO(
+                saleId,
                 "MAT-00456",
                 10,
                 62,
