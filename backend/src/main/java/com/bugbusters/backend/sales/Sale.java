@@ -18,15 +18,15 @@ public class Sale {
     private UUID id;
 
     @ManyToOne
-    @JoinColumn (name = "registration_id", nullable = false)
+    @JoinColumn(name = "registration_id", nullable = false)
     private Registration registration;
 
     @ManyToOne
-    @JoinColumn (name = "store_id", nullable = false)
+    @JoinColumn(name = "store_id", nullable = false)
     private Store store;
 
     @ManyToOne
-    @JoinColumn (name = "brand_id", nullable = false)
+    @JoinColumn(name = "brand_id", nullable = false)
     private Brand brand;
 
     @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
@@ -40,7 +40,6 @@ public class Sale {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
-
 
     @PrePersist
     public void prePersist() {
@@ -56,46 +55,37 @@ public class Sale {
         return registration;
     }
 
-
     public void setRegistration(Registration registration) {
         this.registration = registration;
     }
-
 
     public Store getStore() {
         return store;
     }
 
-
     public void setStore(Store store) {
         this.store = store;
     }
-
 
     public Brand getBrand() {
         return brand;
     }
 
-
     public void setBrand(Brand brand) {
         this.brand = brand;
     }
-
 
     public BigDecimal getValue() {
         return value;
     }
 
-
     public void setValue(BigDecimal value) {
         this.value = value;
     }
 
-
     public LocalDate getSaleDate() {
         return saleDate;
     }
-
 
     public void setSaleDate(LocalDate saleDate) {
         this.saleDate = saleDate;
@@ -105,17 +95,13 @@ public class Sale {
         return saleChannel;
     }
 
-
     public void setSaleChannel(String saleChannel) {
         this.saleChannel = saleChannel;
     }
 
-
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
-
-
 
     public UUID getId() {
         return id;
