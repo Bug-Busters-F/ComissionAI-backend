@@ -1,16 +1,17 @@
 package com.bugbusters.backend.importbase;
 
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 // import java.time.OffsetDateTime;
 // import java.util.List;
 
-@Service 
+@Service
 public class ImportService {
-    public ImportResponse processImport(ImportRequest request) {
+    public ImportResponse processImport( MultipartFile file, ImportType importType ) {
         return new ImportResponse(
-                request.getFile().getOriginalFilename(),
-                request.getImportType(),
+                file.getOriginalFilename(),
+                importType,
                 "PROCESSADO_COM_AVISOS",
                 100,
                 99,

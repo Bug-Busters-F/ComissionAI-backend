@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/imports")
@@ -20,10 +21,10 @@ public class ImportBaseController {
     @Operation(summary = "Upload de base de dados com validação", description = "Processa o arquivo, identifica falhas impeditivas ou avisos e rejeita integralmente caso ocorra duplicidade ou ausência de campos chave.")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ImportResponse> upload(
-            @RequestBody ImportRequest request
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("importType") ImportType importType
         ) {
-
-
-            return this.importService.processImport(request);
+            ImportResponse response = importService.processImport(file, importType);
+            return ResponseEntity.ok(response);
     }
 }
