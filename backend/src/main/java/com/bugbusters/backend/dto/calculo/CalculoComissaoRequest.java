@@ -11,6 +11,9 @@ import jakarta.validation.constraints.Positive;
 
 @Schema(description = "Entrada para apuração de comissão sobre uma venda")
 public record CalculoComissaoRequest(
+    @Schema(description = "Identificador externo único da venda (ex: NF, pedido). Se informado, garante unicidade por transação de venda.", example = "VENDA-2026-00123")
+    String idVendaExterno,
+
     @Schema(description = "Matrícula cadastral do colaborador (chave de vínculo com o RH)", example = "MATRIC-1")
     @NotBlank(message = "A matrícula é obrigatória")
     String matricula,
@@ -50,7 +53,11 @@ public record CalculoComissaoRequest(
         }
     }
 
+    public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, String descrMarca, Integer codLoja, String canal) {
+        this(null, matricula, valorVenda, dataVenda, codMarca, descrMarca, codLoja, canal);
+    }
+
     public CalculoComissaoRequest(String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
-        this(matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
+        this(null, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
     }
 }

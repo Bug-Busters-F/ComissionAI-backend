@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.repository.VendaRepository;
 
 @ExtendWith(MockitoExtension.class)
 class CalculoServiceTest {
@@ -41,6 +42,9 @@ class CalculoServiceTest {
 
     @Mock
     private RegraRepository regraRepository;
+
+    @Mock
+    private VendaRepository vendaRepository;
 
     @InjectMocks
     private CalculoService calculoService;
@@ -236,5 +240,37 @@ class CalculoServiceTest {
         assertEquals(1, logs.size());
         assertEquals(MATRICULA, logs.get(0).matricula());
         assertEquals(new BigDecimal("100.00"), logs.get(0).valorComissao());
+    }
+
+    @Test
+    @DisplayName("6. Deve rejeitar cálculo quando idVendaExterno divergir dos dados da venda registrada em tb_venda")
+    void deveRejeitarCalculoQuandoIdVendaExternoDivergir() {
+        String idExterno = "VENDA-999";
+        com.bugbusters.backend.model.Venda vendaRegistrada = new com.bugbusters.backend.model.Venda();
+        vendaRegistrada.setIdVendaExterno(idExterno);
+        vendaRegistrada.setMatricula(MATRICULA);
+        vendaRegistrada.setDataVenda(DATA_VENDA);
+        vendaRegistrada.setValorVenda(new BigDecimal("2000.00")); // Registrada como 2000.00
+
+        when(vendaRepository.findByIdVendaExterno(idExterno)).thenReturn(Optional.of(vendaRegistrada));
+
+        // Enviando cálculo com valor diferente (1000.00)
+        CalculoComissaoRequest requestComId = new CalculoComissaoRequest(
+                idExterno,
+                MATRICULA,
+                VALOR_VENDA, // 1000.00
+                DATA_VENDA,
+                10,
+                "PRETO",
+                75,
+                "ECOMMERCE"
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                calculoService.calcularComissao(requestComId)
+        );
+
+        assertTrue(ex.getMessage().contains("Dados divergentes da venda 'VENDA-999'"));
+        verify(resultadoCalculoRepository, never()).save(any());
     }
 }

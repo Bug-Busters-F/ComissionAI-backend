@@ -23,6 +23,7 @@ import java.util.UUID;
 
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.repository.VendaRepository;
 import java.time.LocalDate;
 
 @Service
@@ -35,13 +36,16 @@ public class CalculoService {
     private final ResultadoCalculoRepository resultadoCalculoRepository;
     private final LogCalculoRepository logCalculoRepository;
     private final RegraRepository regraRepository;
+    private final VendaRepository vendaRepository;
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
                           LogCalculoRepository logCalculoRepository,
-                          RegraRepository regraRepository) {
+                          RegraRepository regraRepository,
+                          VendaRepository vendaRepository) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.regraRepository = regraRepository;
+        this.vendaRepository = vendaRepository;
     }
 
     /**
@@ -52,7 +56,8 @@ public class CalculoService {
      *    sem gerar novos cálculos e sem registrar novos logs imutáveis.
      * 2. Se a mesma solicitação for reenviada com dados divergentes (ex: valor da venda diferente),
      *    rejeita a operação com BusinessException.
-     * 3. Trata chamadas concorrentes para impedir duplicidade no banco via constraint única.
+     * 3. Se idVendaExterno for informado, cruza consistência com a venda registrada em tb_venda.
+     * 4. Trata chamadas concorrentes para impedir duplicidade no banco via constraint única.
      */
     @Transactional
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
@@ -60,6 +65,11 @@ public class CalculoService {
         BigDecimal taxaAplicada = TAXA_PADRAO;
 
         garantirRegraPadraoExistente(idRegra, taxaAplicada);
+
+        // 0. Valida consistência com a venda cadastrada caso idVendaExterno esteja presente
+        if (request.idVendaExterno() != null && !request.idVendaExterno().isBlank()) {
+            validarConsistenciaComVendaRegistrada(request);
+        }
 
         // 1. Verifica se já existe um cálculo para essa chave estável de negócio (matrícula, data da venda e regra)
         Optional<ResultadoCalculo> existenteOpt = resultadoCalculoRepository
@@ -195,6 +205,21 @@ public class CalculoService {
             );
             defaultRegra.setId(idRegra);
             regraRepository.save(defaultRegra);
+        }
+    }
+
+    private void validarConsistenciaComVendaRegistrada(CalculoComissaoRequest request) {
+        if (vendaRepository != null) {
+            vendaRepository.findByIdVendaExterno(request.idVendaExterno().trim()).ifPresent(venda -> {
+                if (!venda.getMatricula().equalsIgnoreCase(request.matricula().trim())
+                        || venda.getValorVenda().compareTo(request.valorVenda()) != 0
+                        || !venda.getDataVenda().equals(request.dataVenda())) {
+                    throw new BusinessException(String.format(
+                            "Dados divergentes da venda '%s'. A venda cadastrada possui matrícula '%s', data '%s' e valor %s.",
+                            request.idVendaExterno(), venda.getMatricula(), venda.getDataVenda(), venda.getValorVenda()
+                    ));
+                }
+            });
         }
     }
 }

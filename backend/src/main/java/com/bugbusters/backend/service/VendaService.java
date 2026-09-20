@@ -5,11 +5,18 @@ import com.bugbusters.backend.dto.venda.VendaResponseDTO;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.Venda;
 import com.bugbusters.backend.repository.VendaRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 public class VendaService {
+
+    private static final Logger log = LoggerFactory.getLogger(VendaService.class);
 
     private final VendaRepository vendaRepository;
 
@@ -18,33 +25,36 @@ public class VendaService {
     }
 
     /**
-     * Registra uma venda individual no sistema.
+     * Registra uma venda individual no sistema com garantia de idempotência.
      * <p>
      * Regras de negócio aplicadas:
      * <ul>
-     *   <li>Rejeita registros cujo {@code idVendaExterno} já existe (preparação para idempotência
-     *       na etapa de cálculo de comissão).</li>
-     *   <li>Normaliza canal, marca e loja para maiúsculas e sem espaços extras, garantindo
-     *       consistência para o cruzamento com as regras de comissionamento.</li>
-     *   <li>A atribuição do ID interno fica a cargo do banco (IDENTITY), conforme a migration.</li>
+     *   <li>Se a venda com {@code idVendaExterno} já existe e possui dados 100% idênticos,
+     *       retorna o registro pré-existente sem persistir duplicatas (idempotência para reenvios acidentais).</li>
+     *   <li>Se a venda com {@code idVendaExterno} já existe mas algum dado é divergente
+     *       (matrícula, valor, data, canal, marca ou loja), rejeita com {@link BusinessException}.</li>
+     *   <li>Normaliza canal, marca e loja para maiúsculas e sem espaços extras.</li>
+     *   <li>Trata condições de concorrência com chave única no banco.</li>
      * </ul>
      * </p>
      *
      * @param request payload de entrada validado pelo controller
      * @return {@link VendaResponseDTO} com os dados persistidos, incluindo o ID interno gerado
-     * @throws BusinessException se {@code idVendaExterno} já estiver registrado
+     * @throws BusinessException se {@code idVendaExterno} já estiver registrado com dados divergentes
      */
     @Transactional
     public VendaResponseDTO registrarVenda(VendaRequestDTO request) {
-        if (vendaRepository.existsByIdVendaExterno(request.idVendaExterno())) {
-            throw new BusinessException(
-                    "Já existe uma venda registrada com o identificador externo '"
-                    + request.idVendaExterno() + "'. Operação rejeitada para evitar duplicidade."
-            );
+        String idExternoNormalizado = request.idVendaExterno().trim();
+
+        // 1. Verifica se a venda já existe pelo identificador externo
+        Optional<Venda> vendaExistenteOpt = vendaRepository.findByIdVendaExterno(idExternoNormalizado);
+        if (vendaExistenteOpt.isPresent()) {
+            return tratarVendaExistente(request, vendaExistenteOpt.get());
         }
 
+        // 2. Prepara nova venda
         Venda venda = new Venda();
-        venda.setIdVendaExterno(request.idVendaExterno().trim());
+        venda.setIdVendaExterno(idExternoNormalizado);
         venda.setMatricula(request.matricula().trim());
         venda.setCanal(request.canal().toUpperCase().trim());
         venda.setMarca(request.marca().toUpperCase().trim());
@@ -52,9 +62,34 @@ public class VendaService {
         venda.setDataVenda(request.dataVenda());
         venda.setValorVenda(request.valorVenda());
 
-        Venda vendaSalva = vendaRepository.save(venda);
+        try {
+            Venda vendaSalva = vendaRepository.save(venda);
+            return mapearParaResponse(vendaSalva);
+        } catch (DataIntegrityViolationException ex) {
+            log.warn("Violação de integridade por concorrência ao registrar venda externa '{}'. Recuperando registro vencedor.", idExternoNormalizado);
+            Venda concorrente = vendaRepository.findByIdVendaExterno(idExternoNormalizado)
+                    .orElseThrow(() -> ex);
+            return tratarVendaExistente(request, concorrente);
+        }
+    }
 
-        return mapearParaResponse(vendaSalva);
+    private VendaResponseDTO tratarVendaExistente(VendaRequestDTO request, Venda existente) {
+        boolean dadosIguais = existente.getMatricula().equalsIgnoreCase(request.matricula().trim())
+                && existente.getValorVenda().compareTo(request.valorVenda()) == 0
+                && existente.getDataVenda().equals(request.dataVenda())
+                && existente.getCanal().equalsIgnoreCase(request.canal().trim())
+                && existente.getMarca().equalsIgnoreCase(request.marca().trim())
+                && existente.getLoja().equalsIgnoreCase(request.loja().trim());
+
+        if (!dadosIguais) {
+            throw new BusinessException(String.format(
+                    "Conflito de duplicidade: Já existe uma venda registrada com o identificador externo '%s' com dados divergentes.",
+                    request.idVendaExterno()
+            ));
+        }
+
+        log.info("Idempotência aplicada para venda '{}': requisição idêntica retornando registro existente.", request.idVendaExterno());
+        return mapearParaResponse(existente);
     }
 
     // -------------------------------------------------------------------------
