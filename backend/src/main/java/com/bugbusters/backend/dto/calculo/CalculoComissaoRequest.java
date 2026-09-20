@@ -2,6 +2,7 @@ package com.bugbusters.backend.dto.calculo;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.UUID;
 
 import com.bugbusters.backend.model.Marca;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -11,8 +12,8 @@ import jakarta.validation.constraints.Positive;
 
 @Schema(description = "Entrada para apuração de comissão sobre uma venda")
 public record CalculoComissaoRequest(
-    @Schema(description = "Identificador externo único da venda (ex: NF, pedido). Se informado, garante unicidade por transação de venda.", example = "VENDA-2026-00123")
-    String idVendaExterno,
+    @Schema(description = "Identificador único da venda (UUID da classe Sale). Se informado, cruza a consistência com a venda registrada.", example = "c02c2210-2889-490f-8ac8-f2455655e1e5")
+    UUID idVenda,
 
     @Schema(description = "Matrícula cadastral do colaborador (chave de vínculo com o RH)", example = "MATRIC-1")
     @NotBlank(message = "A matrícula é obrigatória")

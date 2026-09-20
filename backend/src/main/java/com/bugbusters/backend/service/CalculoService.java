@@ -66,8 +66,8 @@ public class CalculoService {
 
         garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
-        // 0. Valida consistência com a venda cadastrada caso idVendaExterno esteja presente
-        if (request.idVendaExterno() != null && !request.idVendaExterno().isBlank()) {
+        // 0. Valida consistência com a venda cadastrada caso idVenda esteja presente
+        if (request.idVenda() != null) {
             validarConsistenciaComVendaRegistrada(request);
         }
 
@@ -209,14 +209,14 @@ public class CalculoService {
     }
 
     private void validarConsistenciaComVendaRegistrada(CalculoComissaoRequest request) {
-        if (vendaRepository != null) {
-            vendaRepository.findByIdVendaExterno(request.idVendaExterno().trim()).ifPresent(venda -> {
+        if (vendaRepository != null && request.idVenda() != null) {
+            vendaRepository.findByIdVendaExterno(request.idVenda().toString()).ifPresent(venda -> {
                 if (!venda.getMatricula().equalsIgnoreCase(request.matricula().trim())
                         || venda.getValorVenda().compareTo(request.valorVenda()) != 0
                         || !venda.getDataVenda().equals(request.dataVenda())) {
                     throw new BusinessException(String.format(
                             "Dados divergentes da venda '%s'. A venda cadastrada possui matrícula '%s', data '%s' e valor %s.",
-                            request.idVendaExterno(), venda.getMatricula(), venda.getDataVenda(), venda.getValorVenda()
+                            request.idVenda(), venda.getMatricula(), venda.getDataVenda(), venda.getValorVenda()
                     ));
                 }
             });

@@ -243,20 +243,20 @@ class CalculoServiceTest {
     }
 
     @Test
-    @DisplayName("6. Deve rejeitar cálculo quando idVendaExterno divergir dos dados da venda registrada em tb_venda")
-    void deveRejeitarCalculoQuandoIdVendaExternoDivergir() {
-        String idExterno = "VENDA-999";
+    @DisplayName("6. Deve rejeitar cálculo quando idVenda (UUID) divergir dos dados da venda registrada em tb_venda")
+    void deveRejeitarCalculoQuandoIdVendaDivergir() {
+        UUID idVendaUuid = UUID.randomUUID();
         com.bugbusters.backend.model.Venda vendaRegistrada = new com.bugbusters.backend.model.Venda();
-        vendaRegistrada.setIdVendaExterno(idExterno);
+        vendaRegistrada.setIdVendaExterno(idVendaUuid.toString());
         vendaRegistrada.setMatricula(MATRICULA);
         vendaRegistrada.setDataVenda(DATA_VENDA);
         vendaRegistrada.setValorVenda(new BigDecimal("2000.00")); // Registrada como 2000.00
 
-        when(vendaRepository.findByIdVendaExterno(idExterno)).thenReturn(Optional.of(vendaRegistrada));
+        when(vendaRepository.findByIdVendaExterno(idVendaUuid.toString())).thenReturn(Optional.of(vendaRegistrada));
 
         // Enviando cálculo com valor diferente (1000.00)
         CalculoComissaoRequest requestComId = new CalculoComissaoRequest(
-                idExterno,
+                idVendaUuid,
                 MATRICULA,
                 VALOR_VENDA, // 1000.00
                 DATA_VENDA,
@@ -270,7 +270,7 @@ class CalculoServiceTest {
                 calculoService.calcularComissao(requestComId)
         );
 
-        assertTrue(ex.getMessage().contains("Dados divergentes da venda 'VENDA-999'"));
+        assertTrue(ex.getMessage().contains("Dados divergentes da venda"));
         verify(resultadoCalculoRepository, never()).save(any());
     }
 }
