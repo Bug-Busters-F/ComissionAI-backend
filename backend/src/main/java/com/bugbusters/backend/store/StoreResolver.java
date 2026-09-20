@@ -22,6 +22,13 @@ public class StoreResolver {
         }
     }
 
+    public Store resolve(Integer code) {
+    return repository.findByCode(code)
+            .orElseThrow(() -> new RuntimeException(
+                    "Loja não encontrada para o código: " + code
+            ));
+    }
+
     public Store resolveOrCreate(Integer code, String description){
         return repository.findByCode(code).orElseGet(() -> createSafely(code, description));
     };

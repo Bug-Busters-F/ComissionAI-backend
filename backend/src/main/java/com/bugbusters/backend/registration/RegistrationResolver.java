@@ -3,10 +3,12 @@ package com.bugbusters.backend.registration;
 import java.util.Date;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Component;
 
 import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.store.Store;
 
+@Component 
 public class RegistrationResolver {
     private final RegistrationRepository repository;
 
@@ -32,6 +34,13 @@ public class RegistrationResolver {
         } catch (DataIntegrityViolationException e) {
             return repository.findByRegistration(registrationString).orElseThrow(() -> e);
         }
+    }
+
+    public Registration resolve(String registrationString) {
+        return repository.findByRegistration(registrationString)
+                .orElseThrow(() -> new RuntimeException(
+                        "Matrícula não encontrada: " + registrationString
+                ));
     }
 
     public Registration resolveOrCreate(Position position,

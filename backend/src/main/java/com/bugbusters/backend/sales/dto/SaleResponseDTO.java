@@ -1,39 +1,41 @@
-package com.bugbusters.backend.dto.venda;
+package com.bugbusters.backend.sales.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.UUID;
+
+import com.bugbusters.backend.brand.Brand;
+import com.bugbusters.backend.registration.Registration;
+import com.bugbusters.backend.store.Store;
 
 @Schema(description = "Representação da venda individual registrada no sistema")
-public record VendaResponseDTO(
+public record SaleResponseDTO(
 
         @Schema(description = "Identificador interno gerado pelo sistema", example = "1")
-        Long id,
+        UUID id,
 
-        @Schema(description = "Identificador externo fornecido pelo cliente", example = "VENDA-2026-00123")
-        String idVendaExterno,
-
-        @Schema(description = "Matrícula do funcionário", example = "MAT-00456")
-        String matricula,
-
-        @Schema(description = "Canal de venda", example = "ECOMMERCE")
-        String canal,
+        @Schema(description = "Matricula relacionada")
+        Registration registration,
 
         @Schema(description = "Marca associada à venda", example = "MARCA_A")
-        String marca,
+        Brand brand,
 
-        @Schema(description = "Loja onde a venda foi realizada", example = "LOJA_SP_01")
-        String loja,
+         @Schema(description = "Loja onde a venda foi realizada", example = "LOJA_SP_01")
+        Store store,
 
         @Schema(description = "Data da venda ou competência de referência", example = "2026-09-13")
-        LocalDate dataVenda,
+        LocalDate saleDate,
 
         @Schema(description = "Valor bruto da venda", example = "1500.00")
-        BigDecimal valorVenda,
+        BigDecimal value,
+
+        @Schema(description = "Canal de venda", example = "ECOMMERCE")
+        String saleChannel,
 
         @Schema(description = "Momento em que o registro foi criado no sistema")
-        OffsetDateTime criadoEm
+        OffsetDateTime createdAt
 
 ) {}

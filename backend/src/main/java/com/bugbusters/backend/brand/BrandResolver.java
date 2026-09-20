@@ -22,6 +22,13 @@ public class BrandResolver {
         }
     }
 
+    public Brand resolve(Integer brandCode) {
+    return repository.findByCode(brandCode)
+            .orElseThrow(() -> new RuntimeException(
+                    "Marca não encontrada para o código: " + brandCode
+            ));
+    }
+
     public Brand resolveOrCreate(Integer brandCode, String brandDescription) {
         return repository.findByCode(brandCode).orElseGet(() -> createSafely(brandCode, brandDescription));
     }
