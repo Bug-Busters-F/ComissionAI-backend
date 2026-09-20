@@ -9,6 +9,8 @@ import com.bugbusters.backend.sales.dto.SaleRequestDTO;
 import com.bugbusters.backend.sales.dto.SaleResponseDTO;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreResolver;
+
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -78,7 +80,7 @@ class SaleServiceTest {
                 "ECOMMERCE"
         );
 
-        when(registrationResolver.resolve("MAT-00456")).thenReturn(mockRegistration);
+        when(registrationResolver.resolve("MAT-00456")).thenReturn(Optional.of(mockRegistration));s
         when(brandResolver.resolve(10)).thenReturn(mockBrand);
         when(storeResolver.resolve(62)).thenReturn(mockStore);
 
