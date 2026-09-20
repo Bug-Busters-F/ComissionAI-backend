@@ -62,7 +62,10 @@ public class SaleService {
             }
         }
 
-        Registration registration = registrationResolver.resolve(request.registrationCode());
+        Registration registration = registrationResolver.resolve(request.registrationCode())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Matrícula não encontrada: " + request.registrationCode()));
+
         Brand brand = brandResolver.resolve(request.brandCode());
         Store store = storeResolver.resolve(request.storeCode());
 
@@ -135,7 +138,7 @@ public class SaleService {
                 sale.getBrand(),
                 sale.getStore(),
                 sale.getSaleDate(),
-                valor,
+                sale.getValue(),
                 sale.getSaleChannel(),
                 sale.getCreatedAt());
     }

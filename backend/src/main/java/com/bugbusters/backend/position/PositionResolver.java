@@ -26,4 +26,13 @@ public class PositionResolver {
     public Position resolveOrCreate(Integer code, String description){
         return repository.findByCode(code).orElseGet(() -> createSafely(code, description));
     }
+
+     public Position resolve(Integer code) {
+        return repository.findByCode(code)
+                .orElseThrow(() ->
+                        new RuntimeException(
+                                "Cargo não encontrado para o código: " + code
+                        )
+                );
+    }
 }
