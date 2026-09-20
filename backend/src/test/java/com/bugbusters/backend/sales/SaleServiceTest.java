@@ -80,7 +80,7 @@ class SaleServiceTest {
                 "ECOMMERCE"
         );
 
-        when(registrationResolver.resolve("MAT-00456")).thenReturn(Optional.of(mockRegistration));s
+        when(registrationResolver.resolve("MAT-00456")).thenReturn(Optional.of(mockRegistration));
         when(brandResolver.resolve(10)).thenReturn(mockBrand);
         when(storeResolver.resolve(62)).thenReturn(mockStore);
 
