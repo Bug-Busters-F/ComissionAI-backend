@@ -64,8 +64,4 @@ public record CalculoComissaoRequest(
     public CalculoComissaoRequest(UUID id, String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, Integer codLoja, String canal) {
         this(id, matricula, valorVenda, dataVenda, codMarca, null, codLoja, canal);
     }
-
-    public CalculoComissaoRequest(UUID id, String matricula, BigDecimal valorVenda, LocalDate dataVenda, Integer codMarca, String descrMarca, Integer codLoja, String canal) {
-        this(id, matricula, valorVenda, dataVenda, codMarca, descrMarca, codLoja, canal);
-    }
 }
