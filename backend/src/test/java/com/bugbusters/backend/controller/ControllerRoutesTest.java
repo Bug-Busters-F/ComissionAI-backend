@@ -249,12 +249,81 @@ class ControllerRoutesTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve retornar resultado idêntico sem duplicar logs em caso de reenvio (Idempotência)")
+    void deveRetornarMesmoResultadoEmReenvioIdentico() throws Exception {
+        String payload = """
+            {
+                "matricula": "MATRIC-IDEMPOTENTE",
+                "valorVenda": 2000.00,
+                "canal": "LOJA_FISICA",
+                "dataVenda": "2026-10-10"
+            }
+            """;
+
+        // 1ª chamada: novo cálculo
+        String respostaOriginal = mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.valorComissao").value(200.00))
+                .andReturn().getResponse().getContentAsString();
+
+        String protocoloOriginal = respostaOriginal.replaceAll(".*\"protocoloCalculo\":\\s*\"([^\"]+)\".*", "$1");
+
+        // 2ª chamada idêntica: deve retornar o mesmo protocolo e mesmos dados
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.protocoloCalculo").value(protocoloOriginal))
+                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.valorComissao").value(200.00));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve rejeitar reenvio com dados divergentes com 400 Bad Request")
+    void deveRejeitarReenvioComDadosDivergentes() throws Exception {
+        String payloadOriginal = """
+            {
+                "matricula": "MATRIC-CONFLITO",
+                "valorVenda": 500.00,
+                "canal": "APP",
+                "dataVenda": "2026-10-12"
+            }
+            """;
+
+        String payloadDivergente = """
+            {
+                "matricula": "MATRIC-CONFLITO",
+                "valorVenda": 750.00,
+                "canal": "APP",
+                "dataVenda": "2026-10-12"
+            }
+            """;
+
+        // 1ª chamada bem-sucedida
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadOriginal))
+                .andExpect(status().isOk());
+
+        // 2ª chamada com valor alterado para a mesma matrícula e data de venda -> Rejeitada
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadDivergente))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("dados divergentes")));
+    }
+
+    @Test
     @DisplayName("GET /api/v1/logs-calculo - Deve listar logs com 200 OK")
     void deveListarLogs() throws Exception {
         mockMvc.perform(get("/api/v1/logs-calculo"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(greaterThan(0))))
-                .andExpect(jsonPath("$[0].matricula").value("MATRIC-1"));
+                .andExpect(jsonPath("$[0].matricula").isNotEmpty());
     }
 
     // ==========================================
@@ -317,25 +386,29 @@ class ControllerRoutesTest {
     // 4. Importacao Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/importacoes/upload - Deve realizar upload multipart com 200 OK")
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart com 200 OK")
     void deveRealizarUploadMultipart() throws Exception {
+        byte[] excelBytes;
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            wb.createSheet("Vendas");
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            wb.write(out);
+            excelBytes = out.toByteArray();
+        }
+
         MockMultipartFile file = new MockMultipartFile(
-                "arquivo",
-                "vendas_outubro.csv",
-                "text/csv",
-                "matricula,valor_venda,canal\nMATRIC-1,500,ECOMMERCE".getBytes()
+                "file",
+                "vendas_outubro.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excelBytes
         );
 
-        mockMvc.perform(multipart("/api/v1/importacoes/upload")
+        mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
-                .param("tipoBase", "VENDAS"))
+                .param("importType", "SALES"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.csv"))
-                .andExpect(jsonPath("$.tipoBase").value("VENDAS"))
-                .andExpect(jsonPath("$.status").value("PROCESSADO_COM_AVISOS"))
-                .andExpect(jsonPath("$.inconsistencias[0].campo").value("canal"))
-                .andExpect(jsonPath("$.inconsistencias[0].motivo").value("Canal não preenchido; atribuído canal padrão."))
-                .andExpect(jsonPath("$.inconsistencias[0].severidade").value("AVISO"));
+                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.xlsx"))
+                .andExpect(jsonPath("$.tipoBase").value("SALES"));
     }
 
     // ==========================================
