@@ -29,7 +29,7 @@ public class Sale {
     @JoinColumn(name = "brand_id", nullable = false)
     private Brand brand;
 
-    @Column(nullable = false, precision = 15, scale = 2)
+    @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
     private BigDecimal value;
 
     @Column(nullable = false)
