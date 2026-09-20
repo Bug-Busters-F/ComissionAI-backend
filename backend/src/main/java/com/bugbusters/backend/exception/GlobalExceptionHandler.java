@@ -104,15 +104,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleGenericException(
             Exception ex, HttpServletRequest request) {
+
+        log.error("Erro interno não tratado na rota {}: {}", request.getRequestURI(), ex.getMessage(), ex);
 
         ApiErrorResponse error = new ApiErrorResponse(
                 OffsetDateTime.now(),
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal Server Error",
-                "Ocorreu um erro interno no servidor.",
+                "Ocorreu um erro interno no servidor: " + ex.getMessage(),
                 request.getRequestURI(),
                 List.of()
         );
