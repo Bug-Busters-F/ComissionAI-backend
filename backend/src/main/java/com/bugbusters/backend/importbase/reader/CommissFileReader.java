@@ -12,41 +12,39 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import com.bugbusters.backend.importbase.dto.HrFileRow;
-import com.bugbusters.backend.importbase.mapper.HrFileRowMapper;
+import com.bugbusters.backend.importbase.dto.CommissFileRow;
+import com.bugbusters.backend.importbase.mapper.CommissFileRowMapper;
 import com.bugbusters.backend.importbase.util.ExcelUtils;
 
 @Component
-public class HrFileReader implements FileReader<HrFileRow> {
+public class CommissFileReader implements FileReader<CommissFileRow> {
+    private final CommissFileRowMapper mapper;
 
-    private final HrFileRowMapper mapper;
+    private static final Logger log = LoggerFactory.getLogger(CommissFileReader.class);
 
-    private static final Logger log = LoggerFactory.getLogger(HrFileReader.class);
-
-    public HrFileReader(HrFileRowMapper mapper) {
+    public CommissFileReader(CommissFileRowMapper mapper) {
         this.mapper = mapper;
     }
 
-    public List<HrFileRow> read(InputStream input) {
-        List<HrFileRow> rows = new ArrayList<>();
+    public List<CommissFileRow> read(InputStream input){
+        List<CommissFileRow> rows = new ArrayList<CommissFileRow>();
+
 
         try (Workbook workbook = WorkbookFactory.create(input)) {
             Sheet sheet = workbook.getSheetAt(0);
 
-            for (Row row : sheet) {
-
-                if (row.getRowNum() == 0 || ExcelUtils.isEmptyRow(row)) {
+            for(Row row : sheet){
+                if(row.getRowNum() == 0 || ExcelUtils.isEmptyRow(row)) {
                     continue;
                 }
 
-                rows.add(mapper.toHrFileRow(row));
+                rows.add(mapper.toCommissFileRow(row));
             }
 
             return rows;
-
         } catch (Exception e) {
-            log.error("Erro ao processar arquivo de RH", e);
+            log.error("Erro ao processar arquivo de Comissão Final", e);
             throw new RuntimeException("Erro ao processar arquivo", e);
         }
-    }
+    };
 }
