@@ -14,13 +14,13 @@ import org.springframework.stereotype.Component;
 
 import com.bugbusters.backend.importbase.dto.SalesFileRow;
 import com.bugbusters.backend.importbase.mapper.SalesFileRowMapper;
+import com.bugbusters.backend.importbase.util.ExcelUtils;
 
 @Component
 public class SalesFileReader implements FileReader<SalesFileRow> {
     private SalesFileRowMapper mapper;
 
-    private static final Logger log =
-        LoggerFactory.getLogger(SalesFileReader.class);
+    private static final Logger log = LoggerFactory.getLogger(SalesFileReader.class);
 
     public SalesFileReader(SalesFileRowMapper mapper) {
         this.mapper = mapper;
@@ -29,11 +29,13 @@ public class SalesFileReader implements FileReader<SalesFileRow> {
     public List<SalesFileRow> read(InputStream input) {
         List<SalesFileRow> rows = new ArrayList<>();
 
-        try (Workbook workbook = WorkbookFactory.create(input)){
+        try (Workbook workbook = WorkbookFactory.create(input)) {
             Sheet sheet = workbook.getSheetAt(0);
 
-            for(Row row : sheet) {
-                if(row.getRowNum() == 0) continue;
+            for (Row row : sheet) {
+                if (row.getRowNum() == 0 || ExcelUtils.isEmptyRow(row)) {
+                    continue;
+                }
                 rows.add(mapper.toSalesFileRow(row));
             }
 
