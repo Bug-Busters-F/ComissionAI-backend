@@ -1,23 +1,39 @@
 package com.bugbusters.backend.importbase;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.List;
+
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-// import java.time.OffsetDateTime;
-// import java.util.List;
+import com.bugbusters.backend.importbase.reader.FileReader;
 
 @Service
 public class ImportService {
-    public ImportResponse processImport( MultipartFile file, ImportType importType ) {
-        return new ImportResponse(
+    private FileReaderFactory readerFactory; 
+
+    public ImportService(FileReaderFactory readerFactory) {
+        this.readerFactory = readerFactory;
+    }
+
+    public ImportResponse processImport(
+    MultipartFile file,
+    ImportType importType
+    ) {
+        FileReader<?> reader = readerFactory.getFileReader(importType);
+
+        try (InputStream input = file.getInputStream()){
+            List<?> dados = reader.read(input);
+
+            return new ImportResponse(
                 file.getOriginalFilename(),
                 importType,
-                "PROCESSADO_COM_AVISOS",
-                100,
-                99,
-                false
-                // OffsetDateTime.now()
-                // List.of(new ItemInconsistenciaDTO(12, "canal", "Canal não preenchido; atribuído canal padrão.", ImportInconsistencySeverity.AVISO)),
-        );
+                dados
+            );
+
+        } catch (IOException e) {
+            throw new RuntimeException("Erro ao ler arquivo", e);
+        }
     }
 }

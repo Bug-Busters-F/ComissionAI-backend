@@ -1,8 +1,9 @@
 package com.bugbusters.backend.importbase.reader;
 
 import java.io.InputStream;
-// import java.util.List;
+import java.util.List;
+
 
 public interface FileReader<T> {
-    void read(InputStream input);
+    List<T> read(InputStream input);
 }

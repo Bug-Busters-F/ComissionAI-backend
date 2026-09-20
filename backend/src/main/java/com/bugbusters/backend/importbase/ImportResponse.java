@@ -1,5 +1,7 @@
 package com.bugbusters.backend.importbase;
 
+import java.util.List;
+
 // import java.time.OffsetDateTime;
 // import java.util.List;
 
@@ -13,17 +15,22 @@ public record ImportResponse(
     @Schema(description = "Tipo de base", example = "VENDAS")
     ImportType tipoBase,
 
-    @Schema(description = "Status consolidado: SUCESSO, REJEITADO, PROCESSADO_COM_AVISOS", example = "REJEITADO")
-    String status,
+    // TODO: remover esse atributo depois
+    @Schema(description = "Linhas lidas")
+    List<?> linhas
 
-    @Schema(description = "Total de linhas no arquivo", example = "1500")
-    int totalLinhas,
+    // TODO: VALIDAR ESSES CAMPOS PARA A IMPLEMENTAÇÃO DO SPRING BATCH
+    // @Schema(description = "Status consolidado: SUCESSO, REJEITADO, PROCESSADO_COM_AVISOS", example = "REJEITADO")
+    // String status,
 
-    @Schema(description = "Total de linhas válidas", example = "1498")
-    int linhasValidas,
+    // @Schema(description = "Total de linhas no arquivo", example = "1500")
+    // int totalLinhas,
 
-    @Schema(description = "Indica se houve rejeição integral por falha impeditiva", example = "true")
-    boolean rejeicaoIntegral
+    // @Schema(description = "Total de linhas válidas", example = "1498")
+    // int linhasValidas,
+
+    // @Schema(description = "Indica se houve rejeição integral por falha impeditiva", example = "true")
+    // boolean rejeicaoIntegral
 
     // @Schema(description = "Lista detalhada de inconsistencias apontando linha, campo e gravidade")
     // List<ItemInconsistenciaDTO> inconsistencias,

@@ -8,7 +8,9 @@
 	"features": {
 		"ghcr.io/stuartleeks/dev-container-features/shell-history:0": {},
 		"ghcr.io/devcontainers-extra/features/zsh-plugins:0": {}
-	}
+	},	
+    "forwardPorts": [8080]
+
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {}
