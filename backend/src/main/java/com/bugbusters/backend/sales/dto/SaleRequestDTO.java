@@ -11,15 +11,15 @@ import java.time.LocalDate;
 @Schema(description = "Payload para registro de uma venda individual")
 public record SaleRequestDTO(
         @Schema(description = "Matrícula do funcionário responsável pela venda", example = "MAT-00456")
-        @NotBlank(message = "A matrícula do funcionário é obrigatória")
+        @NotNull(message = "A matrícula do funcionário é obrigatória")
         String registrationCode,
 
         @Schema(description = "Num da Marca associada à venda", example = "10")
-        @NotBlank(message = "A marca é obrigatória")
+        @NotNull(message = "A marca é obrigatória")
         Integer brandCode,
 
         @Schema(description = "Num da Loja onde a venda foi realizada", example = "62")
-        @NotBlank(message = "A loja é obrigatória")
+        @NotNull(message = "A loja é obrigatória")
         Integer storeCode,
 
         @Schema(
