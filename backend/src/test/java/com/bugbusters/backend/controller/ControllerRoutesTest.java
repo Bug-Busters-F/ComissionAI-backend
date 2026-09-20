@@ -33,11 +33,50 @@ class ControllerRoutesTest {
 
     private org.springframework.test.web.client.MockRestServiceServer mockServer;
 
+    @Autowired
+    private com.bugbusters.backend.brand.BrandRepository brandRepository;
+
+    @Autowired
+    private com.bugbusters.backend.store.StoreRepository storeRepository;
+
+    @Autowired
+    private com.bugbusters.backend.position.PositionRepository positionRepository;
+
+    @Autowired
+    private com.bugbusters.backend.registration.RegistrationRepository registrationRepository;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
         mockServer = org.springframework.test.web.client.MockRestServiceServer.bindTo(aiRestClientBuilder).build();
         aiServiceClient.setAiRestClient(aiRestClientBuilder.build());
+
+        if (brandRepository.findByCode(10).isEmpty()) {
+            com.bugbusters.backend.brand.Brand b = new com.bugbusters.backend.brand.Brand();
+            b.setCode(10);
+            b.setDescription("PRETO");
+            brandRepository.save(b);
+        }
+        if (storeRepository.findByCode(62).isEmpty()) {
+            com.bugbusters.backend.store.Store s = new com.bugbusters.backend.store.Store();
+            s.setCode(62);
+            s.setDescription("LOJA 62");
+            storeRepository.save(s);
+        }
+        if (positionRepository.findByCode("150").isEmpty()) {
+            com.bugbusters.backend.position.Position p = new com.bugbusters.backend.position.Position();
+            p.setCode("150");
+            p.setDescription("VENDEDOR");
+            positionRepository.save(p);
+        }
+        if (registrationRepository.findByRegistration("MAT-00456").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MAT-00456");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode("150").get());
+            r.setAdmissDate(new java.util.Date());
+            registrationRepository.save(r);
+        }
     }
 
     // ==========================================
@@ -620,5 +659,109 @@ class ControllerRoutesTest {
         mockMvc.perform(get("/api/v1/campanhas/" + campanhaId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
+    }
+
+    // ==========================================
+    // 6. Sale Controller (Vendas Individuais)
+    // ==========================================
+    @Test
+    @DisplayName("POST /api/v1/vendas - Deve registrar nova venda individual (201)")
+    void deveRegistrarNovaVendaIndividual() throws Exception {
+        String saleId = "c1111111-1111-1111-1111-111111111111";
+        String payload = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1500.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.id").value(saleId))
+                .andExpect(jsonPath("$.value").value(1500.00))
+                .andExpect(jsonPath("$.saleChannel").value("ECOMMERCE"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/vendas - Deve retornar venda existente em reenvio idêntico (Idempotência)")
+    void deveRetornarVendaExistenteEmReenvioIdentico() throws Exception {
+        String saleId = "c2222222-2222-2222-2222-222222222222";
+        String payload = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1800.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        // 1ª chamada: cadastra
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(saleId));
+
+        // 2ª chamada: idêntica, retorna registro existente
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(saleId))
+                .andExpect(jsonPath("$.value").value(1800.00));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/vendas - Deve rejeitar reenvio com dados divergentes (400 Bad Request)")
+    void deveRejeitarVendaComDadosDivergentes() throws Exception {
+        String saleId = "c3333333-3333-3333-3333-333333333333";
+        String payloadOriginal = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1500.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        String payloadDivergente = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 2500.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        // 1ª chamada: sucesso
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadOriginal))
+                .andExpect(status().isCreated());
+
+        // 2ª chamada: mesmo ID mas valor divergente -> 400 Bad Request
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadDivergente))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("dados diferentes")));
     }
 }

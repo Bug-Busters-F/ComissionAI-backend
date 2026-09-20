@@ -11,13 +11,9 @@ import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.store.Store;
 
 @Entity
-@Table(
-        name = "tb-salses",
-        uniqueConstraints = @UniqueConstraint(name = "uk_venda_id_externo", columnNames = "id_venda_externo")
-)
+@Table(name = "tb-sales")
 public class Sale {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private UUID id;
 
     @ManyToOne
@@ -32,7 +28,7 @@ public class Sale {
     @JoinColumn (name = "brand_id", nullable = false)
     private Brand brand;
 
-    @Column(nullable = false)
+    @Column(name = "valor_venda", nullable = false)
     private Double value;
 
     @Column(nullable = false, length = 150)
@@ -41,7 +37,7 @@ public class Sale {
     @Column(nullable = true, length = 150)
     private String referencemonth;
 
-    @Column(name = "data_venda", nullable = false)
+    @Column(name = "canal", nullable = false)
     private String saleChannel;
 
     @Column(name = "created_at", nullable = false, updatable = false)
