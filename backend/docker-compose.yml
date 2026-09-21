@@ -11,5 +11,24 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  backend:
+    build: .
+    container_name: bugbusters-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: bugbusters_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      AI_SERVICE_URL: http://host.docker.internal:8000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
 volumes:
   pgdata:
