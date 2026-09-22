@@ -317,25 +317,77 @@ class ControllerRoutesTest {
     // 4. Importacao Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/importacoes/upload - Deve realizar upload multipart com 200 OK")
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart SALES com 201 CREATED")
     void deveRealizarUploadMultipart() throws Exception {
+        byte[] excelBytes;
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Vendas");
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Data");
+            workbook.write(baos);
+            excelBytes = baos.toByteArray();
+        }
+
         MockMultipartFile file = new MockMultipartFile(
-                "arquivo",
-                "vendas_outubro.csv",
-                "text/csv",
-                "matricula,valor_venda,canal\nMATRIC-1,500,ECOMMERCE".getBytes()
+                "file",
+                "vendas_outubro.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excelBytes
         );
 
-        mockMvc.perform(multipart("/api/v1/importacoes/upload")
+        mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
-                .param("tipoBase", "VENDAS"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.csv"))
-                .andExpect(jsonPath("$.tipoBase").value("VENDAS"))
-                .andExpect(jsonPath("$.status").value("PROCESSADO_COM_AVISOS"))
-                .andExpect(jsonPath("$.inconsistencias[0].campo").value("canal"))
-                .andExpect(jsonPath("$.inconsistencias[0].motivo").value("Canal não preenchido; atribuído canal padrão."))
-                .andExpect(jsonPath("$.inconsistencias[0].severidade").value("AVISO"));
+                .param("importType", "SALES"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.xlsx"))
+                .andExpect(jsonPath("$.tipoBase").value("SALES"))
+                .andExpect(jsonPath("$.totalLinhas").value(0));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart HR com 201 CREATED e persistir matricula")
+    void deveRealizarUploadHRComSucesso() throws Exception {
+        byte[] excelBytes;
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("RH");
+
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            String[] headers = {"Data_Ref", "Cod_Marca", "Descri_Marca", "Cod_Loja", "Descr_Loja", "Matricula", "Data_Admiss", "Data_Demiss", "Cod_Cargo", "Descri_Cargo"};
+            for (int i = 0; i < headers.length; i++) {
+                header.createCell(i).setCellValue(headers[i]);
+            }
+
+            org.apache.poi.ss.usermodel.Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("dez-25");
+            row.createCell(1).setCellValue(20);
+            row.createCell(2).setCellValue("BRANCO");
+            row.createCell(3).setCellValue(75);
+            row.createCell(4).setCellValue("LOJA-75");
+            row.createCell(5).setCellValue("MATRIC-1");
+            row.createCell(6).setCellValue("5/5/2025");
+            row.createCell(8).setCellValue(200);
+            row.createCell(9).setCellValue("VENDEDOR BALCAO");
+
+            workbook.write(baos);
+            excelBytes = baos.toByteArray();
+        }
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "base_rh.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excelBytes
+        );
+
+        mockMvc.perform(multipart("/api/v1/imports/upload")
+                .file(file)
+                .param("importType", "HR"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nomeArquivo").value("base_rh.xlsx"))
+                .andExpect(jsonPath("$.tipoBase").value("HR"))
+                .andExpect(jsonPath("$.totalLinhas").value(1));
     }
 
     // ==========================================

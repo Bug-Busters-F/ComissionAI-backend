@@ -43,4 +43,20 @@ public class DateUtils {
 
     return LocalDate.of(year, month, 1);
 }
+
+    public static LocalDate parseDate(String valor) {
+        if (valor == null || valor.isBlank()) {
+            return null;
+        }
+        valor = valor.trim();
+        if (valor.matches("(?i)^[a-z]{3}-\\d{2}$")) {
+            return parseMonthYear(valor);
+        }
+        for (String pattern : java.util.List.of("M/d/yyyy", "d/M/yyyy", "yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy")) {
+            try {
+                return LocalDate.parse(valor, java.time.format.DateTimeFormatter.ofPattern(pattern));
+            } catch (Exception ignored) {}
+        }
+        return parseMonthYear(valor);
+    }
 }

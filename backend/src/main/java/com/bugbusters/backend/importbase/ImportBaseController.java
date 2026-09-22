@@ -25,6 +25,6 @@ public class ImportBaseController {
             @RequestParam("importType") ImportType importType
         ) {
             ImportResponse response = importService.processImport(file, importType);
-            return ResponseEntity.ok(response);
+            return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(response);
     }
 }
