@@ -7,9 +7,14 @@ import jakarta.validation.constraints.Positive;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.UUID;
 
 @Schema(description = "Payload para registro de uma venda individual")
 public record SaleRequestDTO(
+        @Schema(description = "Identificador único da venda (UUID obrigatório)", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+        @NotNull(message = "O ID da venda é obrigatório")
+        UUID id,
+
         @Schema(description = "Matrícula do funcionário responsável pela venda", example = "MAT-00456")
         @NotNull(message = "A matrícula do funcionário é obrigatória")
         String registrationCode,

@@ -1,3 +1,0 @@
-ALTER TABLE tb_store
-    ALTER COLUMN code TYPE INTEGER
-    USING code::INTEGER;
