@@ -10,7 +10,7 @@ ai:
     url: ${AI_SERVICE_URL:http://localhost:8000}
     endpoint: /api/v1/interpretar
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT:3000}
-    read-timeout-ms: ${AI_READ_TIMEOUT:15000}
+    read-timeout-ms: ${AI_READ_TIMEOUT:35000}
 
 ---
 # Perfil de Desenvolvimento Local (PostgreSQL)

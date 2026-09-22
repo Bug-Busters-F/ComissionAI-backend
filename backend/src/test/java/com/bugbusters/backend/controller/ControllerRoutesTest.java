@@ -127,6 +127,8 @@ class ControllerRoutesTest {
                 .andExpect(jsonPath("$.dataFim").value("2026-10-31"));
     }
 
+
+
     @Test
     @DisplayName("POST /api/v1/regras - Deve criar regra válida com dimensões de público-alvo e sem canal")
     void deveCriarRegraComDimensoesPublicoAlvoSemCanal() throws Exception {
@@ -282,6 +284,7 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty())
+                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
                 .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
                 .andExpect(jsonPath("$.valorOriginal").value(1000.00))
                 .andExpect(jsonPath("$.valorComissao").value(100.00))
@@ -552,6 +555,9 @@ class ControllerRoutesTest {
                 .andExpect(jsonPath("$.regra.taxa").value(0.0500))
                 .andExpect(jsonPath("$.regra.status").value("DRAFT"));
     }
+
+    
+
 
     @Test
     @DisplayName("POST /api/v1/campanhas - Deve cadastrar campanha com dimensões de público-alvo e sem canal")
