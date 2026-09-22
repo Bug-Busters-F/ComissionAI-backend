@@ -1,9 +1,9 @@
-package com.bugbusters.backend.controller;
+package com.bugbusters.backend.sales;
 
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
-import com.bugbusters.backend.dto.venda.VendaRequestDTO;
-import com.bugbusters.backend.dto.venda.VendaResponseDTO;
-import com.bugbusters.backend.service.VendaService;
+import com.bugbusters.backend.sales.dto.SaleRequestDTO;
+import com.bugbusters.backend.sales.dto.SaleResponseDTO;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,12 +22,12 @@ import java.net.URI;
 @RestController
 @RequestMapping("/api/v1/vendas")
 @Tag(name = "3. Vendas Individuais", description = "Registro de vendas individuais para posterior cálculo de comissionamento")
-public class VendaController {
+public class SaleController {
 
-    private final VendaService vendaService;
+    private final SaleService saleService;
 
-    public VendaController(VendaService vendaService) {
-        this.vendaService = vendaService;
+    public SaleController(SaleService salesService) {
+        this.saleService = salesService;
     }
 
     @Operation(
@@ -46,8 +46,8 @@ public class VendaController {
             content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
     )
     @PostMapping
-    public ResponseEntity<VendaResponseDTO> registrarVenda(@Valid @RequestBody VendaRequestDTO request) {
-        VendaResponseDTO response = vendaService.registrarVenda(request);
+    public ResponseEntity<SaleResponseDTO> registrarVenda(@Valid @RequestBody SaleRequestDTO request) {
+        SaleResponseDTO response = saleService.registrarVenda(request);
 
         URI uri = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")

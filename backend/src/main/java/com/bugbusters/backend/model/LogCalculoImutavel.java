@@ -16,17 +16,23 @@ public class LogCalculoImutavel {
     @Column(nullable = false)
     private UUID protocolo;
 
+    @Column(name = "id_venda")
+    private UUID idVenda;
+
     @Column(nullable = false, length = 50)
     private String matricula;
 
     @Column(name = "cod_cargo")
     private Integer codCargo;
 
-    @Column(name = "cod_loja")
-    private Integer codLoja;
+
 
     @Column(name = "cod_marca")
     private Integer codMarca;
+    @Column(name = "cod_loja")
+    private Integer codLoja;
+
+
 
     @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
     private BigDecimal valorVenda;
@@ -42,6 +48,9 @@ public class LogCalculoImutavel {
 
     @Column(name = "data_venda", nullable = false)
     private LocalDate dataVenda;
+
+
+
 
     @Column(length = 100)
     private String canal;
@@ -67,12 +76,13 @@ public class LogCalculoImutavel {
         }
     }
 
-    public LogCalculoImutavel(UUID protocolo, String matricula, Integer codCargo, Integer codLoja,
+    public LogCalculoImutavel(UUID protocolo, UUID idVenda, String matricula, Integer codCargo, Integer codLoja,
                               Integer codMarca, BigDecimal valorVenda, BigDecimal taxaAplicada,
                               BigDecimal valorComissao, Long idRegra, LocalDate dataVenda,
                               String canal, String origemExecucao) {
         this.id = UUID.randomUUID();
         this.protocolo = protocolo;
+        this.idVenda = idVenda;
         this.matricula = matricula;
         this.codCargo = codCargo;
         this.codLoja = codLoja;
@@ -82,16 +92,27 @@ public class LogCalculoImutavel {
         this.valorComissao = valorComissao;
         this.idRegra = idRegra;
         this.dataVenda = dataVenda;
+        this.idRegra = idRegra;
+        this.dataVenda = dataVenda;
         this.canal = canal;
         this.origemExecucao = origemExecucao != null ? origemExecucao : "MOTOR_PRODUCAO";
         this.usuarioExecutor = "SISTEMA";
         this.executadoEm = OffsetDateTime.now();
     }
 
+    public LogCalculoImutavel(UUID protocolo, String matricula, Integer codCargo, Integer codLoja,
+                              Integer codMarca, BigDecimal valorVenda, BigDecimal taxaAplicada,
+                              BigDecimal valorComissao, Long idRegra, LocalDate dataVenda,
+                              String canal, String origemExecucao) {
+        this(protocolo, null, matricula, codCargo, codLoja, codMarca, valorVenda, taxaAplicada, valorComissao, idRegra, dataVenda, canal, origemExecucao);
+    }
+
     // Getters
     public UUID getId() { return id; }
 
     public UUID getProtocolo() { return protocolo; }
+
+    public UUID getIdVenda() { return idVenda; }
 
     public String getMatricula() { return matricula; }
 
@@ -112,6 +133,7 @@ public class LogCalculoImutavel {
     public Long getIdRegra() { return idRegra; }
 
     public LocalDate getDataVenda() { return dataVenda; }
+
 
     public String getCanal() { return canal; }
 
