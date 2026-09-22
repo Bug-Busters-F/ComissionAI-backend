@@ -78,4 +78,12 @@ public class Registration {
     public void setDemissDate(LocalDate demissDate) {
         this.demissDate = demissDate;
     }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
+    }
 }

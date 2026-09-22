@@ -24,12 +24,17 @@ public class RegistrationMapper {
     }
 
     public Registration toEntity(HrFileRow row) {
+        if (row.getRegistration() == null || row.getRegistration().isBlank()) {
+            return null;
+        }
+
         Position position = positionResolver.resolveOrCreate(row.getPositionCode(), row.getPositionDescription());
         Store store = storeResolver.resolveOrCreate(row.getStoreCode(), row.getStoreDescription());
 
         Registration registration = registrationRepository.findByRegistration(row.getRegistration())
             .orElseGet(Registration::new);
 
+        registration.setRegistration(row.getRegistration());
         registration.setAdmissDate(row.getAdmissDate());
         registration.setDemissDate(row.getDemissDate());
         registration.setPosition(position);
