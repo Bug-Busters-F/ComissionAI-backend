@@ -450,14 +450,16 @@ class ControllerRoutesTest {
     // 4. Importacao Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart com 200 OK")
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart SALES com 201 CREATED")
     void deveRealizarUploadMultipart() throws Exception {
         byte[] excelBytes;
-        try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
-            wb.createSheet("Vendas");
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            wb.write(out);
-            excelBytes = out.toByteArray();
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Vendas");
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Data");
+            workbook.write(baos);
+            excelBytes = baos.toByteArray();
         }
 
         MockMultipartFile file = new MockMultipartFile(
@@ -470,9 +472,55 @@ class ControllerRoutesTest {
         mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
                 .param("importType", "SALES"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.xlsx"))
-                .andExpect(jsonPath("$.tipoBase").value("SALES"));
+                .andExpect(jsonPath("$.tipoBase").value("SALES"))
+                .andExpect(jsonPath("$.totalLinhas").value(0));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart HR com 201 CREATED e persistir matricula")
+    void deveRealizarUploadHRComSucesso() throws Exception {
+        byte[] excelBytes;
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("RH");
+
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            String[] headers = {"Data_Ref", "Cod_Marca", "Descri_Marca", "Cod_Loja", "Descr_Loja", "Matricula", "Data_Admiss", "Data_Demiss", "Cod_Cargo", "Descri_Cargo"};
+            for (int i = 0; i < headers.length; i++) {
+                header.createCell(i).setCellValue(headers[i]);
+            }
+
+            org.apache.poi.ss.usermodel.Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("dez-25");
+            row.createCell(1).setCellValue(20);
+            row.createCell(2).setCellValue("BRANCO");
+            row.createCell(3).setCellValue(75);
+            row.createCell(4).setCellValue("LOJA-75");
+            row.createCell(5).setCellValue("MATRIC-1");
+            row.createCell(6).setCellValue("5/5/2025");
+            row.createCell(8).setCellValue(200);
+            row.createCell(9).setCellValue("VENDEDOR BALCAO");
+
+            workbook.write(baos);
+            excelBytes = baos.toByteArray();
+        }
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "base_rh.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excelBytes
+        );
+
+        mockMvc.perform(multipart("/api/v1/imports/upload")
+                .file(file)
+                .param("importType", "HR"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nomeArquivo").value("base_rh.xlsx"))
+                .andExpect(jsonPath("$.tipoBase").value("HR"))
+                .andExpect(jsonPath("$.totalLinhas").value(1));
     }
 
     // ==========================================
