@@ -7,13 +7,17 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      # NOTE: POSTGRES_DB/USER/PASSWORD should match values in db container
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-comissai_db}
       POSTGRES_HOSTNAME: db
       DB_HOST: db
       DB_NAME: ${POSTGRES_DB:-comissai_db}
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-comissai_db}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
 
     volumes:
       - ..:/workspaces/${localWorkspaceFolderBasename:-comissionai-backend}:cached
