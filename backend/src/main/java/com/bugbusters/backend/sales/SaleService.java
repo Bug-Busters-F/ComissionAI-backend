@@ -1,11 +1,11 @@
 package com.bugbusters.backend.sales;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -126,11 +126,12 @@ public class SaleService {
         }
     }
 
-    private SaleResponseDTO mapearParaResponse(Sale sale) {
+    public Page<SaleResponseDTO> readAllSales(Pageable pageable) {
+        return vendaRepository.findAll(pageable)
+            .map(this::mapearParaResponse);
+    }
 
-        BigDecimal valor = sale.getValue() != null
-                ? sale.getValue().setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+    private SaleResponseDTO mapearParaResponse(Sale sale) {
 
         return new SaleResponseDTO(
                 sale.getId(),

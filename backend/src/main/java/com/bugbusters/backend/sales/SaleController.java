@@ -10,10 +10,16 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
@@ -30,21 +36,14 @@ public class SaleController {
         this.saleService = salesService;
     }
 
-    @Operation(
-            summary = "Registrar venda individual",
-            description = """
-                    Recebe o payload de uma venda individual, valida os campos obrigatórios e persiste
-                    no banco de dados. O campo `idVendaExterno` deve ser único por venda e serve de
-                    garantia de idempotência para a etapa de cálculo de comissão.
-                    O valor da venda é tratado como BigDecimal para precisão financeira.
-                    """
-    )
+    @Operation(summary = "Registrar venda individual", description = """
+            Recebe o payload de uma venda individual, valida os campos obrigatórios e persiste
+            no banco de dados. O campo `idVendaExterno` deve ser único por venda e serve de
+            garantia de idempotência para a etapa de cálculo de comissão.
+            O valor da venda é tratado como BigDecimal para precisão financeira.
+            """)
     @ApiResponse(responseCode = "201", description = "Venda registrada com sucesso")
-    @ApiResponse(
-            responseCode = "400",
-            description = "Dados inválidos (campos obrigatórios ausentes, valor não positivo ou ID externo duplicado)",
-            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
-    )
+    @ApiResponse(responseCode = "400", description = "Dados inválidos (campos obrigatórios ausentes, valor não positivo ou ID externo duplicado)", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping
     public ResponseEntity<SaleResponseDTO> registrarVenda(@Valid @RequestBody SaleRequestDTO request) {
         SaleResponseDTO response = saleService.registrarVenda(request);
@@ -55,5 +54,15 @@ public class SaleController {
                 .toUri();
 
         return ResponseEntity.created(uri).body(response);
+    }
+
+    @ApiResponse(responseCode = "200", description = "Vendas recuperadas com sucesso")
+    @GetMapping
+    public Page<SaleResponseDTO> findAllSales(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Pageable pageable = PageRequest.of(page, size);
+        return saleService.readAllSales(pageable);
     }
 }
