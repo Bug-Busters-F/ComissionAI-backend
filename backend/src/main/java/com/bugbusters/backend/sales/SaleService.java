@@ -1,7 +1,5 @@
 package com.bugbusters.backend.sales;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -128,9 +126,9 @@ public class SaleService {
 
     private SaleResponseDTO mapearParaResponse(Sale sale) {
 
-        BigDecimal valor = sale.getValue() != null
-                ? sale.getValue().setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        // BigDecimal valor = sale.getValue() != null
+        //         ? sale.getValue().setScale(2, RoundingMode.HALF_UP)
+        //         : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
         return new SaleResponseDTO(
                 sale.getId(),

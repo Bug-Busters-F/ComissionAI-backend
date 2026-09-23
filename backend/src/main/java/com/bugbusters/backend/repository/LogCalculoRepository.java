@@ -2,13 +2,14 @@ package com.bugbusters.backend.repository;
 
 import com.bugbusters.backend.model.LogCalculoImutavel;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.UUID;
 
 @Repository
-public interface LogCalculoRepository extends JpaRepository<LogCalculoImutavel, UUID> {
+public interface LogCalculoRepository extends JpaRepository<LogCalculoImutavel, UUID>, JpaSpecificationExecutor<LogCalculoImutavel> {
 
     /**
      * Recupera todos os logs imutáveis ordenados do mais recente para o mais antigo.

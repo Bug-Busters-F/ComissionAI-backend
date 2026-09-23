@@ -385,12 +385,13 @@ class ControllerRoutesTest {
     }
 
     @Test
-    @DisplayName("GET /api/v1/logs-calculo - Deve listar logs com 200 OK")
+    @DisplayName("GET /api/v1/logs-calculo - Deve listar logs paginados com 200 OK")
     void deveListarLogs() throws Exception {
         mockMvc.perform(get("/api/v1/logs-calculo"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(greaterThan(0))))
-                .andExpect(jsonPath("$[0].matricula").isNotEmpty());
+                .andExpect(jsonPath("$.content", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$.content[0].matricula").isNotEmpty())
+                .andExpect(jsonPath("$.totalElements").isNumber());
     }
 
     // ==========================================

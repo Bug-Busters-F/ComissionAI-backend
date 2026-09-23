@@ -92,8 +92,6 @@ public class LogCalculoImutavel {
         this.valorComissao = valorComissao;
         this.idRegra = idRegra;
         this.dataVenda = dataVenda;
-        this.idRegra = idRegra;
-        this.dataVenda = dataVenda;
         this.canal = canal;
         this.origemExecucao = origemExecucao != null ? origemExecucao : "MOTOR_PRODUCAO";
         this.usuarioExecutor = "SISTEMA";
