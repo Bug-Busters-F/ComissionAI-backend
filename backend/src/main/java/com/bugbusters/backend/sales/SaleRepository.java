@@ -13,4 +13,10 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
     @Override
     @EntityGraph(attributePaths = { "registration", "registration.position", "brand", "store" })
     Page<Sale> findAll(Pageable pageable);
+
+    boolean existsByRegistrationId(UUID registrationId);
+
+    boolean existsByBrandId(UUID brandId);
+
+    boolean existsByStoreId(UUID storeId);
 }

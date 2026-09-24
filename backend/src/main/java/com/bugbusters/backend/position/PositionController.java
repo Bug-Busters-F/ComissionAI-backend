@@ -1,10 +1,9 @@
-package com.bugbusters.backend.store;
+package com.bugbusters.backend.position;
 
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
-import com.bugbusters.backend.store.dto.StoreResponseDTO;
+import com.bugbusters.backend.position.dto.PositionResponseDTO;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -22,26 +21,26 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 @RestController
-@RequestMapping("api/v1/lojas")
-public class StoreController {
-    private final StoreService service;
+@RequestMapping("api/v1/cargos")
+public class PositionController {
 
-    public StoreController(StoreService service) {
+    private final PositionService service;
+
+    public PositionController(PositionService service) {
         this.service = service;
     }
 
-    @ApiResponse(responseCode = "200", description = "Marcas recuperadas com sucesso")
+    @ApiResponse(responseCode = "200", description = "Cargos recuperados com sucesso")
     @GetMapping
-    public Page<StoreResponseDTO> findAll(
-            @RequestParam int page, @RequestParam int size) {
-        Pageable pageable = PageRequest.of(page, size);
+    public Page<PositionResponseDTO> findAllPositions(@RequestParam int page, @RequestParam int size) {
+        PageRequest pageable = PageRequest.of(page, size);
         return service.findAll(pageable);
     };
 
-    @Operation(summary = "Excluir loja", description = "Remove uma loja, desde que não haja vendas ou matrículas vinculadas.")
-    @ApiResponse(responseCode = "204", description = "Loja excluída com sucesso")
-    @ApiResponse(responseCode = "404", description = "Loja não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
-    @ApiResponse(responseCode = "409", description = "Loja possui vendas ou matrículas vinculadas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @Operation(summary = "Excluir cargo", description = "Remove um cargo, desde que não haja matrículas vinculadas.")
+    @ApiResponse(responseCode = "204", description = "Cargo excluído com sucesso")
+    @ApiResponse(responseCode = "404", description = "Cargo não encontrado", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Cargo possui matrículas vinculadas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         service.delete(id);

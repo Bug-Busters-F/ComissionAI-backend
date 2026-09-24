@@ -15,7 +15,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URI;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/vendas")
@@ -64,5 +67,14 @@ public class SaleController {
 
         Pageable pageable = PageRequest.of(page, size);
         return saleService.readAllSales(pageable);
+    }
+
+    @Operation(summary = "Excluir venda", description = "Remove uma venda individual pelo seu ID.")
+    @ApiResponse(responseCode = "204", description = "Venda excluída com sucesso")
+    @ApiResponse(responseCode = "404", description = "Venda não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deletarVenda(@PathVariable UUID id) {
+        saleService.deletarVenda(id);
+        return ResponseEntity.noContent().build();
     }
 }
