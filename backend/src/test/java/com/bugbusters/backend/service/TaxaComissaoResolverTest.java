@@ -88,32 +88,8 @@ class TaxaComissaoResolverTest {
     }
 
     @Test
-    @DisplayName("1. Prioridade 1: Deve selecionar taxa de tb_basecomiss quando disponível")
-    void deveSelecionarTaxaDeBaseComissPrioritariamente() {
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.1000"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
-                eq(brand.getId()), eq(position.getId()), eq(LocalDate.of(2026, 9, 1))
-        )).thenReturn(Optional.of(baseComiss));
-
-        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
-
-        assertTrue(result.sucesso());
-        assertEquals(new BigDecimal("0.1000"), result.taxa());
-        assertEquals("BASE_COMISS", result.origemTaxa());
-    }
-
-    @Test
-    @DisplayName("2. Prioridade 2: Deve selecionar regra ativa como fallback quando basecomiss não existir")
-    void deveSelecionarRegraAtivaComoFallback() {
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.empty());
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(any(), any()))
-                .thenReturn(Optional.empty());
-        when(baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(any(), any()))
-                .thenReturn(Optional.empty());
-
+    @DisplayName("1. Prioridade 1: Deve selecionar regra ativa de campanha prioritariamente, sobrepondo taxa base de tb_basecomiss")
+    void deveSelecionarRegraAtivaPrioritariamente() {
         Regra regra = new Regra(
                 null,
                 "Regra Campanha Especial",
@@ -148,16 +124,36 @@ class TaxaComissaoResolverTest {
     }
 
     @Test
-    @DisplayName("3. Impedimento: Deve retornar impedimento quando nem basecomiss nem regra existirem")
+    @DisplayName("2. Prioridade 2: Deve selecionar taxa de tb_basecomiss como fallback quando regra ativa não existir")
+    void deveSelecionarTaxaDeBaseComissComoFallback() {
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.1000"));
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
+                eq(brand.getId()), eq(position.getId()), eq(LocalDate.of(2026, 9, 1))
+        )).thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.1000"), result.taxa());
+        assertEquals("BASE_COMISS", result.origemTaxa());
+    }
+
+    @Test
+    @DisplayName("3. Impedimento: Deve retornar impedimento quando nem regra nem basecomiss existirem")
     void deveRetornarImpedimentoQuandoTaxaNaoEncontrada() {
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
         when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
                 .thenReturn(Optional.empty());
         when(baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(any(), any()))
                 .thenReturn(Optional.empty());
         when(baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(any(), any()))
                 .thenReturn(Optional.empty());
-        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(Collections.emptyList());
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 

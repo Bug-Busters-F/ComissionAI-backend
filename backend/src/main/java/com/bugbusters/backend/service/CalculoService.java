@@ -37,7 +37,7 @@ import com.bugbusters.backend.sales.SaleRepository;
  * Serviço responsável pelo processamento do cálculo de comissões, abrangendo:
  * 1. Apuração individual de vendas persistidas (S1-B07);
  * 2. Apuração consolidada de vendas por competência mensal;
- * 3. Seleção de taxas/regras conforme S1-B08 (prioridade BaseComiss, fallback Regra);
+ * 3. Seleção de taxas/regras conforme S1-B08 (prioridade Regra ativa, fallback BaseComiss);
  * 4. Validação de vínculos essenciais (RH, marcas, lojas, cargos, vigência);
  * 5. Política rigorosa de precisão financeira decimal e arredondamento (ABNT NBR 5891 / HALF_UP);
  * 6. Proteção contra cálculos duplicados e concorrência (Idempotência);
@@ -79,7 +79,7 @@ public class CalculoService {
      * Processa o cálculo de comissão para uma venda individual persistida em S1-B07.
      *
      * Valida os vínculos essenciais (matrícula ativa, cargo, marca, loja, valor),
-     * resolve a taxa conforme S1-B08 (BaseComiss prioritária, Regra como fallback)
+     * resolve a taxa conforme S1-B08 (Regra ativa prioritária, BaseComiss como fallback)
      * e aplica a política de precisão decimal (escala 2, RoundingMode.HALF_UP).
      *
      * Persiste o resultado em tb_resultado_calculo e o log de auditoria em tb_log_calculo_imutavel (S1-B10).

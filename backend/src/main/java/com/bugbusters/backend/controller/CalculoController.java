@@ -43,7 +43,7 @@ public class CalculoController {
             description = """
                     Recebe o identificador UUID de uma venda previamente persistida (S1-B07), valida os vínculos essenciais
                     do colaborador (matrícula, vigência contratual e cargo) e seleciona a taxa de comissão conforme S1-B08
-                    (prioridade na taxa de BaseComiss por Marca+Cargo e fallback em Regra de negócio ativa).
+                    (prioridade na Regra de negócio ativa em tb_regra e fallback na taxa padrão de BaseComiss por Marca+Cargo).
                     Aplica arredondamento bancário HALF_UP com precisão decimal em BigDecimal (escala 2), persiste os resultados
                     e registra o log imutável de auditoria (S1-B10).
                     Retorna o resultado de sucesso ou o motivo contratual de impedimento.
@@ -62,7 +62,7 @@ public class CalculoController {
             description = """
                     Processa o conjunto de todas as vendas efetivadas pertencentes à competência solicitada (ex: '2026-09').
                     Para cada venda, cruza com os vínculos de RH (matrícula ativa, cargo, loja e vigência), seleciona a taxa
-                    aplicável em BaseComiss (S1-B08) ou Regra ativa, calcula a comissão com tipo decimal e precisão
+                    aplicável em Regra ativa (prioritária) ou BaseComiss (fallback), calcula a comissão com tipo decimal e precisão
                     arredondada (HALF_UP), grava resultados e logs imutáveis (S1-B10) com garantia de idempotência.
                     Retorna a consolidação do fechamento com a lista de vendas calculadas com sucesso e as vendas com impedimento.
                     """
