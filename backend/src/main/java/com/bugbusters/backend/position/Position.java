@@ -34,6 +34,10 @@ public class Position {
         return description;
     }
 
+    public void setId(UUID id) {
+        this.id = id;
+    }
+
     public void setCode(Integer code) {
         this.code = code;
     }

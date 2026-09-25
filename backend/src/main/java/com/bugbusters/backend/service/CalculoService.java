@@ -1,30 +1,48 @@
 package com.bugbusters.backend.service;
 
-import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
-import com.bugbusters.backend.dto.calculo.CalculoComissaoResponse;
-import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
-import com.bugbusters.backend.exception.BusinessException;
-import com.bugbusters.backend.model.LogCalculoImutavel;
-import com.bugbusters.backend.model.ResultadoCalculo;
-import com.bugbusters.backend.repository.LogCalculoRepository;
-import com.bugbusters.backend.repository.ResultadoCalculoRepository;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.OffsetDateTime;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
-
+import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
+import com.bugbusters.backend.dto.calculo.CalculoComissaoResponse;
+import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
+import com.bugbusters.backend.dto.calculo.CalculoImpedimentoDTO;
+import com.bugbusters.backend.dto.calculo.CalculoIndividualResponseDTO;
+import com.bugbusters.backend.dto.calculo.CalculoItemResponseDTO;
+import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
+import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.model.LogCalculoImutavel;
 import com.bugbusters.backend.model.Regra;
+import com.bugbusters.backend.model.ResultadoCalculo;
+import com.bugbusters.backend.repository.LogCalculoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
-import java.time.LocalDate;
+import com.bugbusters.backend.repository.ResultadoCalculoRepository;
+import com.bugbusters.backend.sales.Sale;
+import com.bugbusters.backend.sales.SaleRepository;
 
+/**
+ * Serviço responsável pelo processamento do cálculo de comissões, abrangendo:
+ * 1. Apuração individual de vendas persistidas (S1-B07);
+ * 2. Apuração consolidada de vendas por competência mensal;
+ * 3. Seleção de taxas/regras conforme S1-B08 (prioridade BaseComiss, fallback Regra);
+ * 4. Validação de vínculos essenciais (RH, marcas, lojas, cargos, vigência);
+ * 5. Política rigorosa de precisão financeira decimal e arredondamento (ABNT NBR 5891 / HALF_UP);
+ * 6. Proteção contra cálculos duplicados e concorrência (Idempotência);
+ * 7. Registro de logs imutáveis para auditoria financeira (S1-B10).
+ */
 @Service
 public class CalculoService {
 
@@ -35,24 +53,343 @@ public class CalculoService {
     private final ResultadoCalculoRepository resultadoCalculoRepository;
     private final LogCalculoRepository logCalculoRepository;
     private final RegraRepository regraRepository;
+    private final SaleRepository saleRepository;
+    private final TaxaComissaoResolver taxaComissaoResolver;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver) {
+        this.resultadoCalculoRepository = resultadoCalculoRepository;
+        this.logCalculoRepository = logCalculoRepository;
+        this.regraRepository = regraRepository;
+        this.saleRepository = saleRepository;
+        this.taxaComissaoResolver = taxaComissaoResolver;
+    }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
                           LogCalculoRepository logCalculoRepository,
                           RegraRepository regraRepository) {
-        this.resultadoCalculoRepository = resultadoCalculoRepository;
-        this.logCalculoRepository = logCalculoRepository;
-        this.regraRepository = regraRepository;
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null);
+    }
+
+    /**
+     * Processa o cálculo de comissão para uma venda individual persistida em S1-B07.
+     *
+     * Valida os vínculos essenciais (matrícula ativa, cargo, marca, loja, valor),
+     * resolve a taxa conforme S1-B08 (BaseComiss prioritária, Regra como fallback)
+     * e aplica a política de precisão decimal (escala 2, RoundingMode.HALF_UP).
+     *
+     * Persiste o resultado em tb_resultado_calculo e o log de auditoria em tb_log_calculo_imutavel (S1-B10).
+     * Em caso de impedimento de negócio, retorna status IMPEDIDO com o motivo contratual.
+     */
+    @Transactional
+    public CalculoIndividualResponseDTO calcularVendaIndividualPorId(UUID idVenda) {
+        if (idVenda == null) {
+            throw new BusinessException("O ID da venda é obrigatório para o cálculo individual.");
+        }
+
+        if (saleRepository == null) {
+            throw new IllegalStateException("SaleRepository não inicializado no serviço de cálculo.");
+        }
+
+        Sale sale = saleRepository.findById(idVenda)
+                .orElseThrow(() -> new BusinessException("Venda não encontrada com o ID: " + idVenda));
+
+        // 1. Verifica se já foi calculada (Idempotência)
+        Optional<ResultadoCalculo> existenteOpt = resultadoCalculoRepository.findByIdVenda(idVenda);
+        if (existenteOpt.isPresent()) {
+            ResultadoCalculo existente = existenteOpt.get();
+            if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
+                throw new BusinessException(String.format(
+                        "Solicitação rejeitada por duplicidade com dados divergentes. A venda com ID '%s' já foi calculada com valor %s (valor atual: %s).",
+                        idVenda, existente.getValorVenda(), sale.getValue()
+                ));
+            }
+            log.info("Idempotência aplicada para cálculo da venda ID {}: retornando resultado prévio.", idVenda);
+            return CalculoIndividualResponseDTO.sucesso(
+                    existente.getProtocoloCalculo(),
+                    existente.getIdVenda(),
+                    existente.getMatricula(),
+                    existente.getCodCargo(),
+                    existente.getCodMarca(),
+                    existente.getCodLoja(),
+                    existente.getDataVenda(),
+                    existente.getValorVenda(),
+                    existente.getTaxaAplicada(),
+                    existente.getValorComissao(),
+                    existente.getRegraId(),
+                    "BASE_COMISS",
+                    existente.getCalculadoEm()
+            );
+        }
+
+        // 2. Valida vínculos essenciais e seleciona taxa (S1-B08)
+        ResolucaoTaxaResult resolucao = taxaComissaoResolver != null
+                ? taxaComissaoResolver.resolverTaxa(sale)
+                : ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
+
+        if (!resolucao.sucesso()) {
+            String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
+            log.warn("Impedimento detectado no cálculo da venda ID {}: {}", idVenda, resolucao.motivoImpedimento());
+            return CalculoIndividualResponseDTO.impedido(
+                    idVenda,
+                    matricula,
+                    sale.getSaleDate(),
+                    sale.getValue(),
+                    resolucao.motivoImpedimento()
+            );
+        }
+
+        BigDecimal taxaAplicada = resolucao.taxa();
+        Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
+        garantirRegraPadraoExistente(idRegra, taxaAplicada);
+
+        // 3. Aplica percentual básico com precisão decimal e arredondamento HALF_UP
+        BigDecimal comissao = sale.getValue().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
+        UUID protocolo = UUID.randomUUID();
+
+        Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
+                ? sale.getRegistration().getPosition().getCode() : null;
+        Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
+        Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : null;
+        String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
+
+        ResultadoCalculo novoResultado = new ResultadoCalculo(
+                protocolo,
+                idVenda,
+                matricula,
+                codMarca,
+                codLoja,
+                codCargo,
+                idRegra,
+                sale.getSaleDate(),
+                sale.getValue(),
+                taxaAplicada,
+                comissao,
+                "INDIVIDUAL"
+        );
+
+        ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
+
+        // 4. Log imutável de auditoria (S1-B10)
+        LogCalculoImutavel logImutavel = new LogCalculoImutavel(
+                salvo.getProtocoloCalculo(),
+                idVenda,
+                matricula,
+                codCargo,
+                codLoja,
+                codMarca,
+                sale.getValue(),
+                taxaAplicada,
+                comissao,
+                idRegra,
+                sale.getSaleDate(),
+                sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
+                "MOTOR_PRODUCAO"
+        );
+        logCalculoRepository.save(logImutavel);
+
+        return CalculoIndividualResponseDTO.sucesso(
+                salvo.getProtocoloCalculo(),
+                idVenda,
+                matricula,
+                codCargo,
+                codMarca,
+                codLoja,
+                sale.getSaleDate(),
+                sale.getValue(),
+                taxaAplicada,
+                comissao,
+                idRegra,
+                resolucao.origemTaxa(),
+                salvo.getCalculadoEm()
+        );
+    }
+
+    /**
+     * Processa o cálculo de comissões para todo o conjunto de vendas efetivadas da competência (mês/ano).
+     *
+     * Identifica as vendas no intervalo da competência, valida os vínculos essenciais (S1-B08),
+     * aplica o percentual básico/regra com precisão decimal e política de arredondamento HALF_UP,
+     * persiste entradas, resultados e logs imutáveis (S1-B10) e retorna a lista consolidada de sucessos e impedimentos.
+     */
+    @Transactional
+    public CalculoCompetenciaResponseDTO calcularPorCompetencia(String competenciaStr) {
+        if (competenciaStr == null || competenciaStr.isBlank()) {
+            throw new BusinessException("A competência é obrigatória para o cálculo em lote.");
+        }
+
+        if (saleRepository == null) {
+            throw new IllegalStateException("SaleRepository não inicializado no serviço de cálculo.");
+        }
+
+        YearMonth ym;
+        try {
+            if (competenciaStr.length() == 7) {
+                ym = YearMonth.parse(competenciaStr);
+            } else {
+                ym = YearMonth.from(LocalDate.parse(competenciaStr));
+            }
+        } catch (Exception e) {
+            throw new BusinessException("Formato de competência inválido: '" + competenciaStr + "'. Utilize YYYY-MM ou YYYY-MM-DD.");
+        }
+
+        LocalDate inicio = ym.atDay(1);
+        LocalDate fim = ym.atEndOfMonth();
+
+        List<Sale> vendas = saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(inicio, fim);
+
+        List<CalculoItemResponseDTO> sucessos = new ArrayList<>();
+        List<CalculoImpedimentoDTO> impedimentos = new ArrayList<>();
+        BigDecimal totalVendasCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalComissoesCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+
+        for (Sale sale : vendas) {
+            UUID idVenda = sale.getId();
+            String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
+
+            // 1. Verifica vínculos e taxa
+            ResolucaoTaxaResult resolucao = taxaComissaoResolver != null
+                    ? taxaComissaoResolver.resolverTaxa(sale)
+                    : ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
+
+            if (!resolucao.sucesso()) {
+                impedimentos.add(new CalculoImpedimentoDTO(
+                        idVenda,
+                        matricula,
+                        sale.getSaleDate(),
+                        sale.getValue(),
+                        resolucao.motivoImpedimento()
+                ));
+                continue;
+            }
+
+            // 2. Idempotência por venda
+            Optional<ResultadoCalculo> existenteOpt = Optional.empty();
+            if (idVenda != null) {
+                existenteOpt = resultadoCalculoRepository.findByIdVenda(idVenda);
+            }
+
+            if (existenteOpt.isPresent()) {
+                ResultadoCalculo existente = existenteOpt.get();
+                if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
+                    impedimentos.add(new CalculoImpedimentoDTO(
+                            idVenda,
+                            matricula,
+                            sale.getSaleDate(),
+                            sale.getValue(),
+                            String.format("Venda com ID '%s' possui dados divergentes de cálculo prévio (anterior: %s, atual: %s)",
+                                    idVenda, existente.getValorVenda(), sale.getValue())
+                    ));
+                    continue;
+                }
+
+                CalculoItemResponseDTO item = new CalculoItemResponseDTO(
+                        existente.getProtocoloCalculo(),
+                        existente.getIdVenda(),
+                        existente.getMatricula(),
+                        existente.getCodCargo(),
+                        existente.getCodMarca(),
+                        existente.getCodLoja(),
+                        existente.getDataVenda(),
+                        existente.getValorVenda(),
+                        existente.getTaxaAplicada(),
+                        existente.getValorComissao(),
+                        existente.getRegraId(),
+                        resolucao.origemTaxa(),
+                        existente.getCalculadoEm()
+                );
+                sucessos.add(item);
+                totalVendasCalculadas = totalVendasCalculadas.add(existente.getValorVenda());
+                totalComissoesCalculadas = totalComissoesCalculadas.add(existente.getValorComissao());
+                continue;
+            }
+
+            // 3. Efetua novo cálculo
+            BigDecimal taxaAplicada = resolucao.taxa();
+            Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
+            garantirRegraPadraoExistente(idRegra, taxaAplicada);
+
+            BigDecimal comissao = sale.getValue().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
+            UUID protocolo = UUID.randomUUID();
+
+            Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
+                    ? sale.getRegistration().getPosition().getCode() : null;
+            Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
+            Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : null;
+
+            ResultadoCalculo novoResultado = new ResultadoCalculo(
+                    protocolo,
+                    idVenda,
+                    matricula,
+                    codMarca,
+                    codLoja,
+                    codCargo,
+                    idRegra,
+                    sale.getSaleDate(),
+                    sale.getValue(),
+                    taxaAplicada,
+                    comissao,
+                    "COMPETENCIA"
+            );
+
+            ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
+
+            LogCalculoImutavel logImutavel = new LogCalculoImutavel(
+                    salvo.getProtocoloCalculo(),
+                    idVenda,
+                    matricula,
+                    codCargo,
+                    codLoja,
+                    codMarca,
+                    sale.getValue(),
+                    taxaAplicada,
+                    comissao,
+                    idRegra,
+                    sale.getSaleDate(),
+                    sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
+                    "MOTOR_PRODUCAO"
+            );
+            logCalculoRepository.save(logImutavel);
+
+            CalculoItemResponseDTO item = new CalculoItemResponseDTO(
+                    salvo.getProtocoloCalculo(),
+                    idVenda,
+                    matricula,
+                    codCargo,
+                    codMarca,
+                    codLoja,
+                    sale.getSaleDate(),
+                    sale.getValue(),
+                    taxaAplicada,
+                    comissao,
+                    idRegra,
+                    resolucao.origemTaxa(),
+                    salvo.getCalculadoEm()
+            );
+            sucessos.add(item);
+            totalVendasCalculadas = totalVendasCalculadas.add(sale.getValue());
+            totalComissoesCalculadas = totalComissoesCalculadas.add(comissao);
+        }
+
+        return new CalculoCompetenciaResponseDTO(
+                competenciaStr,
+                vendas.size(),
+                sucessos.size(),
+                impedimentos.size(),
+                totalVendasCalculadas,
+                totalComissoesCalculadas,
+                sucessos,
+                impedimentos
+        );
     }
 
     /**
      * Processa o cálculo de comissão garantindo proteção contra cálculo duplicado (idempotência).
-     *
-     * Regras aplicadas:
-     * 1. Se a mesma venda (por UUID idVenda ou chave de negócio matrícula + dataVenda + regraId)
-     *    já foi calculada com dados idênticos, retorna o resultado pré-existente sem gerar novos cálculos e sem novos logs.
-     * 2. Se a mesma venda for reenviada com dados divergentes (ex: valor da venda diferente),
-     *    rejeita a operação com BusinessException.
-     * 3. Trata concorrência para impedir duplicidade via constraints e transações.
+     * Mantido para compatibilidade integral com chamadas avulsas e contratos legados.
      */
     @Transactional
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
@@ -128,7 +465,6 @@ public class CalculoService {
         } catch (DataIntegrityViolationException ex) {
             log.warn("Violação de integridade por concorrência detectada para venda/matrícula {}. Recuperando cálculo existente.",
                     request.matricula());
-            // Concorrência: outra thread salvou no mesmo instante; recupera e valida idempotência
             ResultadoCalculo concorrente;
             if (request.idVenda() != null) {
                 concorrente = resultadoCalculoRepository.findByIdVenda(request.idVenda())
@@ -146,7 +482,6 @@ public class CalculoService {
     }
 
     private CalculoComissaoResponse tratarResultadoExistente(CalculoComissaoRequest request, ResultadoCalculo existente) {
-        // Valida se os dados da venda são idênticos aos gravados anteriormente
         if (request.valorVenda().compareTo(existente.getValorVenda()) != 0) {
             String identificador = request.idVenda() != null
                     ? "ID '" + request.idVenda() + "'"
