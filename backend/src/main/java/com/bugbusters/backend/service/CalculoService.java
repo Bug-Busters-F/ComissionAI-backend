@@ -583,7 +583,6 @@ public class CalculoService {
                     LocalDate.of(2020, 1, 1),
                     LocalDate.of(2035, 12, 31)
             );
-            defaultRegra.setId(idRegra);
             regraRepository.save(defaultRegra);
         }
     }
