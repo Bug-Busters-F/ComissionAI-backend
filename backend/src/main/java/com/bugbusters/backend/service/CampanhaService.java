@@ -7,6 +7,7 @@ import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Campanha;
+import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.RegraRepository;
@@ -32,12 +33,14 @@ public class CampanhaService {
     public CampanhaResponse criarCampanha(CampanhaRequest request) {
         PeriodoCalculado periodo = calcularEValidarPeriodo(request.dataInicio(), request.dataFim());
 
+        EstadoCampanha estadoInicial = request.estado() != null ? request.estado() : EstadoCampanha.DRAFT;
+
         Campanha campanha = new Campanha();
         campanha.setTitulo(request.titulo());
         campanha.setTextoOriginal(request.textoOriginal());
         campanha.setDataInicio(periodo.inicio());
         campanha.setDataFim(periodo.fim());
-        campanha.setEstado("DRAFT"); // Salvar proposta estritamente como rascunho sem ativação automática
+        campanha.setEstado(estadoInicial);
 
         Campanha campanhaSalva = campanhaRepository.save(campanha);
 
@@ -54,7 +57,7 @@ public class CampanhaService {
         regra.setTaxa(request.taxa());
         regra.setDataInicio(periodo.inicio());
         regra.setDataFim(periodo.fim());
-        regra.setStatus(StatusRegra.DRAFT);
+        regra.setStatus(mapearEstadoParaStatusRegra(estadoInicial));
 
         Regra regraSalva = regraRepository.save(regra);
 
@@ -63,7 +66,16 @@ public class CampanhaService {
 
     @Transactional(readOnly = true)
     public List<CampanhaResponse> listarAtivas() {
-        return campanhaRepository.findAllByRemovidoEmIsNullOrderByCriadoEmDesc().stream()
+        return listar(EstadoCampanha.ATIVA);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CampanhaResponse> listar(EstadoCampanha estado) {
+        List<Campanha> campanhas = (estado != null)
+                ? campanhaRepository.findAllByEstadoAndRemovidoEmIsNullOrderByCriadoEmDesc(estado)
+                : campanhaRepository.findAllByRemovidoEmIsNullOrderByCriadoEmDesc();
+
+        return campanhas.stream()
                 .map(campanha -> {
                     Regra regra = regraRepository.findByCampanhaIdAndRemovidoEmIsNull(campanha.getId())
                             .orElse(null);
@@ -84,6 +96,24 @@ public class CampanhaService {
     }
 
     @Transactional
+    public CampanhaResponse alterarEstado(Long id, EstadoCampanha novoEstado) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
+
+        campanha.setEstado(novoEstado);
+        campanha.setAtualizadoEm(OffsetDateTime.now());
+        Campanha campanhaAtualizada = campanhaRepository.save(campanha);
+
+        Regra regraAtualizada = regraRepository.findByCampanhaIdAndRemovidoEmIsNull(id).map(regra -> {
+            regra.setStatus(mapearEstadoParaStatusRegra(novoEstado));
+            regra.setAtualizadoEm(OffsetDateTime.now());
+            return regraRepository.save(regra);
+        }).orElse(null);
+
+        return mapearParaResponse(campanhaAtualizada, regraAtualizada);
+    }
+
+    @Transactional
     public CampanhaResponse atualizarCampanha(Long id, CampanhaRequest request) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
@@ -94,6 +124,9 @@ public class CampanhaService {
         campanha.setTextoOriginal(request.textoOriginal());
         campanha.setDataInicio(periodo.inicio());
         campanha.setDataFim(periodo.fim());
+        if (request.estado() != null) {
+            campanha.setEstado(request.estado());
+        }
         campanha.setAtualizadoEm(OffsetDateTime.now());
 
         Campanha campanhaAtualizada = campanhaRepository.save(campanha);
@@ -102,7 +135,7 @@ public class CampanhaService {
                 .orElseGet(() -> {
                     Regra novaRegra = new Regra();
                     novaRegra.setCampanha(campanhaAtualizada);
-                    novaRegra.setStatus(StatusRegra.DRAFT);
+                    novaRegra.setStatus(mapearEstadoParaStatusRegra(campanhaAtualizada.getEstado()));
                     return novaRegra;
                 });
 
@@ -117,6 +150,9 @@ public class CampanhaService {
         regra.setTaxa(request.taxa());
         regra.setDataInicio(periodo.inicio());
         regra.setDataFim(periodo.fim());
+        if (request.estado() != null) {
+            regra.setStatus(mapearEstadoParaStatusRegra(request.estado()));
+        }
         regra.setAtualizadoEm(OffsetDateTime.now());
         
         Regra regraAtualizada = regraRepository.save(regra);
@@ -131,6 +167,7 @@ public class CampanhaService {
 
         OffsetDateTime agora = OffsetDateTime.now();
         campanha.setRemovidoEm(agora);
+        campanha.setEstado(EstadoCampanha.CANCELADA);
         campanhaRepository.save(campanha);
 
         regraRepository.findByCampanhaIdAndRemovidoEmIsNull(id).ifPresent(regra -> {
@@ -138,6 +175,17 @@ public class CampanhaService {
             regra.setStatus(StatusRegra.INATIVA);
             regraRepository.save(regra);
         });
+    }
+
+    private StatusRegra mapearEstadoParaStatusRegra(EstadoCampanha estado) {
+        if (estado == null) {
+            return StatusRegra.DRAFT;
+        }
+        return switch (estado) {
+            case ATIVA -> StatusRegra.ATIVA;
+            case DRAFT -> StatusRegra.DRAFT;
+            case INATIVA, CONCLUIDA, CANCELADA -> StatusRegra.INATIVA;
+        };
     }
 
     private PeriodoCalculado calcularEValidarPeriodo(LocalDate inicioInformado, LocalDate fimInformado) {

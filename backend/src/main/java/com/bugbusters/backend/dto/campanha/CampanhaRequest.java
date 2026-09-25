@@ -1,5 +1,6 @@
 package com.bugbusters.backend.dto.campanha;
 
+import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.model.Marca;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -48,7 +49,10 @@ public record CampanhaRequest(
         LocalDate dataInicio,
 
         @Schema(description = "Data final da vigência. Se ausente, aplica-se automaticamente 30 dias a partir da data atual.", example = "2026-10-31")
-        LocalDate dataFim
+        LocalDate dataFim,
+
+        @Schema(description = "Estado da campanha (opcional na criação/edição)", example = "ATIVA")
+        EstadoCampanha estado
 ) {
     public CampanhaRequest {
         if (descrMarca != null && !descrMarca.isBlank()) {
@@ -61,13 +65,19 @@ public record CampanhaRequest(
         }
     }
 
+    public CampanhaRequest(String titulo, String textoOriginal, String canal, Integer codMarca, String descrMarca,
+                           Integer codLoja, Integer codCargo, String descriCargo, String matricula,
+                           BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim) {
+        this(titulo, textoOriginal, canal, codMarca, descrMarca, codLoja, codCargo, descriCargo, matricula, taxa, dataInicio, dataFim, null);
+    }
+
     public CampanhaRequest(String titulo, String textoOriginal, String canal, BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim) {
-        this(titulo, textoOriginal, canal, null, null, null, null, null, null, taxa, dataInicio, dataFim);
+        this(titulo, textoOriginal, canal, null, null, null, null, null, null, taxa, dataInicio, dataFim, null);
     }
 
     public CampanhaRequest(String titulo, String textoOriginal, String canal, Integer codMarca,
                            Integer codLoja, Integer codCargo, String descriCargo, String matricula,
                            BigDecimal taxa, LocalDate dataInicio, LocalDate dataFim) {
-        this(titulo, textoOriginal, canal, codMarca, null, codLoja, codCargo, descriCargo, matricula, taxa, dataInicio, dataFim);
+        this(titulo, textoOriginal, canal, codMarca, null, codLoja, codCargo, descriCargo, matricula, taxa, dataInicio, dataFim, null);
     }
 }

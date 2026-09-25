@@ -1,8 +1,10 @@
 package com.bugbusters.backend.controller;
 
+import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
+import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.service.CampanhaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -41,10 +43,22 @@ public class CampanhaController {
         return ResponseEntity.created(uri).body(response);
     }
 
-    @Operation(summary = "Listar todas as campanhas ativas (não removidas)")
+    @Operation(summary = "Listar campanhas", description = "Lista todas as campanhas cadastradas não removidas, com filtro opcional por estado (DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA).")
     @GetMapping
-    public ResponseEntity<List<CampanhaResponse>> listarCampanhas() {
-        return ResponseEntity.ok(campanhaService.listarAtivas());
+    public ResponseEntity<List<CampanhaResponse>> listarCampanhas(
+            @RequestParam(required = false) EstadoCampanha estado) {
+        return ResponseEntity.ok(campanhaService.listar(estado));
+    }
+
+    @Operation(summary = "Alterar estado da campanha", description = "Transiciona o estado da campanha para qualquer um dos valores: DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA e sincroniza a regra vinculada.")
+    @ApiResponse(responseCode = "200", description = "Estado alterado com sucesso")
+    @ApiResponse(responseCode = "400", description = "Estado inválido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada ou excluída", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PatchMapping("/{id}/estado")
+    public ResponseEntity<CampanhaResponse> alterarEstado(
+            @PathVariable Long id,
+            @Valid @RequestBody AlterarEstadoCampanhaRequest request) {
+        return ResponseEntity.ok(campanhaService.alterarEstado(id, request.estado()));
     }
 
     @Operation(summary = "Consultar detalhe da campanha por ID")

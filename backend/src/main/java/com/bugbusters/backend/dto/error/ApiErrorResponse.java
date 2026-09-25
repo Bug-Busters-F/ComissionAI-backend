@@ -19,7 +19,7 @@ public record ApiErrorResponse(
     @Schema(description = "Mensagem amigável de orientação", example = "Dados de entrada inválidos.")
     String message,
 
-    @Schema(description = "Caminho da URI que gerou o erro", example = "/api/v1/regras")
+    @Schema(description = "Caminho da URI que gerou o erro", example = "/api/v1/campanhas")
     String path,
     
     @Schema(description = "Detalhamento por campo (quando houver falhas de validação)")
