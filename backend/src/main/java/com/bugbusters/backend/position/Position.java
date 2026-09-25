@@ -10,7 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 @Entity 
-@Table (name = "tb_position ")
+@Table(name = "tb_position")
 public class Position {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -34,6 +34,10 @@ public class Position {
 
     public String getDescription() {
         return description;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
     }
 
     public void setCode(Integer code) {

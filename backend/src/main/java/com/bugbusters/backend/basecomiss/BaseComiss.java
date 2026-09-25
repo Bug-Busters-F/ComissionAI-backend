@@ -32,7 +32,7 @@ public class BaseComiss {
     @JoinColumn(name = "position_id", nullable = false)
     private Position position;
 
-    @Column(nullable = false, precision = 5, scale = 2)
+    @Column(nullable = false, precision = 6, scale = 4)
     private BigDecimal percentage;
 
     @Column(nullable = false)
