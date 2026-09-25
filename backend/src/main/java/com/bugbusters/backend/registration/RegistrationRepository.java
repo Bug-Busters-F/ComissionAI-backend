@@ -7,4 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface RegistrationRepository extends JpaRepository<Registration, UUID> {
     public Optional<Registration> findByRegistration(String registration);
+
+    boolean existsByStoreId(UUID storeId);
+
+    boolean existsByPositionId(UUID positionId);
 }

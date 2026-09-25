@@ -17,19 +17,19 @@ public class Sale {
     @Id
     private UUID id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "registration_id", nullable = false)
     private Registration registration;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id", nullable = false)
     private Store store;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id", nullable = false)
     private Brand brand;
 
-    @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
+    @Column(name = "sale_value", nullable = false, precision = 15, scale = 2)
     private BigDecimal value;
 
     @Column(nullable = false)
