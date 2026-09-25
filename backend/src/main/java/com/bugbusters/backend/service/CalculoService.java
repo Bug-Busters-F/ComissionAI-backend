@@ -109,6 +109,9 @@ public class CalculoService {
                 ));
             }
             log.info("Idempotência aplicada para cálculo da venda ID {}: retornando resultado prévio.", idVenda);
+            String origemTaxa = (existente.getRegraId() != null && !existente.getRegraId().equals(REGRA_PADRAO_ID))
+                    ? "REGRA_NEGOCIO"
+                    : "BASE_COMISS";
             return CalculoIndividualResponseDTO.sucesso(
                     existente.getProtocoloCalculo(),
                     existente.getIdVenda(),
@@ -121,7 +124,7 @@ public class CalculoService {
                     existente.getTaxaAplicada(),
                     existente.getValorComissao(),
                     existente.getRegraId(),
-                    "BASE_COMISS",
+                    origemTaxa,
                     existente.getCalculadoEm()
             );
         }
@@ -172,41 +175,74 @@ public class CalculoService {
                 "INDIVIDUAL"
         );
 
-        ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
+        try {
+            ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
 
-        // 4. Log imutável de auditoria (S1-B10)
-        LogCalculoImutavel logImutavel = new LogCalculoImutavel(
-                salvo.getProtocoloCalculo(),
-                idVenda,
-                matricula,
-                codCargo,
-                codLoja,
-                codMarca,
-                sale.getValue(),
-                taxaAplicada,
-                comissao,
-                idRegra,
-                sale.getSaleDate(),
-                sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
-                "MOTOR_PRODUCAO"
-        );
-        logCalculoRepository.save(logImutavel);
+            // 4. Log imutável de auditoria (S1-B10)
+            LogCalculoImutavel logImutavel = new LogCalculoImutavel(
+                    salvo.getProtocoloCalculo(),
+                    idVenda,
+                    matricula,
+                    codCargo,
+                    codLoja,
+                    codMarca,
+                    sale.getValue(),
+                    taxaAplicada,
+                    comissao,
+                    idRegra,
+                    sale.getSaleDate(),
+                    sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
+                    "MOTOR_PRODUCAO"
+            );
+            logCalculoRepository.save(logImutavel);
 
-        return CalculoIndividualResponseDTO.sucesso(
-                salvo.getProtocoloCalculo(),
-                idVenda,
-                matricula,
-                codCargo,
-                codMarca,
-                codLoja,
-                sale.getSaleDate(),
-                sale.getValue(),
-                taxaAplicada,
-                comissao,
-                idRegra,
-                resolucao.origemTaxa(),
-                salvo.getCalculadoEm()
-        );
+            return CalculoIndividualResponseDTO.sucesso(
+                    salvo.getProtocoloCalculo(),
+                    idVenda,
+                    matricula,
+                    codCargo,
+                    codMarca,
+                    codLoja,
+                    sale.getSaleDate(),
+                    sale.getValue(),
+                    taxaAplicada,
+                    comissao,
+                    idRegra,
+                    resolucao.origemTaxa(),
+                    salvo.getCalculadoEm()
+            );
+        } catch (DataIntegrityViolationException ex) {
+            log.warn("Violação de integridade por concorrência detectada para cálculo da venda ID {}. Recuperando resultado existente.", idVenda);
+            ResultadoCalculo concorrente = resultadoCalculoRepository.findByIdVenda(idVenda)
+                    .orElseThrow(() -> ex);
+
+            if (sale.getValue().compareTo(concorrente.getValorVenda()) != 0) {
+                throw new BusinessException(String.format(
+                        "Solicitação rejeitada por duplicidade com dados divergentes. A venda com ID '%s' já foi calculada com valor %s (valor atual: %s).",
+                        idVenda, concorrente.getValorVenda(), sale.getValue()
+                ));
+            }
+
+            String origemTaxa = (concorrente.getRegraId() != null && !concorrente.getRegraId().equals(REGRA_PADRAO_ID))
+                    ? "REGRA_NEGOCIO"
+                    : "BASE_COMISS";
+
+            return CalculoIndividualResponseDTO.sucesso(
+                    concorrente.getProtocoloCalculo(),
+                    concorrente.getIdVenda(),
+                    concorrente.getMatricula(),
+                    concorrente.getCodCargo(),
+                    concorrente.getCodMarca(),
+                    concorrente.getCodLoja(),
+                    concorrente.getDataVenda(),
+                    concorrente.getValorVenda(),
+                    concorrente.getTaxaAplicada(),
+                    concorrente.getValorComissao(),
+                    concorrente.getRegraId(),
+                    origemTaxa,
+                    concorrente.getCalculadoEm()
+            );
+        }
     }
 
     /**

@@ -346,6 +346,67 @@ class CalculoServiceTest {
     }
 
     @Test
+    @DisplayName("7.1. Deve tratar concorrência em cálculo individual via DataIntegrityViolationException")
+    void deveTratarConcorrenciaEmCalculoIndividual() {
+        UUID id = UUID.randomUUID();
+        Sale sale = new Sale();
+        sale.setId(id);
+        sale.setValue(new BigDecimal("1000.00"));
+        sale.setSaleDate(LocalDate.of(2026, 9, 15));
+
+        Brand brand = new Brand();
+        brand.setCode(10);
+        sale.setBrand(brand);
+
+        Store store = new Store();
+        store.setCode(75);
+        sale.setStore(store);
+
+        Position pos = new Position();
+        pos.setCode(100);
+
+        Registration reg = new Registration();
+        reg.setRegistration("MATRIC-1");
+        reg.setPosition(pos);
+        sale.setRegistration(reg);
+
+        ResultadoCalculo calculoConcorrente = new ResultadoCalculo(
+                UUID.randomUUID(),
+                id,
+                "MATRIC-1",
+                10,
+                75,
+                100,
+                1L,
+                LocalDate.of(2026, 9, 15),
+                new BigDecimal("1000.00"),
+                new BigDecimal("0.1000"),
+                new BigDecimal("100.00"),
+                "INDIVIDUAL"
+        );
+
+        when(saleRepository.findById(id)).thenReturn(Optional.of(sale));
+        when(resultadoCalculoRepository.findByIdVenda(id))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(calculoConcorrente));
+
+        when(taxaComissaoResolver.resolverTaxa(sale))
+                .thenReturn(ResolucaoTaxaResult.sucesso(new BigDecimal("0.1000"), 1L, "BASE_COMISS"));
+
+        when(resultadoCalculoRepository.save(any(ResultadoCalculo.class)))
+                .thenThrow(new DataIntegrityViolationException("Duplicate key error"));
+
+        CalculoIndividualResponseDTO response = calculoService.calcularVendaIndividualPorId(id);
+
+        assertNotNull(response);
+        assertEquals("SUCESSO", response.status());
+        assertEquals(calculoConcorrente.getProtocoloCalculo(), response.protocoloCalculo());
+        assertEquals(new BigDecimal("100.00"), response.valorComissao());
+
+        verify(logCalculoRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("8. Deve retornar status IMPEDIDO com motivo contratual quando taxa ou vínculo não forem localizados")
     void deveRetornarStatusImpedidoQuandoHouverImpedimento() {
         UUID id = UUID.randomUUID();

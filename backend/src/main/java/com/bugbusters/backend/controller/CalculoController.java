@@ -50,8 +50,7 @@ public class CalculoController {
                     """
     )
     @ApiResponse(responseCode = "200", description = "Venda processada (status SUCESSO ou IMPEDIDO)")
-    @ApiResponse(responseCode = "400", description = "ID da venda inválido ou divergente de apuração prévia", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
-    @ApiResponse(responseCode = "404", description = "Venda não encontrada com o UUID informado", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "ID da venda inválido, não encontrada ou divergente de apuração prévia", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping("/comissoes/calcular/venda/{id}")
     public ResponseEntity<CalculoIndividualResponseDTO> calcularVendaIndividual(@PathVariable("id") UUID id) {
         CalculoIndividualResponseDTO response = calculoService.calcularVendaIndividualPorId(id);

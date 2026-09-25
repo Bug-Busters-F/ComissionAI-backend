@@ -8,6 +8,9 @@
 -- apenas para requisições legadas onde id_venda é NULL.
 -- =============================================================================
 
+ALTER TABLE tb_resultado_calculo ADD COLUMN IF NOT EXISTS id_venda UUID;
+ALTER TABLE tb_log_calculo_imutavel ADD COLUMN IF NOT EXISTS id_venda UUID;
+
 DROP INDEX IF EXISTS uk_resultado_calculo_venda_regra;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_resultado_calculo_venda_regra_sem_id 
