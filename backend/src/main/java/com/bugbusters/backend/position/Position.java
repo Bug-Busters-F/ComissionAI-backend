@@ -22,6 +22,8 @@ public class Position {
     @Column(nullable = false)
     private String description;
 
+    
+
     public UUID getId() {
         return id;
     }
