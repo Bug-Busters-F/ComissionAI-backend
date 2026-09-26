@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -29,6 +30,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
 import com.bugbusters.backend.dto.calculo.CalculoComissaoResponse;
@@ -36,6 +43,7 @@ import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoIndividualResponseDTO;
 import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
 import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.LogCalculoImutavel;
 import com.bugbusters.backend.model.ResultadoCalculo;
 import com.bugbusters.backend.position.Position;
@@ -500,5 +508,132 @@ class CalculoServiceTest {
     @DisplayName("10. Deve rejeitar competência em formato inválido com BusinessException")
     void deveRejeitarCompetenciaInvalida() {
         assertThrows(BusinessException.class, () -> calculoService.calcularPorCompetencia("invalido"));
+    }
+
+    // ==========================================
+    // Testes de Auditoria e Logs (feat/logs)
+    // ==========================================
+    @Test
+    @DisplayName("11. Deve retornar lista vazia legítima sem dados mock quando não houver registros")
+    void deveRetornarListaVaziaSemMock() {
+        when(logCalculoRepository.findAllByOrderByExecutadoEmDesc()).thenReturn(List.of());
+
+        List<LogCalculoResponse> logs = calculoService.listarLogs();
+
+        assertNotNull(logs);
+        assertTrue(logs.isEmpty());
+    }
+
+    @Test
+    @DisplayName("12. Deve listar logs paginados aplicando especificação e parâmetros de paginação")
+    @SuppressWarnings("unchecked")
+    void deveListarLogsPaginadosComSucesso() {
+        LogCalculoImutavel log = new LogCalculoImutavel(
+                UUID.randomUUID(),
+                ID_VENDA,
+                MATRICULA,
+                150,
+                75,
+                10,
+                VALOR_VENDA,
+                new BigDecimal("0.1000"),
+                new BigDecimal("100.00"),
+                1L,
+                DATA_VENDA,
+                "ECOMMERCE",
+                "MOTOR_PRODUCAO"
+        );
+
+        Pageable pageable = PageRequest.of(0, 10);
+        Page<LogCalculoImutavel> pagedResult = new PageImpl<>(List.of(log), pageable, 1);
+
+        when(logCalculoRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(pagedResult);
+
+        Page<LogCalculoResponse> resultado = calculoService.listarLogs(
+                ID_VENDA, MATRICULA, 1L, DATA_VENDA.minusDays(5), DATA_VENDA.plusDays(5), pageable
+        );
+
+        assertNotNull(resultado);
+        assertEquals(1, resultado.getTotalElements());
+        assertEquals(1, resultado.getContent().size());
+        LogCalculoResponse response = resultado.getContent().get(0);
+        assertEquals(MATRICULA, response.matricula());
+        assertEquals(ID_VENDA, response.idVenda());
+        assertEquals(1L, response.idRegra());
+        assertEquals(10, response.codMarca());
+        assertEquals(75, response.codLoja());
+        assertEquals(150, response.codCargo());
+        assertEquals(VALOR_VENDA, response.valorVenda());
+        assertEquals(new BigDecimal("100.00"), response.valorComissao());
+    }
+
+    @Test
+    @DisplayName("13. Deve rejeitar período inválido com BusinessException quando dataInicio for posterior a dataFim")
+    void deveRejeitarPeriodoInvalido() {
+        Pageable pageable = PageRequest.of(0, 10);
+        LocalDate inicio = LocalDate.of(2026, 12, 31);
+        LocalDate fim = LocalDate.of(2026, 12, 1);
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                calculoService.listarLogs(null, null, null, inicio, fim, pageable)
+        );
+
+        assertTrue(ex.getMessage().contains("Data de início não pode ser posterior"));
+    }
+
+    @Test
+    @DisplayName("14. Deve buscar log por identificador existente retornando todos os dados preservados")
+    void deveBuscarLogPorIdExistente() {
+        UUID idLog = UUID.randomUUID();
+        LogCalculoImutavel log = new LogCalculoImutavel(
+                UUID.randomUUID(),
+                ID_VENDA,
+                MATRICULA,
+                150,
+                75,
+                10,
+                VALOR_VENDA,
+                new BigDecimal("0.1000"),
+                new BigDecimal("100.00"),
+                1L,
+                DATA_VENDA,
+                "ECOMMERCE",
+                "MOTOR_PRODUCAO"
+        );
+
+        when(logCalculoRepository.findById(idLog)).thenReturn(Optional.of(log));
+
+        LogCalculoResponse response = calculoService.buscarPorId(idLog);
+
+        assertNotNull(response);
+        assertEquals(log.getId(), response.idLog());
+        assertEquals(log.getProtocolo(), response.protocolo());
+        assertEquals(ID_VENDA, response.idVenda());
+        assertEquals(MATRICULA, response.matricula());
+        assertEquals(150, response.codCargo());
+        assertEquals(75, response.codLoja());
+        assertEquals(10, response.codMarca());
+        assertEquals(VALOR_VENDA, response.valorVenda());
+        assertEquals(new BigDecimal("0.1000"), response.taxaAplicada());
+        assertEquals(new BigDecimal("100.00"), response.valorComissao());
+        assertEquals(1L, response.idRegra());
+        assertEquals(DATA_VENDA, response.dataVenda());
+        assertEquals("ECOMMERCE", response.canal());
+        assertEquals("MOTOR_PRODUCAO", response.origemExecucao());
+        assertEquals("SISTEMA", response.usuarioExecutor());
+    }
+
+    @Test
+    @DisplayName("15. Deve lançar ResourceNotFoundException quando buscar log com identificador inexistente")
+    void deveLancarResourceNotFoundQuandoBuscarIdInexistente() {
+        UUID idInexistente = UUID.randomUUID();
+        when(logCalculoRepository.findById(idInexistente)).thenReturn(Optional.empty());
+
+        ResourceNotFoundException ex = assertThrows(ResourceNotFoundException.class, () ->
+                calculoService.buscarPorId(idInexistente)
+        );
+
+        assertTrue(ex.getMessage().contains("Log de cálculo não encontrado"));
+        assertTrue(ex.getMessage().contains(idInexistente.toString()));
     }
 }

@@ -16,6 +16,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+
 import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
 import com.bugbusters.backend.dto.calculo.CalculoComissaoResponse;
 import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
@@ -24,10 +28,12 @@ import com.bugbusters.backend.dto.calculo.CalculoIndividualResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoItemResponseDTO;
 import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
 import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.LogCalculoImutavel;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.model.ResultadoCalculo;
 import com.bugbusters.backend.repository.LogCalculoRepository;
+import com.bugbusters.backend.repository.LogCalculoSpecification;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.ResultadoCalculoRepository;
 import com.bugbusters.backend.sales.Sale;
@@ -429,10 +435,9 @@ public class CalculoService {
      */
     @Transactional
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
-        Long idRegra = REGRA_PADRAO_ID;
+        Regra regraAplicada = garantirRegraPadraoExistente(REGRA_PADRAO_ID, TAXA_PADRAO);
+        Long idRegra = (regraAplicada != null && regraAplicada.getId() != null) ? regraAplicada.getId() : REGRA_PADRAO_ID;
         BigDecimal taxaAplicada = TAXA_PADRAO;
-
-        garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
         // 1. Verifica se já existe cálculo pelo UUID da venda (se informado) ou pela chave de negócio
         Optional<ResultadoCalculo> existenteOpt = Optional.empty();
@@ -543,47 +548,81 @@ public class CalculoService {
     }
 
     /**
-     * Consulta os logs imutáveis de cálculos gerados no sistema.
+     * Consulta paginada dos logs imutáveis de cálculos com filtros combináveis.
+     * Retorna valores históricos preservados sem recalcular nada durante a consulta.
+     *
+     * @param idVenda identificador único da venda (opcional)
+     * @param matricula matrícula do colaborador (opcional)
+     * @param idRegra identificador da regra aplicada (opcional)
+     * @param dataInicio início do período de venda (opcional)
+     * @param dataFim fim do período de venda (opcional)
+     * @param pageable parâmetros de paginação e ordenação
+     * @return página de logs de auditoria
+     */
+    @Transactional(readOnly = true)
+    public Page<LogCalculoResponse> listarLogs(
+            UUID idVenda,
+            String matricula,
+            Long idRegra,
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            Pageable pageable
+    ) {
+        if (dataInicio != null && dataFim != null && dataInicio.isAfter(dataFim)) {
+            throw new BusinessException("Data de início não pode ser posterior à data de término.");
+        }
+
+        Specification<LogCalculoImutavel> spec = LogCalculoSpecification.comFiltros(
+                idVenda, matricula, idRegra, dataInicio, dataFim
+        );
+
+        Page<LogCalculoImutavel> page = logCalculoRepository.findAll(spec, pageable);
+        return page.map(LogCalculoResponse::fromEntity);
+    }
+
+    /**
+     * Consulta os detalhes de um log de cálculo específico por seu identificador único.
+     * Preserva referências e valores históricos sem recalcular.
+     *
+     * @param id identificador único do log
+     * @return detalhes completos do log de cálculo
+     * @throws ResourceNotFoundException caso o log não exista
+     */
+    @Transactional(readOnly = true)
+    public LogCalculoResponse buscarPorId(UUID id) {
+        LogCalculoImutavel log = logCalculoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Log de cálculo não encontrado com o identificador: " + id));
+        return LogCalculoResponse.fromEntity(log);
+    }
+
+    /**
+     * Consulta todos os logs imutáveis de cálculos gerados no sistema (sem paginação).
+     * Retorna lista vazia legítima caso não existam registros.
      */
     @Transactional(readOnly = true)
     public List<LogCalculoResponse> listarLogs() {
-        List<LogCalculoImutavel> logs = logCalculoRepository.findAllByOrderByExecutadoEmDesc();
-        if (logs.isEmpty()) {
-            return List.of(
-                    new LogCalculoResponse(
-                            UUID.randomUUID(),
-                            "MATRIC-1",
-                            REGRA_PADRAO_ID,
-                            new BigDecimal("1000.00"),
-                            TAXA_PADRAO,
-                            new BigDecimal("100.00"),
-                            OffsetDateTime.now()
-                    )
-            );
-        }
-
-        return logs.stream().map(logItem -> new LogCalculoResponse(
-                logItem.getId(),
-                logItem.getMatricula(),
-                logItem.getIdRegra(),
-                logItem.getValorVenda(),
-                logItem.getTaxaAplicada(),
-                logItem.getValorComissao(),
-                logItem.getExecutadoEm()
-        )).toList();
+        return logCalculoRepository.findAllByOrderByExecutadoEmDesc()
+                .stream()
+                .map(LogCalculoResponse::fromEntity)
+                .toList();
     }
 
-    private void garantirRegraPadraoExistente(Long idRegra, BigDecimal taxa) {
-        if (regraRepository != null && !regraRepository.existsById(idRegra)) {
-            Regra defaultRegra = new Regra(
-                    null,
-                    "Regra Geral Padrão",
-                    "PADRAO",
-                    taxa,
-                    LocalDate.of(2020, 1, 1),
-                    LocalDate.of(2035, 12, 31)
-            );
-            regraRepository.save(defaultRegra);
+    private Regra garantirRegraPadraoExistente(Long idRegra, BigDecimal taxa) {
+        if (regraRepository == null) {
+            return null;
         }
+        if (regraRepository.existsById(idRegra)) {
+            return regraRepository.findById(idRegra).orElse(null);
+        }
+
+        Regra defaultRegra = new Regra(
+                null,
+                "Regra Geral Padrão",
+                "PADRAO",
+                taxa,
+                LocalDate.of(2020, 1, 1),
+                LocalDate.of(2035, 12, 31)
+        );
+        return regraRepository.save(defaultRegra);
     }
 }

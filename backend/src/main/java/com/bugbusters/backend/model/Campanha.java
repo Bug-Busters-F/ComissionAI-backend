@@ -24,8 +24,9 @@ public class Campanha {
     @Column(name = "data_fim", nullable = false)
     private LocalDate dataFim;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
-    private String estado = "DRAFT";
+    private EstadoCampanha estado = EstadoCampanha.DRAFT;
 
     @Column(name = "removido_em")
     private OffsetDateTime removidoEm;
@@ -43,7 +44,7 @@ public class Campanha {
         this.textoOriginal = textoOriginal;
         this.dataInicio = dataInicio;
         this.dataFim = dataFim;
-        this.estado = "DRAFT";
+        this.estado = EstadoCampanha.DRAFT;
     }
 
     @PrePersist
@@ -69,8 +70,11 @@ public class Campanha {
     public LocalDate getDataFim() { return dataFim; }
     public void setDataFim(LocalDate dataFim) { this.dataFim = dataFim; }
 
-    public String getEstado() { return estado; }
-    public void setEstado(String estado) { this.estado = estado; }
+    public EstadoCampanha getEstado() { return estado; }
+    public void setEstado(EstadoCampanha estado) { this.estado = estado; }
+    public void setEstado(String estado) {
+        this.estado = estado != null ? EstadoCampanha.valueOf(estado) : EstadoCampanha.DRAFT;
+    }
 
     public OffsetDateTime getRemovidoEm() { return removidoEm; }
     public void setRemovidoEm(OffsetDateTime removidoEm) { this.removidoEm = removidoEm; }

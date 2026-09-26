@@ -1,6 +1,7 @@
 package com.bugbusters.backend.dto.campanha;
 
 import com.bugbusters.backend.dto.regra.StatusRegra;
+import com.bugbusters.backend.model.EstadoCampanha;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -11,7 +12,7 @@ public record CampanhaResponse(
         Long id,
         String titulo,
         String textoOriginal,
-        String estado,
+        EstadoCampanha estado,
         LocalDate dataInicio,
         LocalDate dataFim,
         RegraVinculadaDTO regra,

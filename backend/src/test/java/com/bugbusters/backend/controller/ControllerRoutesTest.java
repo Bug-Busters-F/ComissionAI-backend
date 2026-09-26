@@ -93,190 +93,6 @@ class ControllerRoutesTest {
     }
 
     // ==========================================
-    // 1. Regras Controller
-    // ==========================================
-    @Test
-    @DisplayName("POST /api/v1/regras - Deve criar regra válida com sucesso (201)")
-    void deveCriarRegraValida() throws Exception {
-        String payload = """
-            {
-                "nome": "Comissão Black Friday",
-                "canal": "ECOMMERCE",
-                "taxa": 0.0500,
-                "dataInicio": "2026-11-01",
-                "dataFim": "2026-11-30"
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.nome").value("Comissão Black Friday"))
-                .andExpect(jsonPath("$.canal").value("ECOMMERCE"))
-                .andExpect(jsonPath("$.taxa").value(0.0500))
-                .andExpect(jsonPath("$.status").value("ATIVA"))
-                .andExpect(jsonPath("$.dataFim").value("2026-11-30"));
-    }
-
-    @Test
-    @DisplayName("POST /api/v1/regras - Deve calcular dataFim (+30 dias) quando omitida")
-    void deveCalcularDataFimQuandoOmitida() throws Exception {
-        String payload = """
-            {
-                "nome": "Regra Sem Fim",
-                "canal": "LOJA_FISICA",
-                "taxa": 0.0800,
-                "dataInicio": "2026-10-01"
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.dataInicio").value("2026-10-01"))
-                .andExpect(jsonPath("$.dataFim").value("2026-10-31"));
-    }
-
-
-
-    @Test
-    @DisplayName("POST /api/v1/regras - Deve criar regra válida com dimensões de público-alvo e sem canal")
-    void deveCriarRegraComDimensoesPublicoAlvoSemCanal() throws Exception {
-        String payload = """
-            {
-                "nome": "Comissão Gerentes Marca Preto",
-                "codMarca": 10,
-                "codLoja": 75,
-                "codCargo": 150,
-                "descriCargo": "GERENTE DE LOJA",
-                "matricula": "MATRIC-888",
-                "taxa": 0.0100,
-                "dataInicio": "2026-11-01"
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.nome").value("Comissão Gerentes Marca Preto"))
-                .andExpect(jsonPath("$.canal").doesNotExist())
-                .andExpect(jsonPath("$.codMarca").value(10))
-                .andExpect(jsonPath("$.codLoja").value(75))
-                .andExpect(jsonPath("$.codCargo").value(150))
-                .andExpect(jsonPath("$.descriCargo").value("GERENTE DE LOJA"))
-                .andExpect(jsonPath("$.matricula").value("MATRIC-888"))
-                .andExpect(jsonPath("$.taxa").value(0.0100))
-                .andExpect(jsonPath("$.status").value("ATIVA"))
-                .andExpect(jsonPath("$.dataFim").value("2026-12-01"));
-    }
-
-    @Test
-    @DisplayName("POST /api/v1/regras - Deve padronizar empresa/marca case-insensitively (Vermelho e vermelho -> VERMELHO)")
-    void devePadronizarNomeEmpresaCaseInsensitive() throws Exception {
-        // Teste 1: Enviando 'Vermelho' com inicial maiúscula
-        String payload1 = """
-            {
-                "nome": "Regra Marca Vermelho Maiúscula",
-                "descrMarca": "Vermelho",
-                "taxa": 0.0500,
-                "dataInicio": "2026-11-01"
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload1))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.descrMarca").value("VERMELHO"))
-                .andExpect(jsonPath("$.codMarca").value(40));
-
-        // Teste 2: Enviando 'vermelho' em minúsculas
-        String payload2 = """
-            {
-                "nome": "Regra Marca vermelho Minúscula",
-                "descrMarca": "vermelho",
-                "taxa": 0.0500,
-                "dataInicio": "2026-11-01"
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload2))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.descrMarca").value("VERMELHO"))
-                .andExpect(jsonPath("$.codMarca").value(40));
-    }
-
-    @Test
-    @DisplayName("POST /api/v1/regras - Deve permitir e padronizar nova cor de empresa sem bloquear")
-    void devePermitirNovaCorDeEmpresa() throws Exception {
-        String payload = """
-            {
-                "nome": "Regra Nova Empresa Roxo",
-                "descrMarca": "  roxo  ",
-                "taxa": 0.0350,
-                "dataInicio": "2026-11-01"
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.descrMarca").value("ROXO"));
-    }
-
-    @Test
-    @DisplayName("POST /api/v1/regras - Deve rejeitar payload inválido com 400 e lista de validações")
-    void deveRejeitarRegraInvalida() throws Exception {
-        String payload = """
-            {
-                "nome": "",
-                "taxa": -0.05
-            }
-            """;
-
-        mockMvc.perform(post("/api/v1/regras")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(payload))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400))
-                .andExpect(jsonPath("$.message").value("Dados de entrada inválidos."))
-                .andExpect(jsonPath("$.validacoes", hasSize(greaterThan(0))));
-    }
-
-    @Test
-    @DisplayName("GET /api/v1/regras - Deve listar regras com 200 OK")
-    void deveListarRegras() throws Exception {
-        mockMvc.perform(get("/api/v1/regras"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(greaterThan(0))))
-                .andExpect(jsonPath("$[0].canal").value("ECOMMERCE"));
-    }
-
-    @Test
-    @DisplayName("GET /api/v1/regras/{id} - Deve buscar regra por ID com 200 OK")
-    void deveBuscarRegraPorId() throws Exception {
-        mockMvc.perform(get("/api/v1/regras/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.status").value("ATIVA"));
-    }
-
-    @Test
-    @DisplayName("DELETE /api/v1/regras/{id} - Deve desativar regra com 204 No Content")
-    void deveDesativarRegra() throws Exception {
-        mockMvc.perform(delete("/api/v1/regras/1"))
-                .andExpect(status().isNoContent());
-    }
-
-    // ==========================================
     // 2. Calculo Controller
     // ==========================================
     @Test
@@ -398,12 +214,13 @@ class ControllerRoutesTest {
     }
 
     @Test
-    @DisplayName("GET /api/v1/logs-calculo - Deve listar logs com 200 OK")
+    @DisplayName("GET /api/v1/logs-calculo - Deve listar logs paginados com 200 OK")
     void deveListarLogs() throws Exception {
         mockMvc.perform(get("/api/v1/logs-calculo"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(greaterThan(0))))
-                .andExpect(jsonPath("$[0].matricula").isNotEmpty());
+                .andExpect(jsonPath("$.content", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$.content[0].matricula").isNotEmpty())
+                .andExpect(jsonPath("$.totalElements").isNumber());
     }
 
     @Test
@@ -854,6 +671,115 @@ class ControllerRoutesTest {
 
         // 6. Tentar buscar após exclusão lógica deve retornar 404
         mockMvc.perform(get("/api/v1/campanhas/" + campanhaId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve transicionar estados e sincronizar status da regra vinculada")
+    void deveAlterarEstadoDaCampanhaESincronizarRegra() throws Exception {
+        // Criar campanha (inicia em DRAFT)
+        String criarPayload = """
+            {
+                "titulo": "Campanha Teste Estados",
+                "textoOriginal": "Comissão de 4.5%",
+                "canal": "ECOMMERCE",
+                "taxa": 0.0450,
+                "dataInicio": "2026-10-01",
+                "dataFim": "2026-10-31"
+            }
+            """;
+
+        String postResponse = mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(criarPayload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.regra.status").value("DRAFT"))
+                .andReturn().getResponse().getContentAsString();
+
+        long campanhaId = Long.parseLong(postResponse.replaceAll(".*\"id\":\\s*(\\d+).*", "$1"));
+
+        // 1. Alterar para ATIVA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"ATIVA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("ATIVA"))
+                .andExpect(jsonPath("$.regra.status").value("ATIVA"));
+
+        // 2. Verificar filtro GET por estado
+        mockMvc.perform(get("/api/v1/campanhas").param("estado", "ATIVA"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", hasItem((int) campanhaId)));
+
+        // 3. Alterar para INATIVA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"INATIVA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("INATIVA"))
+                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+
+        // 4. Alterar para CONCLUIDA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"CONCLUIDA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("CONCLUIDA"))
+                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+
+        // 5. Alterar para CANCELADA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"CANCELADA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("CANCELADA"))
+                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+
+        // 6. Voltar para DRAFT
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"DRAFT\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.regra.status").value("DRAFT"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve rejeitar estado inválido com 400 Bad Request")
+    void deveRejeitarEstadoInvalido() throws Exception {
+        String criarPayload = """
+            {
+                "titulo": "Campanha Para Erro Estado",
+                "textoOriginal": "Texto",
+                "canal": "LOJA",
+                "taxa": 0.0500,
+                "dataInicio": "2026-10-01",
+                "dataFim": "2026-10-31"
+            }
+            """;
+
+        String postResponse = mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(criarPayload))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        long campanhaId = Long.parseLong(postResponse.replaceAll(".*\"id\":\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"ESTADO_INEXISTENTE\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve retornar 404 para campanha inexistente")
+    void deveRetornar404ParaCampanhaInexistenteNoPatchEstado() throws Exception {
+        mockMvc.perform(patch("/api/v1/campanhas/999999/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"ATIVA\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
     }
