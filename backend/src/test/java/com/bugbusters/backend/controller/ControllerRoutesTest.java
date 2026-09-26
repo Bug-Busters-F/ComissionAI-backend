@@ -12,6 +12,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.util.UUID;
+
 import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -45,6 +47,9 @@ class ControllerRoutesTest {
     @Autowired
     private com.bugbusters.backend.registration.RegistrationRepository registrationRepository;
 
+    @Autowired
+    private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
@@ -74,8 +79,16 @@ class ControllerRoutesTest {
             r.setRegistration("MAT-00456");
             r.setStore(storeRepository.findByCode(62).get());
             r.setPosition(positionRepository.findByCode(150).get());
-            r.setAdmissDate(java.time.LocalDate.now());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
             registrationRepository.save(r);
+        }
+        if (baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(10, 150).isEmpty()) {
+            com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
+                    brandRepository.findByCode(10).get(),
+                    positionRepository.findByCode(150).get(),
+                    new java.math.BigDecimal("0.1000")
+            );
+            baseComissRepository.save(bc);
         }
     }
 
@@ -208,6 +221,111 @@ class ControllerRoutesTest {
                 .andExpect(jsonPath("$.content", hasSize(greaterThan(0))))
                 .andExpect(jsonPath("$.content[0].matricula").isNotEmpty())
                 .andExpect(jsonPath("$.totalElements").isNumber());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular/venda/{id} - Deve calcular comissão de venda individual persistida (S1-B07) resultando em R$ 100 para R$ 1.000")
+    void deveCalcularComissaoVendaIndividualPersistida() throws Exception {
+        String saleId = "a1111111-1111-1111-1111-111111111111";
+        String vendaPayload = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1000.00,
+                "saleDate": "%s",
+                "saleChannel": "LOJA_FISICA"
+            }
+            """, saleId, java.time.LocalDate.now());
+
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(vendaPayload))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular/venda/" + saleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCESSO"))
+                .andExpect(jsonPath("$.idVenda").value(saleId))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
+                .andExpect(jsonPath("$.valorVenda").value(1000.00))
+                .andExpect(jsonPath("$.taxaAplicada").value(0.1000))
+                .andExpect(jsonPath("$.valorComissao").value(100.00))
+                .andExpect(jsonPath("$.origemTaxa").value("BASE_COMISS"))
+                .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty());
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular/venda/" + saleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCESSO"))
+                .andExpect(jsonPath("$.valorComissao").value(100.00));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular/venda/{id} - Deve retornar 400 quando venda não for encontrada")
+    void deveRetornarErroQuandoVendaNaoEncontrada() throws Exception {
+        UUID idInexistente = UUID.randomUUID();
+        mockMvc.perform(post("/api/v1/comissoes/calcular/venda/" + idInexistente))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("Venda não encontrada")));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular-competencia - Deve calcular vendas da competência consolidando totais e impedimentos")
+    void deveCalcularComissoesPorCompetencia() throws Exception {
+        String comp = java.time.YearMonth.now().toString();
+
+        String saleIdValida = "b1111111-1111-1111-1111-111111111111";
+        String vendaValida = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1000.00,
+                "saleDate": "%s",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleIdValida, java.time.LocalDate.now());
+
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(vendaValida))
+                .andExpect(status().isCreated());
+
+        String payloadComp = String.format("""
+            {
+                "competencia": "%s"
+            }
+            """, comp);
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular-competencia")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadComp))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.competencia").value(comp))
+                .andExpect(jsonPath("$.totalVendasProcessadas", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.totalCalculados", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.valorTotalComissao", greaterThan(0.0)))
+                .andExpect(jsonPath("$.resultados", hasSize(greaterThan(0))));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular-competencia - Deve rejeitar formato inválido de competência com 400")
+    void deveRejeitarCompetenciaComFormatoInvalido() throws Exception {
+        String payloadInvalido = """
+            {
+                "competencia": "ano-mes-invalido"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular-competencia")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadInvalido))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.validacoes[0].campo").value("competencia"));
     }
 
     // ==========================================

@@ -4,9 +4,8 @@
 	"name": "Java & PostgreSQL",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "app",
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	"workspaceFolder": "/workspaces/comissionai-backend",
 	"features": {
-		"ghcr.io/stuartleeks/dev-container-features/shell-history:0": {},
 		"ghcr.io/devcontainers-extra/features/zsh-plugins:0": {}
 	},	
     "forwardPorts": [8080]

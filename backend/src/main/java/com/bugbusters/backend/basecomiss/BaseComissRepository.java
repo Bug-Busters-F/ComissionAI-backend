@@ -15,4 +15,20 @@ public interface BaseComissRepository extends JpaRepository<BaseComiss, UUID> {
             UUID positionId,
             LocalDate referenceMonth
     );
+
+    Optional<BaseComiss> findFirstByBrandIdAndPositionIdAndReferenceMonth(
+            UUID brandId,
+            UUID positionId,
+            LocalDate referenceMonth
+    );
+
+    Optional<BaseComiss> findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(
+            UUID brandId,
+            UUID positionId
+    );
+
+    Optional<BaseComiss> findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(
+            Integer brandCode,
+            Integer positionCode
+    );
 }
