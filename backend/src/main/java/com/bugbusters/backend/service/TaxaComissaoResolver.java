@@ -112,7 +112,8 @@ public class TaxaComissaoResolver {
         if (!regras.isEmpty()) {
             if (regras.size() == 1) {
                 Regra regra = regras.get(0);
-                return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO");
+                String versaoRegra = "REGRA#" + regra.getId() + " - " + regra.getNome();
+                return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO", versaoRegra, null);
             }
 
             // Múltiplas regras aplicáveis: aplicar critério determinístico por nível de especificidade
@@ -137,7 +138,8 @@ public class TaxaComissaoResolver {
             }
 
             Regra regraVencedora = regrasMaisEspecificas.get(0);
-            return ResolucaoTaxaResult.sucesso(regraVencedora.getTaxa(), regraVencedora.getId(), "REGRA_NEGOCIO");
+            String versaoRegra = "REGRA#" + regraVencedora.getId() + " - " + regraVencedora.getNome();
+            return ResolucaoTaxaResult.sucesso(regraVencedora.getTaxa(), regraVencedora.getId(), "REGRA_NEGOCIO", versaoRegra, null);
         }
 
         // 2ª Prioridade (Fallback): Buscar taxa padrão em tb_basecomiss (Marca + Cargo)
@@ -163,7 +165,9 @@ public class TaxaComissaoResolver {
 
         if (baseComissOpt.isPresent() && baseComissOpt.get().getPercentage() != null) {
             BigDecimal taxa = baseComissOpt.get().getPercentage();
-            return ResolucaoTaxaResult.sucesso(taxa, REGRA_BASE_ID, "BASE_COMISS");
+            String referencia = "BASE_COMISS (Marca: " + (brand.getCode() != null ? brand.getCode() : brand.getId())
+                    + ", Cargo: " + (position.getCode() != null ? position.getCode() : position.getId()) + ")";
+            return ResolucaoTaxaResult.sucesso(taxa, REGRA_BASE_ID, "BASE_COMISS", referencia, null);
         }
 
         // Se nem regra nem basecomiss forem encontradas: impedimento

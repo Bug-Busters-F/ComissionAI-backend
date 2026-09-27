@@ -13,8 +13,13 @@ import java.util.UUID;
 @Repository
 public interface SaleRepository extends JpaRepository<Sale, UUID> {
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
+
     @Override
-    @EntityGraph(attributePaths = { "registration", "registration.position", "brand", "store" })
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    java.util.Optional<Sale> findById(UUID id);
+
+    @Override
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     Page<Sale> findAll(Pageable pageable);
 
     boolean existsByRegistrationId(UUID registrationId);
