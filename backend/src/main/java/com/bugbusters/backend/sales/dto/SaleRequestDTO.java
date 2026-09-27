@@ -44,5 +44,15 @@ public record SaleRequestDTO(
 
         @Schema(description = "Canal de venda (ex: ECOMMERCE, LOJA_FISICA)", example = "ECOMMERCE")
         @NotBlank(message = "O canal de venda é obrigatório")
-        String saleChannel
-) {}
+        String saleChannel,
+
+        @Schema(description = "Tipo de origem da venda (INFORMADA ou IMPORTADA)", example = "INFORMADA")
+        String tipoVenda,
+
+        @Schema(description = "Identificador do lote de origem quando houver", example = "LOTE-2026-09")
+        String idLoteOrigem
+) {
+    public SaleRequestDTO(UUID id, String registrationCode, Integer brandCode, Integer storeCode, BigDecimal value, LocalDate saleDate, String saleChannel) {
+        this(id, registrationCode, brandCode, storeCode, value, saleDate, saleChannel, "INFORMADA", null);
+    }
+}

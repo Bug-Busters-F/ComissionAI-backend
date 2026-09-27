@@ -3,6 +3,7 @@ package com.bugbusters.backend.sales;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandResolver;
 import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.registration.RegistrationResolver;
 import com.bugbusters.backend.sales.dto.SaleRequestDTO;
@@ -174,5 +175,52 @@ class SaleServiceTest {
         assertTrue(ex.getMessage().contains(saleId.toString()));
 
         verify(vendaRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("4. Deve buscar venda por ID com sucesso")
+    void deveBuscarVendaPorIdComSucesso() {
+        UUID saleId = UUID.randomUUID();
+        Sale sale = new Sale();
+        sale.setId(saleId);
+        sale.setRegistration(mockRegistration);
+        sale.setBrand(mockBrand);
+        sale.setStore(mockStore);
+        sale.setValue(VALOR);
+        sale.setSaleDate(DATA_VENDA);
+        sale.setSaleChannel("ECOMMERCE");
+        sale.setTipoVenda("INFORMADA");
+        sale.setIdLoteOrigem("LOTE-TESTE");
+
+        when(vendaRepository.findById(saleId)).thenReturn(Optional.of(sale));
+
+        SaleResponseDTO response = saleService.buscarVendaPorId(saleId);
+
+        assertNotNull(response);
+        assertEquals(saleId, response.id());
+        assertEquals("MAT-00456", response.registration().getRegistration());
+        assertEquals("MARCA_TESTE", response.brand().getDescription());
+        assertEquals("LOJA_TESTE", response.store().getDescription());
+        assertEquals(0, VALOR.compareTo(response.value()));
+        assertEquals(DATA_VENDA, response.saleDate());
+        assertEquals("ECOMMERCE", response.saleChannel());
+        assertEquals("INFORMADA", response.tipoVenda());
+        assertEquals("LOTE-TESTE", response.idLoteOrigem());
+
+        verify(vendaRepository, times(1)).findById(saleId);
+    }
+
+    @Test
+    @DisplayName("5. Deve lançar ResourceNotFoundException quando buscar venda por ID inexistente")
+    void deveLancarResourceNotFoundQuandoBuscarVendaInexistente() {
+        UUID saleId = UUID.randomUUID();
+        when(vendaRepository.findById(saleId)).thenReturn(Optional.empty());
+
+        ResourceNotFoundException ex = assertThrows(ResourceNotFoundException.class, () ->
+                saleService.buscarVendaPorId(saleId)
+        );
+
+        assertTrue(ex.getMessage().contains(saleId.toString()));
+        verify(vendaRepository, times(1)).findById(saleId);
     }
 }

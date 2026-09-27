@@ -43,7 +43,7 @@ class CalculoAuditoriaControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
-        logCalculoRepository.deleteAll();
+        logCalculoRepository.deleteAllInBatch();
 
         vendaId1 = UUID.randomUUID();
         vendaId2 = UUID.randomUUID();
