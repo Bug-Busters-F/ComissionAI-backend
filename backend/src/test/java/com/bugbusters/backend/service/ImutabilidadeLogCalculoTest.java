@@ -234,6 +234,27 @@ class ImutabilidadeLogCalculoTest {
         assertNotNull(logPreservado.parametrosAplicados());
         assertTrue(logPreservado.parametrosAplicados().contains("\"taxaAplicada\":0.1000"));
         assertTrue(logPreservado.parametrosAplicados().contains("\"valorVenda\":2000.00"));
+
+        // O recálculo atualiza apenas o resultado vigente e acrescenta outro log.
+        var recalculo = calculoService.calcularPorCompetencia("2026-09", true);
+        assertEquals(new BigDecimal("700.00"), recalculo.valorTotalComissao());
+        assertEquals("REGRA_NEGOCIO", recalculo.resultados().get(0).origemTaxa());
+        resultadoCalculoRepository.flush();
+        logCalculoRepository.flush();
+
+        var historico = calculoService.listarLogs(idVenda, null, null, null, null, PageRequest.of(0, 10));
+        assertEquals(2, historico.getTotalElements());
+        var anterior = historico.stream().filter(item -> item.protocolo().equals(calculo.protocoloCalculo()))
+                .findFirst().orElseThrow();
+        var atual = historico.stream().filter(item -> !item.protocolo().equals(calculo.protocoloCalculo()))
+                .findFirst().orElseThrow();
+        assertEquals(logPreservado.parametrosAplicados(), anterior.parametrosAplicados());
+        assertEquals(new BigDecimal("200.00"), anterior.valorComissao());
+        assertEquals(new BigDecimal("700.00"), atual.valorComissao());
+        assertEquals("REGRA_NEGOCIO", atual.origemTaxa());
+        assertTrue(atual.versaoRegra().contains("Regra Alterada para 35"));
+        assertTrue(atual.parametrosAplicados().contains("\"taxaAplicada\":0.3500"));
+
     }
 
     @Test

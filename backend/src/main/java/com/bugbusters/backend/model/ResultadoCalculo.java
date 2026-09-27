@@ -50,7 +50,10 @@ public class ResultadoCalculo {
     @Column(name = "tipo_calculo", nullable = false, length = 50)
     private String tipoCalculo;
 
-    @Column(name = "calculado_em", nullable = false, updatable = false)
+    @Column(name = "origem_taxa", length = 30)
+    private String origemTaxa;
+
+    @Column(name = "calculado_em", nullable = false)
     private OffsetDateTime calculadoEm;
 
     public ResultadoCalculo() {}
@@ -178,6 +181,14 @@ public class ResultadoCalculo {
 
     public void setTaxaAplicada(BigDecimal taxaAplicada) {
         this.taxaAplicada = taxaAplicada;
+    }
+
+    public String getOrigemTaxa() {
+        return origemTaxa;
+    }
+
+    public void setOrigemTaxa(String origemTaxa) {
+        this.origemTaxa = origemTaxa;
     }
 
     public BigDecimal getValorComissao() {

@@ -78,7 +78,7 @@ public class CalculoController {
     @ApiResponse(responseCode = "400", description = "Formato de competência inválido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping("/comissoes/calcular-competencia")
     public ResponseEntity<CalculoCompetenciaResponseDTO> calcularPorCompetencia(@Valid @RequestBody CalculoCompetenciaRequest request) {
-        CalculoCompetenciaResponseDTO response = calculoService.calcularPorCompetencia(request.competencia());
+        CalculoCompetenciaResponseDTO response = calculoService.calcularPorCompetencia(request.competencia(), Boolean.TRUE.equals(request.recalcular()));
         return ResponseEntity.ok(response);
     }
 

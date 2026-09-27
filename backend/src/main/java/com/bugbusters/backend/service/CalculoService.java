@@ -115,9 +115,6 @@ public class CalculoService {
                 ));
             }
             log.info("Idempotência aplicada para cálculo da venda ID {}: retornando resultado prévio.", idVenda);
-            String origemTaxa = (existente.getRegraId() != null && !existente.getRegraId().equals(REGRA_PADRAO_ID))
-                    ? "REGRA_NEGOCIO"
-                    : "BASE_COMISS";
             return CalculoIndividualResponseDTO.sucesso(
                     existente.getProtocoloCalculo(),
                     existente.getIdVenda(),
@@ -130,7 +127,7 @@ public class CalculoService {
                     existente.getTaxaAplicada(),
                     existente.getValorComissao(),
                     existente.getRegraId(),
-                    origemTaxa,
+                    existente.getOrigemTaxa(),
                     existente.getCalculadoEm()
             );
         }
@@ -180,6 +177,7 @@ public class CalculoService {
                 comissao,
                 "INDIVIDUAL"
         );
+        novoResultado.setOrigemTaxa(resolucao.origemTaxa());
 
         try {
             ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
@@ -214,6 +212,7 @@ public class CalculoService {
                     versaoRegra,
                     parametrosSnapshot
             );
+            logImutavel.setOrigemTaxa(resolucao.origemTaxa());
             logCalculoRepository.save(logImutavel);
 
             return CalculoIndividualResponseDTO.sucesso(
@@ -243,10 +242,6 @@ public class CalculoService {
                 ));
             }
 
-            String origemTaxa = (concorrente.getRegraId() != null && !concorrente.getRegraId().equals(REGRA_PADRAO_ID))
-                    ? "REGRA_NEGOCIO"
-                    : "BASE_COMISS";
-
             return CalculoIndividualResponseDTO.sucesso(
                     concorrente.getProtocoloCalculo(),
                     concorrente.getIdVenda(),
@@ -259,7 +254,7 @@ public class CalculoService {
                     concorrente.getTaxaAplicada(),
                     concorrente.getValorComissao(),
                     concorrente.getRegraId(),
-                    origemTaxa,
+                    concorrente.getOrigemTaxa(),
                     concorrente.getCalculadoEm()
             );
         }
@@ -274,6 +269,15 @@ public class CalculoService {
      */
     @Transactional
     public CalculoCompetenciaResponseDTO calcularPorCompetencia(String competenciaStr) {
+        return calcularPorCompetencia(competenciaStr, false);
+    }
+
+    /**
+     * Processa uma competência preservando a idempotência por padrão ou
+     * recalculando as vendas com as regras vigentes quando solicitado.
+     */
+    @Transactional
+    public CalculoCompetenciaResponseDTO calcularPorCompetencia(String competenciaStr, boolean recalcular) {
         if (competenciaStr == null || competenciaStr.isBlank()) {
             throw new BusinessException("A competência é obrigatória para o cálculo em lote.");
         }
@@ -303,11 +307,28 @@ public class CalculoService {
         BigDecimal totalVendasCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal totalComissoesCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
-        for (Sale sale : vendas) {
+        for (Sale vendaPersistida : vendas) {
+            Sale sale = bloquearVenda(vendaPersistida);
             UUID idVenda = sale.getId();
             String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
+            Optional<ResultadoCalculo> existenteOpt = idVenda != null
+                    ? resultadoCalculoRepository.findByIdVenda(idVenda)
+                    : Optional.empty();
 
-            // 1. Verifica vínculos e taxa
+            // Sem recálculo, o resultado vigente é reutilizado sem consultar as regras atuais.
+            if (existenteOpt.isPresent() && !recalcular) {
+                ResultadoCalculo existente = existenteOpt.get();
+                if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
+                    impedimentos.add(impedimentoPorDivergencia(idVenda, matricula, sale, existente));
+                    continue;
+                }
+
+                sucessos.add(toItem(existente));
+                totalVendasCalculadas = totalVendasCalculadas.add(existente.getValorVenda());
+                totalComissoesCalculadas = totalComissoesCalculadas.add(existente.getValorComissao());
+                continue;
+            }
+
             ResolucaoTaxaResult resolucao = taxaComissaoResolver != null
                     ? taxaComissaoResolver.resolverTaxa(sale)
                     : ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
@@ -323,126 +344,46 @@ public class CalculoService {
                 continue;
             }
 
-            // 2. Idempotência por venda
-            Optional<ResultadoCalculo> existenteOpt = Optional.empty();
-            if (idVenda != null) {
-                existenteOpt = resultadoCalculoRepository.findByIdVenda(idVenda);
-            }
-
-            if (existenteOpt.isPresent()) {
-                ResultadoCalculo existente = existenteOpt.get();
-                if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
-                    impedimentos.add(new CalculoImpedimentoDTO(
-                            idVenda,
-                            matricula,
-                            sale.getSaleDate(),
-                            sale.getValue(),
-                            String.format("Venda com ID '%s' possui dados divergentes de cálculo prévio (anterior: %s, atual: %s)",
-                                    idVenda, existente.getValorVenda(), sale.getValue())
-                    ));
-                    continue;
-                }
-
-                CalculoItemResponseDTO item = new CalculoItemResponseDTO(
-                        existente.getProtocoloCalculo(),
-                        existente.getIdVenda(),
-                        existente.getMatricula(),
-                        existente.getCodCargo(),
-                        existente.getCodMarca(),
-                        existente.getCodLoja(),
-                        existente.getDataVenda(),
-                        existente.getValorVenda(),
-                        existente.getTaxaAplicada(),
-                        existente.getValorComissao(),
-                        existente.getRegraId(),
-                        resolucao.origemTaxa(),
-                        existente.getCalculadoEm()
-                );
-                sucessos.add(item);
-                totalVendasCalculadas = totalVendasCalculadas.add(existente.getValorVenda());
-                totalComissoesCalculadas = totalComissoesCalculadas.add(existente.getValorComissao());
-                continue;
-            }
-
-            // 3. Efetua novo cálculo
             BigDecimal taxaAplicada = resolucao.taxa();
             Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
             garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
             BigDecimal comissao = sale.getValue().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
-            UUID protocolo = UUID.randomUUID();
-
             Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
                     ? sale.getRegistration().getPosition().getCode() : null;
             Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
             Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : null;
+            ResultadoCalculo resultado;
 
-            ResultadoCalculo novoResultado = new ResultadoCalculo(
-                    protocolo,
-                    idVenda,
-                    matricula,
-                    codMarca,
-                    codLoja,
-                    codCargo,
-                    idRegra,
-                    sale.getSaleDate(),
-                    sale.getValue(),
-                    taxaAplicada,
-                    comissao,
-                    "COMPETENCIA"
-            );
+            if (existenteOpt.isPresent()) {
+                resultado = atualizarResultadoExistente(
+                        existenteOpt.get(), idVenda, matricula, codMarca, codLoja, codCargo,
+                        idRegra, sale, taxaAplicada, comissao, resolucao.origemTaxa()
+                );
+            } else {
+                resultado = new ResultadoCalculo(
+                        UUID.randomUUID(),
+                        idVenda,
+                        matricula,
+                        codMarca,
+                        codLoja,
+                        codCargo,
+                        idRegra,
+                        sale.getSaleDate(),
+                        sale.getValue(),
+                        taxaAplicada,
+                        comissao,
+                        "COMPETENCIA"
+                );
+                resultado.setOrigemTaxa(resolucao.origemTaxa());
+            }
 
-            ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
+            ResultadoCalculo salvo = resultadoCalculoRepository.save(resultado);
+            registrarLog(salvo, sale, resolucao);
 
-            String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank() ? sale.getTipoVenda() : "IMPORTADA";
-            String idLoteOrigem = sale.getIdLoteOrigem();
-            String versaoRegra = resolucao.versaoOuReferenciaRegra() != null ? resolucao.versaoOuReferenciaRegra() : "REGRA#" + idRegra;
-            String parametrosSnapshot = montarSnapshotParametros(
-                    sale.getValue(), taxaAplicada, comissao, idRegra, resolucao.origemTaxa(), versaoRegra,
-                    sale.getSaleDate(), matricula, codCargo, codLoja, codMarca,
-                    sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
-                    tipoVenda, idLoteOrigem
-            );
-
-            LogCalculoImutavel logImutavel = new LogCalculoImutavel(
-                    salvo.getProtocoloCalculo(),
-                    idVenda,
-                    matricula,
-                    codCargo,
-                    codLoja,
-                    codMarca,
-                    sale.getValue(),
-                    taxaAplicada,
-                    comissao,
-                    idRegra,
-                    sale.getSaleDate(),
-                    sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
-                    "MOTOR_PRODUCAO",
-                    tipoVenda,
-                    idLoteOrigem,
-                    versaoRegra,
-                    parametrosSnapshot
-            );
-            logCalculoRepository.save(logImutavel);
-
-            CalculoItemResponseDTO item = new CalculoItemResponseDTO(
-                    salvo.getProtocoloCalculo(),
-                    idVenda,
-                    matricula,
-                    codCargo,
-                    codMarca,
-                    codLoja,
-                    sale.getSaleDate(),
-                    sale.getValue(),
-                    taxaAplicada,
-                    comissao,
-                    idRegra,
-                    resolucao.origemTaxa(),
-                    salvo.getCalculadoEm()
-            );
-            sucessos.add(item);
-            totalVendasCalculadas = totalVendasCalculadas.add(sale.getValue());
-            totalComissoesCalculadas = totalComissoesCalculadas.add(comissao);
+            sucessos.add(toItem(salvo));
+            totalVendasCalculadas = totalVendasCalculadas.add(salvo.getValorVenda());
+            totalComissoesCalculadas = totalComissoesCalculadas.add(salvo.getValorComissao());
         }
 
         return new CalculoCompetenciaResponseDTO(
@@ -455,6 +396,112 @@ public class CalculoService {
                 sucessos,
                 impedimentos
         );
+    }
+
+    private Sale bloquearVenda(Sale sale) {
+        if (sale == null || sale.getId() == null || saleRepository == null) {
+            return sale;
+        }
+        return saleRepository.findByIdForUpdate(sale.getId()).orElse(sale);
+    }
+
+    private CalculoImpedimentoDTO impedimentoPorDivergencia(
+            UUID idVenda,
+            String matricula,
+            Sale sale,
+            ResultadoCalculo existente
+    ) {
+        return new CalculoImpedimentoDTO(
+                idVenda,
+                matricula,
+                sale.getSaleDate(),
+                sale.getValue(),
+                String.format("Venda com ID '%s' possui dados divergentes de cálculo prévio (anterior: %s, atual: %s)",
+                        idVenda, existente.getValorVenda(), sale.getValue())
+        );
+    }
+
+    private ResultadoCalculo atualizarResultadoExistente(
+            ResultadoCalculo resultado,
+            UUID idVenda,
+            String matricula,
+            Integer codMarca,
+            Integer codLoja,
+            Integer codCargo,
+            Long idRegra,
+            Sale sale,
+            BigDecimal taxaAplicada,
+            BigDecimal comissao,
+            String origemTaxa
+    ) {
+        resultado.setProtocoloCalculo(UUID.randomUUID());
+        resultado.setIdVenda(idVenda);
+        resultado.setMatricula(matricula);
+        resultado.setCodMarca(codMarca);
+        resultado.setCodLoja(codLoja);
+        resultado.setCodCargo(codCargo);
+        resultado.setRegraId(idRegra);
+        resultado.setDataVenda(sale.getSaleDate());
+        resultado.setValorVenda(sale.getValue());
+        resultado.setTaxaAplicada(taxaAplicada);
+        resultado.setValorComissao(comissao);
+        resultado.setOrigemTaxa(origemTaxa);
+        resultado.setTipoCalculo("COMPETENCIA");
+        resultado.setCalculadoEm(OffsetDateTime.now());
+        return resultado;
+    }
+
+    private CalculoItemResponseDTO toItem(ResultadoCalculo resultado) {
+        return new CalculoItemResponseDTO(
+                resultado.getProtocoloCalculo(),
+                resultado.getIdVenda(),
+                resultado.getMatricula(),
+                resultado.getCodCargo(),
+                resultado.getCodMarca(),
+                resultado.getCodLoja(),
+                resultado.getDataVenda(),
+                resultado.getValorVenda(),
+                resultado.getTaxaAplicada(),
+                resultado.getValorComissao(),
+                resultado.getRegraId(),
+                resultado.getOrigemTaxa(),
+                resultado.getCalculadoEm()
+        );
+    }
+
+    private void registrarLog(ResultadoCalculo resultado, Sale sale, ResolucaoTaxaResult resolucao) {
+        String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank()
+                ? sale.getTipoVenda() : "IMPORTADA";
+        String canal = sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO";
+        String versaoRegra = resolucao.versaoOuReferenciaRegra() != null
+                ? resolucao.versaoOuReferenciaRegra() : "REGRA#" + resultado.getRegraId();
+        String parametrosSnapshot = montarSnapshotParametros(
+                resultado.getValorVenda(), resultado.getTaxaAplicada(), resultado.getValorComissao(),
+                resultado.getRegraId(), resolucao.origemTaxa(), versaoRegra, resultado.getDataVenda(),
+                resultado.getMatricula(), resultado.getCodCargo(), resultado.getCodLoja(), resultado.getCodMarca(),
+                canal, tipoVenda, sale.getIdLoteOrigem()
+        );
+        LogCalculoImutavel logImutavel = new LogCalculoImutavel(
+                resultado.getProtocoloCalculo(),
+                resultado.getIdVenda(),
+                resultado.getMatricula(),
+                resultado.getCodCargo(),
+                resultado.getCodLoja(),
+                resultado.getCodMarca(),
+                resultado.getValorVenda(),
+                resultado.getTaxaAplicada(),
+                resultado.getValorComissao(),
+                resultado.getRegraId(),
+                resultado.getDataVenda(),
+                canal,
+                "MOTOR_PRODUCAO",
+                tipoVenda,
+                sale.getIdLoteOrigem(),
+                versaoRegra,
+                parametrosSnapshot
+        );
+        logImutavel.setOrigemTaxa(resolucao.origemTaxa());
+        logCalculoRepository.save(logImutavel);
     }
 
     /**
@@ -500,6 +547,7 @@ public class CalculoService {
                 comissao,
                 "INDIVIDUAL"
         );
+        novoResultado.setOrigemTaxa("PADRAO");
 
         try {
             ResultadoCalculo resultadoSalvo = resultadoCalculoRepository.save(novoResultado);
@@ -533,6 +581,7 @@ public class CalculoService {
                     versaoRegra,
                     parametrosSnapshot
             );
+            logImutavel.setOrigemTaxa("PADRAO");
             logCalculoRepository.save(logImutavel);
 
             return new CalculoComissaoResponse(

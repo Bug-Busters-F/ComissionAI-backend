@@ -46,6 +46,9 @@ public record LogCalculoResponse(
     @Schema(description = "ID da regra aplicada", example = "1")
     Long idRegra,
 
+    @Schema(description = "Origem histórica da taxa aplicada", example = "BASE_COMISS")
+    String origemTaxa,
+
     @Schema(description = "Data histórica da venda", example = "2025-12-01")
     LocalDate dataVenda,
 
@@ -84,7 +87,7 @@ public record LogCalculoResponse(
             String canal, String origemExecucao, String usuarioExecutor, OffsetDateTime executadoEm
     ) {
         this(idLog, protocolo, idVenda, matricula, codCargo, codLoja, codMarca, valorOriginal, valorVenda,
-                taxaAplicada, valorComissao, idRegra, dataVenda, canal, origemExecucao, usuarioExecutor,
+                taxaAplicada, valorComissao, idRegra, null, dataVenda, canal, origemExecucao, usuarioExecutor,
                 executadoEm, "INFORMADA", null, "REGRA#" + idRegra, null);
     }
 
@@ -115,6 +118,7 @@ public record LogCalculoResponse(
                 log.getTaxaAplicada(),
                 log.getValorComissao(),
                 log.getIdRegra(),
+                log.getOrigemTaxa(),
                 log.getDataVenda(),
                 log.getCanal(),
                 log.getOrigemExecucao(),

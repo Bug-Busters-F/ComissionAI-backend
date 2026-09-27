@@ -29,7 +29,7 @@ import com.bugbusters.backend.sales.Sale;
  *    - Matrícula específica (peso 16) > Loja específica (peso 8) > Cargo específico (peso 4) > Canal específico (peso 2) > Marca geral (peso 1).
  *    - Caso haja empate na maior especificidade com múltiplas regras concorrentes, a resolução é bloqueada por ambiguidade/conflito.
  * 2. Taxa base cadastrada em tb_basecomiss (Fallback para taxa padrão por Marca + Cargo do colaborador na competência).
- * 
+ *
  * Caso nenhum percentual seja localizado, os vínculos essenciais apresentem inconsistências ou ocorra conflito de regras,
  * o cálculo é marcado como IMPEDIDO com motivo descritivo contratual.
  * Percentuais nunca são somados implicitamente.
@@ -108,6 +108,10 @@ public class TaxaComissaoResolver {
                 canal,
                 StatusRegra.ATIVA
         );
+
+        regras = regras.stream()
+                .filter(regra -> !isRegraPadraoTecnica(regra))
+                .toList();
 
         if (!regras.isEmpty()) {
             if (regras.size() == 1) {
@@ -205,5 +209,11 @@ public class TaxaComissaoResolver {
             peso += 1;
         }
         return peso;
+    }
+    /** Exclui o registro técnico usado como referência para a taxa base. */
+    private boolean isRegraPadraoTecnica(Regra regra) {
+        return regra != null
+                && REGRA_BASE_ID.equals(regra.getId())
+                && regra.getCampanha() == null;
     }
 }

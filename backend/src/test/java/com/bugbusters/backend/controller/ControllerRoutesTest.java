@@ -632,7 +632,7 @@ class ControllerRoutesTest {
                 .andReturn().getResponse().getContentAsString();
 
         // Extrai o ID criado (ex: "id": 1)
-        long campanhaId = Long.parseLong(postResponse.replaceAll(".*\"id\":\\s*(\\d+).*", "$1"));
+        long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
 
         // 2. Buscar por ID
         mockMvc.perform(get("/api/v1/campanhas/" + campanhaId))
@@ -698,7 +698,7 @@ class ControllerRoutesTest {
                 .andExpect(jsonPath("$.regra.status").value("DRAFT"))
                 .andReturn().getResponse().getContentAsString();
 
-        long campanhaId = Long.parseLong(postResponse.replaceAll(".*\"id\":\\s*(\\d+).*", "$1"));
+        long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
 
         // 1. Alterar para ATIVA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
@@ -766,7 +766,7 @@ class ControllerRoutesTest {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
 
-        long campanhaId = Long.parseLong(postResponse.replaceAll(".*\"id\":\\s*(\\d+).*", "$1"));
+        long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
 
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
                 .contentType(MediaType.APPLICATION_JSON)

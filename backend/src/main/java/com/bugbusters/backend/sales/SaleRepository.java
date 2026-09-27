@@ -3,6 +3,9 @@ package com.bugbusters.backend.sales;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -10,9 +13,15 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.persistence.LockModeType;
+
 @Repository
 public interface SaleRepository extends JpaRepository<Sale, UUID> {
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from Sale s where s.id = :id")
+    java.util.Optional<Sale> findByIdForUpdate(@Param("id") UUID id);
 
     @Override
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
