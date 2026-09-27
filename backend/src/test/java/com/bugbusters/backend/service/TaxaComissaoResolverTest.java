@@ -196,4 +196,105 @@ class TaxaComissaoResolverTest {
         assertFalse(result.sucesso());
         assertTrue(result.motivoImpedimento().contains("posterior à demissão"));
     }
+
+    @Test
+    @DisplayName("7. Precedência Determinística: Regra mais específica deve prevalecer sobre regra genérica")
+    void deveSelecionarRegraMaisEspecificaQuandoHouverMultiplasRegrasCompativeis() {
+        Regra regraGeralMarca = new Regra(
+                null,
+                "Regra Geral Marca",
+                null,
+                brand.getCode(),
+                null,
+                null,
+                null,
+                null,
+                new BigDecimal("0.0300"),
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 30)
+        );
+        regraGeralMarca.setId(10L);
+
+        Regra regraEspecificaLoja = new Regra(
+                null,
+                "Regra Específica Loja",
+                "ECOMMERCE",
+                brand.getCode(),
+                store.getCode(),
+                null,
+                null,
+                null,
+                new BigDecimal("0.0700"),
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 30)
+        );
+        regraEspecificaLoja.setId(20L);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regraGeralMarca, regraEspecificaLoja));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.0700"), result.taxa());
+        assertEquals(20L, result.idRegra());
+        assertEquals("REGRA_NEGOCIO", result.origemTaxa());
+    }
+
+    @Test
+    @DisplayName("8. Bloqueio de Conflito: Múltiplas regras no mesmo nível de especificidade devem ser bloqueadas")
+    void deveBloquearCalculoQuandoHouverMultiplasRegrasConflitantesNoMesmoNivel() {
+        Regra regra1 = new Regra(
+                null,
+                "Regra Campanha A",
+                "ECOMMERCE",
+                brand.getCode(),
+                store.getCode(),
+                null,
+                null,
+                null,
+                new BigDecimal("0.0500"),
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 30)
+        );
+        regra1.setId(101L);
+
+        Regra regra2 = new Regra(
+                null,
+                "Regra Campanha B",
+                "ECOMMERCE",
+                brand.getCode(),
+                store.getCode(),
+                null,
+                null,
+                null,
+                new BigDecimal("0.0800"),
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 30)
+        );
+        regra2.setId(102L);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra1, regra2));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertFalse(result.sucesso());
+        assertNotNull(result.motivoImpedimento());
+        assertTrue(result.motivoImpedimento().contains("Conflito de regras"));
+        assertTrue(result.motivoImpedimento().contains("ambiguidade"));
+        assertTrue(result.motivoImpedimento().contains("101"));
+        assertTrue(result.motivoImpedimento().contains("102"));
+    }
+
+    @Test
+    @DisplayName("9. Impedimento: Venda com valor zero ou negativo deve gerar impedimento")
+    void deveRetornarImpedimentoQuandoValorInvalido() {
+        sale.setValue(BigDecimal.ZERO);
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertFalse(result.sucesso());
+        assertTrue(result.motivoImpedimento().contains("Valor da venda inválido"));
+    }
 }

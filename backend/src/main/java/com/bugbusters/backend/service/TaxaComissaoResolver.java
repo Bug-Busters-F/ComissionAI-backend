@@ -22,11 +22,17 @@ import com.bugbusters.backend.sales.Sale;
 /**
  * Componente responsável pela resolução de taxa de comissão e validação de vínculos essenciais (S1-B08).
  * <p>
- * Ordem de prioridade definida:
+ * Ordem de prioridade e precedência definida:
  * 1. Regra de negócio ativa em tb_regra (Campanhas ativas, promoções temporárias, regras específicas por canal/loja/vendedor).
- * 2. Taxa base cadastrada em tb_basecomiss (Fallback para taxa padrão por Marca + Cargo do colaborador).
- * Caso nenhum percentual seja localizado ou os vínculos essenciais apresentem inconsistências,
- * o cálculo é marcado como IMPEDIDO com motivo descritivo.
+ *    A regra ativa sobrepõe e substitui a taxa base da competência.
+ *    Em caso de múltiplas regras ativas aplicáveis, avalia-se o grau de especificidade:
+ *    - Matrícula específica (peso 16) > Loja específica (peso 8) > Cargo específico (peso 4) > Canal específico (peso 2) > Marca geral (peso 1).
+ *    - Caso haja empate na maior especificidade com múltiplas regras concorrentes, a resolução é bloqueada por ambiguidade/conflito.
+ * 2. Taxa base cadastrada em tb_basecomiss (Fallback para taxa padrão por Marca + Cargo do colaborador na competência).
+ * 
+ * Caso nenhum percentual seja localizado, os vínculos essenciais apresentem inconsistências ou ocorra conflito de regras,
+ * o cálculo é marcado como IMPEDIDO com motivo descritivo contratual.
+ * Percentuais nunca são somados implicitamente.
  * </p>
  */
 @Component
@@ -104,8 +110,34 @@ public class TaxaComissaoResolver {
         );
 
         if (!regras.isEmpty()) {
-            Regra regra = regras.get(0);
-            return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO");
+            if (regras.size() == 1) {
+                Regra regra = regras.get(0);
+                return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO");
+            }
+
+            // Múltiplas regras aplicáveis: aplicar critério determinístico por nível de especificidade
+            int maiorEspecificidade = regras.stream()
+                    .mapToInt(this::calcularEspecificidade)
+                    .max()
+                    .orElse(0);
+
+            List<Regra> regrasMaisEspecificas = regras.stream()
+                    .filter(r -> calcularEspecificidade(r) == maiorEspecificidade)
+                    .toList();
+
+            // Empate na maior especificidade com múltiplas regras concorrentes: conflito/ambiguidade bloqueado
+            if (regrasMaisEspecificas.size() > 1) {
+                List<Long> idsConflitantes = regrasMaisEspecificas.stream().map(Regra::getId).toList();
+                log.warn("Conflito de regras ativas para a venda ID {}: múltiplas regras no nível de especificidade {} (IDs: {})",
+                        sale.getId(), maiorEspecificidade, idsConflitantes);
+                return ResolucaoTaxaResult.impedido(String.format(
+                        "Conflito de regras: múltiplas regras ativas concorrentes encontradas com o mesmo nível de especificidade (Regras IDs: %s). Resolução bloqueada por ambiguidade.",
+                        idsConflitantes
+                ));
+            }
+
+            Regra regraVencedora = regrasMaisEspecificas.get(0);
+            return ResolucaoTaxaResult.sucesso(regraVencedora.getTaxa(), regraVencedora.getId(), "REGRA_NEGOCIO");
         }
 
         // 2ª Prioridade (Fallback): Buscar taxa padrão em tb_basecomiss (Marca + Cargo)
@@ -126,7 +158,7 @@ public class TaxaComissaoResolver {
         if (baseComissOpt.isEmpty() && brand.getCode() != null && position.getCode() != null) {
             baseComissOpt = baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(
                     brand.getCode(), position.getCode()
-            );
+                );
         }
 
         if (baseComissOpt.isPresent() && baseComissOpt.get().getPercentage() != null) {
@@ -140,5 +172,34 @@ public class TaxaComissaoResolver {
                 brand.getDescription() != null ? brand.getDescription() : brand.getCode(),
                 position.getDescription() != null ? position.getDescription() : position.getCode()
         ));
+    }
+
+    /**
+     * Calcula o peso/nível de especificidade da regra.
+     * Regras mais restritas/específicas possuem precedência superior determinística:
+     * - Matrícula (colaborador individual): 16
+     * - Loja: 8
+     * - Cargo: 4
+     * - Canal específico (diferente de PADRAO ou nulo): 2
+     * - Marca: 1
+     */
+    private int calcularEspecificidade(Regra regra) {
+        int peso = 0;
+        if (regra.getMatricula() != null && !regra.getMatricula().isBlank()) {
+            peso += 16;
+        }
+        if (regra.getCodLoja() != null) {
+            peso += 8;
+        }
+        if (regra.getCodCargo() != null) {
+            peso += 4;
+        }
+        if (regra.getCanal() != null && !regra.getCanal().isBlank() && !"PADRAO".equalsIgnoreCase(regra.getCanal())) {
+            peso += 2;
+        }
+        if (regra.getCodMarca() != null) {
+            peso += 1;
+        }
+        return peso;
     }
 }
