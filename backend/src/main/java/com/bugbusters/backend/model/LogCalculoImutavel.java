@@ -46,6 +46,9 @@ public class LogCalculoImutavel {
     @Column(name = "id_regra", nullable = false)
     private Long idRegra;
 
+    @Column(name = "origem_taxa", length = 30)
+    private String origemTaxa;
+
     @Column(name = "data_venda", nullable = false)
     private LocalDate dataVenda;
 
@@ -129,6 +132,10 @@ public class LogCalculoImutavel {
     public BigDecimal getValorComissao() { return valorComissao; }
 
     public Long getIdRegra() { return idRegra; }
+
+    public String getOrigemTaxa() { return origemTaxa; }
+
+    public void setOrigemTaxa(String origemTaxa) { this.origemTaxa = origemTaxa; }
 
     public LocalDate getDataVenda() { return dataVenda; }
 

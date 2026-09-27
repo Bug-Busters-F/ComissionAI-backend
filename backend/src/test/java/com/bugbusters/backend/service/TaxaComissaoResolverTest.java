@@ -144,6 +144,36 @@ class TaxaComissaoResolverTest {
     }
 
     @Test
+    @DisplayName("2.1. Deve ignorar a regra técnica padrão e usar a taxa base")
+    void deveIgnorarRegraPadraoTecnicaAoResolverTaxa() {
+        Regra regraPadraoTecnica = new Regra(
+                null,
+                "Regra Geral Padrão",
+                "PADRAO",
+                new BigDecimal("0.0250"),
+                LocalDate.of(2020, 1, 1),
+                LocalDate.of(2035, 12, 31)
+        );
+        regraPadraoTecnica.setId(1L);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regraPadraoTecnica));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0250"));
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
+                eq(brand.getId()), eq(position.getId()), eq(LocalDate.of(2026, 9, 1))
+        )).thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.0250"), result.taxa());
+        assertEquals(1L, result.idRegra());
+        assertEquals("BASE_COMISS", result.origemTaxa());
+    }
+
+    @Test
     @DisplayName("3. Impedimento: Deve retornar impedimento quando nem regra nem basecomiss existirem")
     void deveRetornarImpedimentoQuandoTaxaNaoEncontrada() {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))

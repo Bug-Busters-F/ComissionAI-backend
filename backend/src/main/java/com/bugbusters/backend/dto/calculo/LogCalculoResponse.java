@@ -46,6 +46,9 @@ public record LogCalculoResponse(
     @Schema(description = "ID da regra aplicada", example = "1")
     Long idRegra,
 
+    @Schema(description = "Origem histórica da taxa aplicada", example = "BASE_COMISS")
+    String origemTaxa,
+
     @Schema(description = "Data histórica da venda", example = "2025-12-01")
     LocalDate dataVenda,
 
@@ -66,7 +69,7 @@ public record LogCalculoResponse(
      * Construtor de compatibilidade para código ou testes que utilizam a assinatura simplificada prévia.
      */
     public LogCalculoResponse(UUID idLog, String matricula, Long idRegra, BigDecimal valorOriginal, BigDecimal taxaAplicada, BigDecimal valorComissao, OffsetDateTime executadoEm) {
-        this(idLog, null, null, matricula, null, null, null, valorOriginal, valorOriginal, taxaAplicada, valorComissao, idRegra, null, null, null, null, executadoEm);
+        this(idLog, null, null, matricula, null, null, null, valorOriginal, valorOriginal, taxaAplicada, valorComissao, idRegra, null, null, null, null, null, executadoEm);
     }
 
     /**
@@ -89,6 +92,7 @@ public record LogCalculoResponse(
                 log.getTaxaAplicada(),
                 log.getValorComissao(),
                 log.getIdRegra(),
+                log.getOrigemTaxa(),
                 log.getDataVenda(),
                 log.getCanal(),
                 log.getOrigemExecucao(),

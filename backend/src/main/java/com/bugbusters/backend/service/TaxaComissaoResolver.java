@@ -103,8 +103,13 @@ public class TaxaComissaoResolver {
                 StatusRegra.ATIVA
         );
 
-        if (!regras.isEmpty()) {
-            Regra regra = regras.get(0);
+        Regra regraAplicavel = regras.stream()
+                .filter(regra -> !isRegraPadraoTecnica(regra))
+                .findFirst()
+                .orElse(null);
+
+        if (regraAplicavel != null) {
+            Regra regra = regraAplicavel;
             return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO");
         }
 
@@ -140,5 +145,16 @@ public class TaxaComissaoResolver {
                 brand.getDescription() != null ? brand.getDescription() : brand.getCode(),
                 position.getDescription() != null ? position.getDescription() : position.getCode()
         ));
+    }
+
+    /**
+     * A regra com ID 1 e sem campanha é um registro técnico criado apenas para
+     * satisfazer a referência dos resultados calculados quando a taxa vem de
+     * tb_basecomiss. Ela não representa uma campanha criada pelo usuário.
+     */
+    private boolean isRegraPadraoTecnica(Regra regra) {
+        return regra != null
+                && REGRA_BASE_ID.equals(regra.getId())
+                && regra.getCampanha() == null;
     }
 }

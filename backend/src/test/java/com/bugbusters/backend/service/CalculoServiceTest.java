@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -502,6 +503,116 @@ class CalculoServiceTest {
         assertEquals(new BigDecimal("100.00"), response.resultados().get(0).valorComissao());
         assertEquals(1, response.impedimentos().size());
         assertTrue(response.impedimentos().get(0).motivo().contains("sem cargo vinculado"));
+    }
+
+    @Test
+    @DisplayName("9.1. Deve recalcular resultado existente, atualizar o vigente e gerar novo log")
+    void deveRecalcularResultadoExistenteComRegraAtual() {
+        UUID idVenda = UUID.randomUUID();
+        Sale sale = new Sale();
+        sale.setId(idVenda);
+        sale.setValue(new BigDecimal("1000.00"));
+        sale.setSaleDate(LocalDate.of(2026, 9, 10));
+        sale.setSaleChannel("LOJA_FISICA");
+
+        ResultadoCalculo existente = new ResultadoCalculo(
+                UUID.randomUUID(), idVenda, "MATRIC-RECALC", 10, 75, 100, 1L,
+                sale.getSaleDate(), new BigDecimal("1000.00"), new BigDecimal("0.0250"),
+                new BigDecimal("25.00"), "COMPETENCIA"
+        );
+        existente.setOrigemTaxa("BASE_COMISS");
+        UUID protocoloAnterior = existente.getProtocoloCalculo();
+
+        when(saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)
+        )).thenReturn(List.of(sale));
+        when(saleRepository.findByIdForUpdate(idVenda)).thenReturn(Optional.of(sale));
+        when(resultadoCalculoRepository.findByIdVenda(idVenda)).thenReturn(Optional.of(existente));
+        when(taxaComissaoResolver.resolverTaxa(sale))
+                .thenReturn(ResolucaoTaxaResult.sucesso(new BigDecimal("0.0300"), 99L, "REGRA_NEGOCIO"));
+        when(resultadoCalculoRepository.save(any(ResultadoCalculo.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        CalculoCompetenciaResponseDTO response = calculoService.calcularPorCompetencia("2026-09", true);
+
+        assertEquals(1, response.totalCalculados());
+        assertEquals(new BigDecimal("30.00"), response.valorTotalComissao());
+        assertEquals("REGRA_NEGOCIO", response.resultados().get(0).origemTaxa());
+        assertEquals(99L, existente.getRegraId());
+        assertEquals(new BigDecimal("0.0300"), existente.getTaxaAplicada());
+        assertNotNull(existente.getOrigemTaxa());
+        assertTrue(!protocoloAnterior.equals(existente.getProtocoloCalculo()));
+
+        ArgumentCaptor<LogCalculoImutavel> logCaptor = ArgumentCaptor.forClass(LogCalculoImutavel.class);
+        verify(logCalculoRepository).save(logCaptor.capture());
+        assertEquals("REGRA_NEGOCIO", logCaptor.getValue().getOrigemTaxa());
+    }
+
+    @Test
+    @DisplayName("9.2. Deve preservar o resultado anterior quando o recálculo fica impedido")
+    void devePreservarResultadoQuandoRecalculoFicaImpedido() {
+        UUID idVenda = UUID.randomUUID();
+        Sale sale = new Sale();
+        sale.setId(idVenda);
+        sale.setValue(new BigDecimal("1000.00"));
+        sale.setSaleDate(LocalDate.of(2026, 9, 10));
+
+        ResultadoCalculo existente = new ResultadoCalculo(
+                UUID.randomUUID(), idVenda, "MATRIC-IMPEDIDA", 10, 75, 100, 1L,
+                sale.getSaleDate(), new BigDecimal("1000.00"), new BigDecimal("0.0250"),
+                new BigDecimal("25.00"), "COMPETENCIA"
+        );
+        existente.setOrigemTaxa("BASE_COMISS");
+        UUID protocoloAnterior = existente.getProtocoloCalculo();
+
+        when(saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)
+        )).thenReturn(List.of(sale));
+        when(saleRepository.findByIdForUpdate(idVenda)).thenReturn(Optional.of(sale));
+        when(resultadoCalculoRepository.findByIdVenda(idVenda)).thenReturn(Optional.of(existente));
+        when(taxaComissaoResolver.resolverTaxa(sale))
+                .thenReturn(ResolucaoTaxaResult.impedido("Sem taxa aplicável"));
+
+        CalculoCompetenciaResponseDTO response = calculoService.calcularPorCompetencia("2026-09", true);
+
+        assertEquals(0, response.totalCalculados());
+        assertEquals(1, response.totalImpedimentos());
+        assertTrue(response.resultados().isEmpty());
+        assertEquals(protocoloAnterior, existente.getProtocoloCalculo());
+        assertEquals(new BigDecimal("25.00"), existente.getValorComissao());
+        verify(resultadoCalculoRepository, never()).save(any());
+        verify(logCalculoRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("9.3. Deve reutilizar resultado sem consultar regra quando recálculo não for solicitado")
+    void deveReutilizarResultadoSemRecalcularPorPadrao() {
+        UUID idVenda = UUID.randomUUID();
+        Sale sale = new Sale();
+        sale.setId(idVenda);
+        sale.setValue(new BigDecimal("1000.00"));
+        sale.setSaleDate(LocalDate.of(2026, 9, 10));
+
+        ResultadoCalculo existente = new ResultadoCalculo(
+                UUID.randomUUID(), idVenda, "MATRIC-IDEMPOTENTE", 10, 75, 100, 1L,
+                sale.getSaleDate(), new BigDecimal("1000.00"), new BigDecimal("0.0250"),
+                new BigDecimal("25.00"), "COMPETENCIA"
+        );
+        existente.setOrigemTaxa("BASE_COMISS");
+
+        when(saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)
+        )).thenReturn(List.of(sale));
+        when(saleRepository.findByIdForUpdate(idVenda)).thenReturn(Optional.of(sale));
+        when(resultadoCalculoRepository.findByIdVenda(idVenda)).thenReturn(Optional.of(existente));
+
+        CalculoCompetenciaResponseDTO response = calculoService.calcularPorCompetencia("2026-09");
+
+        assertEquals(1, response.totalCalculados());
+        assertEquals("BASE_COMISS", response.resultados().get(0).origemTaxa());
+        verify(taxaComissaoResolver, never()).resolverTaxa(any());
+        verify(resultadoCalculoRepository, never()).save(any());
+        verify(logCalculoRepository, never()).save(any());
     }
 
     @Test
