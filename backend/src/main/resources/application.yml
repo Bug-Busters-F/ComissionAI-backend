@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: bugbusters-backend
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+ai:
+  service:
+    url: ${AI_SERVICE_URL:http://localhost:8000}
+    endpoint: /api/v1/interpretar
+    connect-timeout-ms: ${AI_CONNECT_TIMEOUT:3000}
+    read-timeout-ms: ${AI_READ_TIMEOUT:35000}
+
+---
+# Perfil de Desenvolvimento Local (PostgreSQL)
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:db}:${DB_PORT:5432}/${DB_NAME:comissai_db}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    out-of-order: true
+    locations: classpath:db/migration
+
+  batch:
+    jdbc:
+      initialize-schema: never
+    job:
+      enabled: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+---
+# Perfil de Testes Automatizados (Banco em memória H2)
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+  batch:
+    jdbc:
+      initialize-schema: embedded
+    job:
+      enabled: false

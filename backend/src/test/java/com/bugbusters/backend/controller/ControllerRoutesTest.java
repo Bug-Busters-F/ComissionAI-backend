@@ -1,0 +1,890 @@
+package com.bugbusters.backend.controller;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.util.UUID;
+
+import static org.hamcrest.Matchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@SpringBootTest
+@ActiveProfiles("test")
+class ControllerRoutesTest {
+
+    @Autowired
+    private WebApplicationContext webApplicationContext;
+
+    private MockMvc mockMvc;
+
+    @Autowired
+    private org.springframework.web.client.RestClient.Builder aiRestClientBuilder;
+
+    @Autowired
+    private com.bugbusters.backend.service.client.AiServiceClient aiServiceClient;
+
+    private org.springframework.test.web.client.MockRestServiceServer mockServer;
+
+    @Autowired
+    private com.bugbusters.backend.brand.BrandRepository brandRepository;
+
+    @Autowired
+    private com.bugbusters.backend.store.StoreRepository storeRepository;
+
+    @Autowired
+    private com.bugbusters.backend.position.PositionRepository positionRepository;
+
+    @Autowired
+    private com.bugbusters.backend.registration.RegistrationRepository registrationRepository;
+
+    @Autowired
+    private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
+
+    @BeforeEach
+    void setUp() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+        mockServer = org.springframework.test.web.client.MockRestServiceServer.bindTo(aiRestClientBuilder).build();
+        aiServiceClient.setAiRestClient(aiRestClientBuilder.build());
+
+        if (brandRepository.findByCode(10).isEmpty()) {
+            com.bugbusters.backend.brand.Brand b = new com.bugbusters.backend.brand.Brand();
+            b.setCode(10);
+            b.setDescription("PRETO");
+            brandRepository.save(b);
+        }
+        if (storeRepository.findByCode(62).isEmpty()) {
+            com.bugbusters.backend.store.Store s = new com.bugbusters.backend.store.Store();
+            s.setCode(62);
+            s.setDescription("LOJA 62");
+            storeRepository.save(s);
+        }
+        if (positionRepository.findByCode(150).isEmpty()) {
+            com.bugbusters.backend.position.Position p = new com.bugbusters.backend.position.Position();
+            p.setCode(150);
+            p.setDescription("VENDEDOR");
+            positionRepository.save(p);
+        }
+        if (registrationRepository.findByRegistration("MAT-00456").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MAT-00456");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(10, 150).isEmpty()) {
+            com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
+                    brandRepository.findByCode(10).get(),
+                    positionRepository.findByCode(150).get(),
+                    new java.math.BigDecimal("0.1000")
+            );
+            baseComissRepository.save(bc);
+        }
+    }
+
+    // ==========================================
+    // 2. Calculo Controller
+    // ==========================================
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve processar cálculo com 200 OK")
+    void deveCalcularComissao() throws Exception {
+        String payload = """
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "matricula": "MATRIC-1234",
+                "valorVenda": 1000.00,
+                "canal": "ECOMMERCE",
+                "dataVenda": "2026-10-05"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty())
+                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
+                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
+                .andExpect(jsonPath("$.valorOriginal").value(1000.00))
+                .andExpect(jsonPath("$.valorComissao").value(100.00))
+                .andExpect(jsonPath("$.dataCalculo").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve rejeitar cálculo sem ID com 400 Bad Request")
+    void deveRejeitarCalculoSemIdCom400BadRequest() throws Exception {
+        String payloadSemId = """
+            {
+                "matricula": "MATRIC-SEM-ID",
+                "valorVenda": 1000.00,
+                "canal": "ECOMMERCE",
+                "dataVenda": "2026-10-05"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadSemId))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.validacoes[0].campo").value("id"))
+                .andExpect(jsonPath("$.validacoes[0].motivo").value("O ID da venda é obrigatório"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve retornar resultado idêntico sem duplicar logs em caso de reenvio (Idempotência)")
+    void deveRetornarMesmoResultadoEmReenvioIdentico() throws Exception {
+        String payload = """
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "matricula": "MATRIC-IDEMPOTENTE",
+                "valorVenda": 2000.00,
+                "canal": "LOJA_FISICA",
+                "dataVenda": "2026-10-10"
+            }
+            """;
+
+        // 1ª chamada: novo cálculo
+        String respostaOriginal = mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.valorComissao").value(200.00))
+                .andReturn().getResponse().getContentAsString();
+
+        String protocoloOriginal = respostaOriginal.replaceAll(".*\"protocoloCalculo\":\\s*\"([^\"]+)\".*", "$1");
+
+        // 2ª chamada idêntica: deve retornar o mesmo protocolo e mesmos dados
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.protocoloCalculo").value(protocoloOriginal))
+                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.valorComissao").value(200.00));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve rejeitar reenvio com dados divergentes com 400 Bad Request")
+    void deveRejeitarReenvioComDadosDivergentes() throws Exception {
+        String payloadOriginal = """
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "matricula": "MATRIC-CONFLITO",
+                "valorVenda": 500.00,
+                "canal": "APP",
+                "dataVenda": "2026-10-12"
+            }
+            """;
+
+        String payloadDivergente = """
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "matricula": "MATRIC-CONFLITO",
+                "valorVenda": 750.00,
+                "canal": "APP",
+                "dataVenda": "2026-10-12"
+            }
+            """;
+
+        // 1ª chamada bem-sucedida
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadOriginal))
+                .andExpect(status().isOk());
+
+        // 2ª chamada com valor alterado para a mesma matrícula e data de venda -> Rejeitada
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadDivergente))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("dados divergentes")));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/logs-calculo - Deve listar logs paginados com 200 OK")
+    void deveListarLogs() throws Exception {
+        mockMvc.perform(get("/api/v1/logs-calculo"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$.content[0].matricula").isNotEmpty())
+                .andExpect(jsonPath("$.totalElements").isNumber());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular/venda/{id} - Deve calcular comissão de venda individual persistida (S1-B07) resultando em R$ 100 para R$ 1.000")
+    void deveCalcularComissaoVendaIndividualPersistida() throws Exception {
+        String saleId = "a1111111-1111-1111-1111-111111111111";
+        String vendaPayload = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1000.00,
+                "saleDate": "%s",
+                "saleChannel": "LOJA_FISICA"
+            }
+            """, saleId, java.time.LocalDate.now());
+
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(vendaPayload))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular/venda/" + saleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCESSO"))
+                .andExpect(jsonPath("$.idVenda").value(saleId))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
+                .andExpect(jsonPath("$.valorVenda").value(1000.00))
+                .andExpect(jsonPath("$.taxaAplicada").value(0.1000))
+                .andExpect(jsonPath("$.valorComissao").value(100.00))
+                .andExpect(jsonPath("$.origemTaxa").value("BASE_COMISS"))
+                .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty());
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular/venda/" + saleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCESSO"))
+                .andExpect(jsonPath("$.valorComissao").value(100.00));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular/venda/{id} - Deve retornar 400 quando venda não for encontrada")
+    void deveRetornarErroQuandoVendaNaoEncontrada() throws Exception {
+        UUID idInexistente = UUID.randomUUID();
+        mockMvc.perform(post("/api/v1/comissoes/calcular/venda/" + idInexistente))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("Venda não encontrada")));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular-competencia - Deve calcular vendas da competência consolidando totais e impedimentos")
+    void deveCalcularComissoesPorCompetencia() throws Exception {
+        String comp = java.time.YearMonth.now().toString();
+
+        String saleIdValida = "b1111111-1111-1111-1111-111111111111";
+        String vendaValida = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1000.00,
+                "saleDate": "%s",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleIdValida, java.time.LocalDate.now());
+
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(vendaValida))
+                .andExpect(status().isCreated());
+
+        String payloadComp = String.format("""
+            {
+                "competencia": "%s"
+            }
+            """, comp);
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular-competencia")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadComp))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.competencia").value(comp))
+                .andExpect(jsonPath("$.totalVendasProcessadas", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.totalCalculados", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.valorTotalComissao", greaterThan(0.0)))
+                .andExpect(jsonPath("$.resultados", hasSize(greaterThan(0))));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/comissoes/calcular-competencia - Deve rejeitar formato inválido de competência com 400")
+    void deveRejeitarCompetenciaComFormatoInvalido() throws Exception {
+        String payloadInvalido = """
+            {
+                "competencia": "ano-mes-invalido"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular-competencia")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadInvalido))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.validacoes[0].campo").value("competencia"));
+    }
+
+    // ==========================================
+    // 3. Interpretador Controller
+    // ==========================================
+    @Test
+    @DisplayName("POST /api/v1/interpretador/extrair-regra - Deve extrair parâmetros com 200 OK")
+    void deveInterpretarRegra() throws Exception {
+        String respostaSimuladaPython = """
+            {
+              "canal": "ecommerce",
+              "taxa": 0.0500,
+              "dataInicio": "2026-12-01",
+              "dataFim": "2026-12-31",
+              "confianca": 0.98,
+              "pendencias": []
+            }
+            """;
+
+        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo("http://localhost:8000/api/v1/interpretar"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
+
+        String payload = """
+            {
+                "texto": "comissão de 5% no ecommerce para dezembro",
+                "contexto": {}
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/interpretador/extrair-regra")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.canal").value("ECOMMERCE"))
+                .andExpect(jsonPath("$.taxa").value(0.05))
+                .andExpect(jsonPath("$.dataInicio").value("2026-12-01"))
+                .andExpect(jsonPath("$.dataFim").value("2026-12-31"))
+                .andExpect(jsonPath("$.confianca").value(0.98));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/interpretador/extrair-regra - Deve rejeitar texto vazio com 400")
+    void deveRejeitarTextoLivreVazio() throws Exception {
+        String payload = """
+            {
+                "texto": "   "
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/interpretador/extrair-regra")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.validacoes[0].campo").value("texto"));
+    }
+
+    // ==========================================
+    // 4. Importacao Controller
+    // ==========================================
+    @Test
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart SALES com 201 CREATED")
+    void deveRealizarUploadMultipart() throws Exception {
+        byte[] excelBytes;
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Vendas");
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Data");
+            workbook.write(baos);
+            excelBytes = baos.toByteArray();
+        }
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "vendas_outubro.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excelBytes
+        );
+
+        mockMvc.perform(multipart("/api/v1/imports/upload")
+                .file(file)
+                .param("importType", "SALES"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.xlsx"))
+                .andExpect(jsonPath("$.tipoBase").value("SALES"))
+                .andExpect(jsonPath("$.totalLinhas").value(0));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart HR com 201 CREATED e persistir matricula")
+    void deveRealizarUploadHRComSucesso() throws Exception {
+        byte[] excelBytes;
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("RH");
+
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            String[] headers = {"Data_Ref", "Cod_Marca", "Descri_Marca", "Cod_Loja", "Descr_Loja", "Matricula", "Data_Admiss", "Data_Demiss", "Cod_Cargo", "Descri_Cargo"};
+            for (int i = 0; i < headers.length; i++) {
+                header.createCell(i).setCellValue(headers[i]);
+            }
+
+            org.apache.poi.ss.usermodel.Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("dez-25");
+            row.createCell(1).setCellValue(20);
+            row.createCell(2).setCellValue("BRANCO");
+            row.createCell(3).setCellValue(75);
+            row.createCell(4).setCellValue("LOJA-75");
+            row.createCell(5).setCellValue("MATRIC-1");
+            row.createCell(6).setCellValue("5/5/2025");
+            row.createCell(8).setCellValue(200);
+            row.createCell(9).setCellValue("VENDEDOR BALCAO");
+
+            workbook.write(baos);
+            excelBytes = baos.toByteArray();
+        }
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "base_rh.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excelBytes
+        );
+
+        mockMvc.perform(multipart("/api/v1/imports/upload")
+                .file(file)
+                .param("importType", "HR"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nomeArquivo").value("base_rh.xlsx"))
+                .andExpect(jsonPath("$.tipoBase").value("HR"))
+                .andExpect(jsonPath("$.totalLinhas").value(1));
+    }
+
+    // ==========================================
+    // 5. Campanha Controller
+    // ==========================================
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve cadastrar campanha com sucesso (201) e regra em DRAFT")
+    void deveCriarCampanhaValida() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Black Friday 2026",
+                "textoOriginal": "Comissão de 5% para vendas no e-commerce em novembro",
+                "canal": "ECOMMERCE",
+                "taxa": 0.0500,
+                "dataInicio": "2026-11-01",
+                "dataFim": "2026-11-30"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.id").isNumber())
+                .andExpect(jsonPath("$.titulo").value("Campanha Black Friday 2026"))
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.regra.canal").value("ECOMMERCE"))
+                .andExpect(jsonPath("$.regra.taxa").value(0.0500))
+                .andExpect(jsonPath("$.regra.status").value("DRAFT"));
+    }
+
+    
+
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve cadastrar campanha com dimensões de público-alvo e sem canal")
+    void deveCriarCampanhaComDimensoesPublicoAlvoSemCanal() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Gerente Quiosque Marca Azul",
+                "textoOriginal": "Comissão de 0.75% para gerente quiosque da marca azul loja 30",
+                "codMarca": 30,
+                "codLoja": 30,
+                "codCargo": 150,
+                "descriCargo": "GERENTE QUIOSQUE",
+                "matricula": "MATRIC-999",
+                "taxa": 0.0075,
+                "dataInicio": "2026-11-01",
+                "dataFim": "2026-11-30"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.titulo").value("Campanha Gerente Quiosque Marca Azul"))
+                .andExpect(jsonPath("$.regra.canal").doesNotExist())
+                .andExpect(jsonPath("$.regra.codMarca").value(30))
+                .andExpect(jsonPath("$.regra.codLoja").value(30))
+                .andExpect(jsonPath("$.regra.codCargo").value(150))
+                .andExpect(jsonPath("$.regra.descriCargo").value("GERENTE QUIOSQUE"))
+                .andExpect(jsonPath("$.regra.matricula").value("MATRIC-999"))
+                .andExpect(jsonPath("$.regra.taxa").value(0.0075));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve padronizar empresa case-insensitively ao criar campanha")
+    void devePadronizarEmpresaEmCampanhaCaseInsensitive() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Empresa Vermelho",
+                "textoOriginal": "Comissão de 4% para a empresa vermelho",
+                "descrMarca": "  veRmelho  ",
+                "taxa": 0.0400,
+                "dataInicio": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.regra.descrMarca").value("VERMELHO"))
+                .andExpect(jsonPath("$.regra.codMarca").value(40));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve calcular dataFim (+30 dias) quando omitida")
+    void deveCalcularDataFimCampanhaQuandoOmitida() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Sem Fim",
+                "textoOriginal": "Comissão de 6% no varejo físico",
+                "canal": "LOJA_FISICA",
+                "taxa": 0.0600,
+                "dataInicio": "2026-10-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.dataInicio").value("2026-10-01"))
+                .andExpect(jsonPath("$.dataFim").value("2026-10-31"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve rejeitar dados inválidos com 400 Bad Request")
+    void deveRejeitarCampanhaInvalida() throws Exception {
+        String payload = """
+            {
+                "titulo": "",
+                "textoOriginal": "",
+                "canal": "",
+                "taxa": -0.05
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.validacoes", hasSize(greaterThan(0))));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/campanhas - Deve rejeitar período incoerente com 400 Bad Request")
+    void deveRejeitarPeriodoIncoerente() throws Exception {
+        String payload = """
+            {
+                "titulo": "Campanha Datas Invertidas",
+                "textoOriginal": "Texto da regra",
+                "canal": "ECOMMERCE",
+                "taxa": 0.0500,
+                "dataInicio": "2026-12-01",
+                "dataFim": "2026-11-01"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("Período incoerente")));
+    }
+
+    @Test
+    @DisplayName("GET, PUT e DELETE /api/v1/campanhas - Ciclo completo de vida da campanha")
+    void deveExecutarCicloDeVidaCampanha() throws Exception {
+        // 1. Criar
+        String criarPayload = """
+            {
+                "titulo": "Campanha Ciclo Vida",
+                "textoOriginal": "Texto original",
+                "canal": "APP",
+                "taxa": 0.0400,
+                "dataInicio": "2026-09-01",
+                "dataFim": "2026-09-30"
+            }
+            """;
+
+        String postResponse = mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(criarPayload))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        // Extrai o ID criado (ex: "id": 1)
+        long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
+
+        // 2. Buscar por ID
+        mockMvc.perform(get("/api/v1/campanhas/" + campanhaId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.titulo").value("Campanha Ciclo Vida"))
+                .andExpect(jsonPath("$.regra.canal").value("APP"));
+
+        // 3. Listar ativas
+        mockMvc.perform(get("/api/v1/campanhas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(greaterThan(0))));
+
+        // 4. Atualizar
+        String atualizarPayload = """
+            {
+                "titulo": "Campanha Ciclo Vida Atualizada",
+                "textoOriginal": "Texto alterado",
+                "canal": "APP_PREMIUM",
+                "taxa": 0.0600,
+                "dataInicio": "2026-09-01",
+                "dataFim": "2026-10-15"
+            }
+            """;
+
+        mockMvc.perform(put("/api/v1/campanhas/" + campanhaId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(atualizarPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.titulo").value("Campanha Ciclo Vida Atualizada"))
+                .andExpect(jsonPath("$.regra.canal").value("APP_PREMIUM"))
+                .andExpect(jsonPath("$.regra.taxa").value(0.0600));
+
+        // 5. Exclusão lógica (soft delete)
+        mockMvc.perform(delete("/api/v1/campanhas/" + campanhaId))
+                .andExpect(status().isNoContent());
+
+        // 6. Tentar buscar após exclusão lógica deve retornar 404
+        mockMvc.perform(get("/api/v1/campanhas/" + campanhaId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve transicionar estados e sincronizar status da regra vinculada")
+    void deveAlterarEstadoDaCampanhaESincronizarRegra() throws Exception {
+        // Criar campanha (inicia em DRAFT)
+        String criarPayload = """
+            {
+                "titulo": "Campanha Teste Estados",
+                "textoOriginal": "Comissão de 4.5%",
+                "canal": "ECOMMERCE",
+                "taxa": 0.0450,
+                "dataInicio": "2026-10-01",
+                "dataFim": "2026-10-31"
+            }
+            """;
+
+        String postResponse = mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(criarPayload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.regra.status").value("DRAFT"))
+                .andReturn().getResponse().getContentAsString();
+
+        long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
+
+        // 1. Alterar para ATIVA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"ATIVA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("ATIVA"))
+                .andExpect(jsonPath("$.regra.status").value("ATIVA"));
+
+        // 2. Verificar filtro GET por estado
+        mockMvc.perform(get("/api/v1/campanhas").param("estado", "ATIVA"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", hasItem((int) campanhaId)));
+
+        // 3. Alterar para INATIVA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"INATIVA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("INATIVA"))
+                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+
+        // 4. Alterar para CONCLUIDA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"CONCLUIDA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("CONCLUIDA"))
+                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+
+        // 5. Alterar para CANCELADA
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"CANCELADA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("CANCELADA"))
+                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+
+        // 6. Voltar para DRAFT
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"DRAFT\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.regra.status").value("DRAFT"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve rejeitar estado inválido com 400 Bad Request")
+    void deveRejeitarEstadoInvalido() throws Exception {
+        String criarPayload = """
+            {
+                "titulo": "Campanha Para Erro Estado",
+                "textoOriginal": "Texto",
+                "canal": "LOJA",
+                "taxa": 0.0500,
+                "dataInicio": "2026-10-01",
+                "dataFim": "2026-10-31"
+            }
+            """;
+
+        String postResponse = mockMvc.perform(post("/api/v1/campanhas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(criarPayload))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
+
+        mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"ESTADO_INEXISTENTE\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve retornar 404 para campanha inexistente")
+    void deveRetornar404ParaCampanhaInexistenteNoPatchEstado() throws Exception {
+        mockMvc.perform(patch("/api/v1/campanhas/999999/estado")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"estado\": \"ATIVA\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
+    }
+
+    // ==========================================
+    // 6. Sale Controller (Vendas Individuais)
+    // ==========================================
+    @Test
+    @DisplayName("POST /api/v1/vendas - Deve registrar nova venda individual (201)")
+    void deveRegistrarNovaVendaIndividual() throws Exception {
+        String saleId = "c1111111-1111-1111-1111-111111111111";
+        String payload = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1500.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.id").value(saleId))
+                .andExpect(jsonPath("$.value").value(1500.00))
+                .andExpect(jsonPath("$.saleChannel").value("ECOMMERCE"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/vendas - Deve retornar venda existente em reenvio idêntico (Idempotência)")
+    void deveRetornarVendaExistenteEmReenvioIdentico() throws Exception {
+        String saleId = "c2222222-2222-2222-2222-222222222222";
+        String payload = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1800.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        // 1ª chamada: cadastra
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(saleId));
+
+        // 2ª chamada: idêntica, retorna registro existente
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(saleId))
+                .andExpect(jsonPath("$.value").value(1800.00));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/vendas - Deve rejeitar reenvio com dados divergentes (400 Bad Request)")
+    void deveRejeitarVendaComDadosDivergentes() throws Exception {
+        String saleId = "c3333333-3333-3333-3333-333333333333";
+        String payloadOriginal = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 1500.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        String payloadDivergente = String.format("""
+            {
+                "id": "%s",
+                "registrationCode": "MAT-00456",
+                "brandCode": 10,
+                "storeCode": 62,
+                "value": 2500.00,
+                "saleDate": "2026-09-13",
+                "saleChannel": "ECOMMERCE"
+            }
+            """, saleId);
+
+        // 1ª chamada: sucesso
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadOriginal))
+                .andExpect(status().isCreated());
+
+        // 2ª chamada: mesmo ID mas valor divergente -> 400 Bad Request
+        mockMvc.perform(post("/api/v1/vendas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadDivergente))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("dados diferentes")));
+    }
+}
