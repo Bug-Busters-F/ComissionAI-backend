@@ -184,7 +184,17 @@ public class CalculoService {
         try {
             ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
 
-            // 4. Log imutável de auditoria (S1-B10)
+            // 4. Log imutável de auditoria (S1-B10 / BUG-23)
+            String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank() ? sale.getTipoVenda() : "INFORMADA";
+            String idLoteOrigem = sale.getIdLoteOrigem();
+            String versaoRegra = resolucao.versaoOuReferenciaRegra() != null ? resolucao.versaoOuReferenciaRegra() : "REGRA#" + idRegra;
+            String parametrosSnapshot = montarSnapshotParametros(
+                    sale.getValue(), taxaAplicada, comissao, idRegra, resolucao.origemTaxa(), versaoRegra,
+                    sale.getSaleDate(), matricula, codCargo, codLoja, codMarca,
+                    sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
+                    tipoVenda, idLoteOrigem
+            );
+
             LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                     salvo.getProtocoloCalculo(),
                     idVenda,
@@ -198,7 +208,11 @@ public class CalculoService {
                     idRegra,
                     sale.getSaleDate(),
                     sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
-                    "MOTOR_PRODUCAO"
+                    "MOTOR_PRODUCAO",
+                    tipoVenda,
+                    idLoteOrigem,
+                    versaoRegra,
+                    parametrosSnapshot
             );
             logCalculoRepository.save(logImutavel);
 
@@ -380,6 +394,16 @@ public class CalculoService {
 
             ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
 
+            String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank() ? sale.getTipoVenda() : "IMPORTADA";
+            String idLoteOrigem = sale.getIdLoteOrigem();
+            String versaoRegra = resolucao.versaoOuReferenciaRegra() != null ? resolucao.versaoOuReferenciaRegra() : "REGRA#" + idRegra;
+            String parametrosSnapshot = montarSnapshotParametros(
+                    sale.getValue(), taxaAplicada, comissao, idRegra, resolucao.origemTaxa(), versaoRegra,
+                    sale.getSaleDate(), matricula, codCargo, codLoja, codMarca,
+                    sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
+                    tipoVenda, idLoteOrigem
+            );
+
             LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                     salvo.getProtocoloCalculo(),
                     idVenda,
@@ -393,7 +417,11 @@ public class CalculoService {
                     idRegra,
                     sale.getSaleDate(),
                     sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
-                    "MOTOR_PRODUCAO"
+                    "MOTOR_PRODUCAO",
+                    tipoVenda,
+                    idLoteOrigem,
+                    versaoRegra,
+                    parametrosSnapshot
             );
             logCalculoRepository.save(logImutavel);
 
@@ -476,7 +504,16 @@ public class CalculoService {
         try {
             ResultadoCalculo resultadoSalvo = resultadoCalculoRepository.save(novoResultado);
 
-            // Grava o log imutável de auditoria apenas na primeira execução com sucesso
+            // Grava o log imutável de auditoria apenas na primeira execução com sucesso (BUG-23)
+            String tipoVenda = "INFORMADA";
+            String idLoteOrigem = null;
+            String versaoRegra = "REGRA_PADRAO_V1";
+            String parametrosSnapshot = montarSnapshotParametros(
+                    request.valorVenda(), taxaAplicada, comissao, idRegra, "PADRAO", versaoRegra,
+                    request.dataVenda(), request.matricula(), null, request.codLoja(), request.codMarca(),
+                    request.canal(), tipoVenda, idLoteOrigem
+            );
+
             LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                     resultadoSalvo.getProtocoloCalculo(),
                     request.idVenda(),
@@ -490,7 +527,11 @@ public class CalculoService {
                     idRegra,
                     request.dataVenda(),
                     request.canal(),
-                    "MOTOR_PRODUCAO"
+                    "MOTOR_PRODUCAO",
+                    tipoVenda,
+                    idLoteOrigem,
+                    versaoRegra,
+                    parametrosSnapshot
             );
             logCalculoRepository.save(logImutavel);
 
@@ -566,6 +607,8 @@ public class CalculoService {
             Long idRegra,
             LocalDate dataInicio,
             LocalDate dataFim,
+            String tipoVenda,
+            String idLoteOrigem,
             Pageable pageable
     ) {
         if (dataInicio != null && dataFim != null && dataInicio.isAfter(dataFim)) {
@@ -573,11 +616,23 @@ public class CalculoService {
         }
 
         Specification<LogCalculoImutavel> spec = LogCalculoSpecification.comFiltros(
-                idVenda, matricula, idRegra, dataInicio, dataFim
+                idVenda, matricula, idRegra, dataInicio, dataFim, tipoVenda, idLoteOrigem
         );
 
         Page<LogCalculoImutavel> page = logCalculoRepository.findAll(spec, pageable);
         return page.map(LogCalculoResponse::fromEntity);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LogCalculoResponse> listarLogs(
+            UUID idVenda,
+            String matricula,
+            Long idRegra,
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            Pageable pageable
+    ) {
+        return listarLogs(idVenda, matricula, idRegra, dataInicio, dataFim, null, null, pageable);
     }
 
     /**
@@ -591,7 +646,8 @@ public class CalculoService {
     @Transactional(readOnly = true)
     public LogCalculoResponse buscarPorId(UUID id) {
         LogCalculoImutavel log = logCalculoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Log de cálculo não encontrado com o identificador: " + id));
+                .or(() -> logCalculoRepository.findByProtocolo(id).stream().findFirst())
+                .orElseThrow(() -> new ResourceNotFoundException("Log de cálculo não encontrado com o identificador ou protocolo: " + id));
         return LogCalculoResponse.fromEntity(log);
     }
 
@@ -605,6 +661,33 @@ public class CalculoService {
                 .stream()
                 .map(LogCalculoResponse::fromEntity)
                 .toList();
+    }
+
+    private String montarSnapshotParametros(
+            BigDecimal valorVenda, BigDecimal taxaAplicada, BigDecimal valorComissao,
+            Long idRegra, String origemTaxa, String versaoRegra,
+            LocalDate dataVenda, String matricula, Integer codCargo, Integer codLoja, Integer codMarca,
+            String canal, String tipoVenda, String idLoteOrigem
+    ) {
+        return String.format(
+                "{\"valorVenda\":%s,\"taxaAplicada\":%s,\"valorComissao\":%s,\"idRegra\":%s," +
+                "\"origemTaxa\":\"%s\",\"versaoRegra\":\"%s\",\"dataVenda\":\"%s\",\"matricula\":\"%s\"," +
+                "\"codCargo\":%s,\"codLoja\":%s,\"codMarca\":%s,\"canal\":\"%s\",\"tipoVenda\":\"%s\",\"idLoteOrigem\":%s}",
+                valorVenda != null ? valorVenda : BigDecimal.ZERO,
+                taxaAplicada != null ? taxaAplicada : BigDecimal.ZERO,
+                valorComissao != null ? valorComissao : BigDecimal.ZERO,
+                idRegra != null ? idRegra : 1L,
+                origemTaxa != null ? origemTaxa : "PADRAO",
+                versaoRegra != null ? versaoRegra : "",
+                dataVenda != null ? dataVenda : "",
+                matricula != null ? matricula : "",
+                codCargo != null ? codCargo.toString() : "null",
+                codLoja != null ? codLoja.toString() : "null",
+                codMarca != null ? codMarca.toString() : "null",
+                canal != null ? canal : "",
+                tipoVenda != null ? tipoVenda : "INFORMADA",
+                idLoteOrigem != null ? "\"" + idLoteOrigem + "\"" : "null"
+        );
     }
 
     private Regra garantirRegraPadraoExistente(Long idRegra, BigDecimal taxa) {

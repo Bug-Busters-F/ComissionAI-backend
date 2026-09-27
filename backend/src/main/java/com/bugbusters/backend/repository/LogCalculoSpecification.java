@@ -11,7 +11,8 @@ import java.util.UUID;
 
 /**
  * Especificação JPA dinâmica para filtros combináveis de logs imutáveis de cálculo.
- * Suporta filtros por venda (idVenda ou matrícula), regra (idRegra) e período (dataVenda).
+ * Suporta filtros por venda (idVenda ou matrícula), regra (idRegra), período (dataVenda),
+ * tipo de venda (informada vs importada) e identificador de lote de origem (BUG-23 e BUG-24).
  */
 public class LogCalculoSpecification {
 
@@ -24,7 +25,9 @@ public class LogCalculoSpecification {
             String matricula,
             Long idRegra,
             LocalDate dataInicio,
-            LocalDate dataFim
+            LocalDate dataFim,
+            String tipoVenda,
+            String idLoteOrigem
     ) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -52,7 +55,31 @@ public class LogCalculoSpecification {
                 predicates.add(cb.lessThanOrEqualTo(root.get("dataVenda"), dataFim));
             }
 
+            if (tipoVenda != null && !tipoVenda.isBlank()) {
+                predicates.add(cb.equal(
+                        cb.upper(root.get("tipoVenda")),
+                        tipoVenda.trim().toUpperCase()
+                ));
+            }
+
+            if (idLoteOrigem != null && !idLoteOrigem.isBlank()) {
+                predicates.add(cb.equal(
+                        cb.upper(root.get("idLoteOrigem")),
+                        idLoteOrigem.trim().toUpperCase()
+                ));
+            }
+
             return cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    public static Specification<LogCalculoImutavel> comFiltros(
+            UUID idVenda,
+            String matricula,
+            Long idRegra,
+            LocalDate dataInicio,
+            LocalDate dataFim
+    ) {
+        return comFiltros(idVenda, matricula, idRegra, dataInicio, dataFim, null, null);
     }
 }

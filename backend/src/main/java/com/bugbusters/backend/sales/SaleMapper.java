@@ -43,6 +43,7 @@ public class SaleMapper {
         saleEntity.setBrand(brand);
         saleEntity.setValue(row.getSaleValue());
         saleEntity.setSaleDate(row.getReferenceDate());
+        saleEntity.setTipoVenda("IMPORTADA");
 
         return saleEntity;
     }

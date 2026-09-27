@@ -29,7 +29,7 @@ public class Sale {
     @JoinColumn(name = "brand_id", nullable = false)
     private Brand brand;
 
-    @Column(name = "sale_value", nullable = false, precision = 15, scale = 2)
+    @Column(name = "valor_venda", nullable = false, precision = 15, scale = 2)
     private BigDecimal value;
 
     @Column(nullable = false)
@@ -37,6 +37,12 @@ public class Sale {
 
     @Column(name = "canal", nullable = true)
     private String saleChannel;
+
+    @Column(name = "tipo_venda", length = 50)
+    private String tipoVenda = "INFORMADA";
+
+    @Column(name = "id_lote_origem", length = 100)
+    private String idLoteOrigem;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -109,5 +115,21 @@ public class Sale {
 
     public void setId(UUID id) {
         this.id = id;
+    }
+
+    public String getTipoVenda() {
+        return tipoVenda;
+    }
+
+    public void setTipoVenda(String tipoVenda) {
+        this.tipoVenda = tipoVenda;
+    }
+
+    public String getIdLoteOrigem() {
+        return idLoteOrigem;
+    }
+
+    public void setIdLoteOrigem(String idLoteOrigem) {
+        this.idLoteOrigem = idLoteOrigem;
     }
 }

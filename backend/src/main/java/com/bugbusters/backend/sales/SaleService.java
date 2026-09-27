@@ -100,6 +100,8 @@ public class SaleService {
         sale.setValue(request.value());
         sale.setSaleDate(request.saleDate());
         sale.setSaleChannel(request.saleChannel());
+        sale.setTipoVenda(request.tipoVenda() != null && !request.tipoVenda().isBlank() ? request.tipoVenda() : "INFORMADA");
+        sale.setIdLoteOrigem(request.idLoteOrigem());
 
         Sale createdSale = vendaRepository.save(sale);
 
@@ -146,13 +148,19 @@ public class SaleService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public SaleResponseDTO buscarVendaPorId(UUID id) {
+        Sale sale = vendaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Venda não encontrada: " + id));
+        return mapearParaResponse(sale);
+    }
+
     public Page<SaleResponseDTO> readAllSales(Pageable pageable) {
         return vendaRepository.findAll(pageable)
                 .map(this::mapearParaResponse);
     }
 
     private SaleResponseDTO mapearParaResponse(Sale sale) {
-
         return new SaleResponseDTO(
                 sale.getId(),
                 sale.getRegistration(),
@@ -161,6 +169,8 @@ public class SaleService {
                 sale.getSaleDate(),
                 sale.getValue(),
                 sale.getSaleChannel(),
-                sale.getCreatedAt());
+                sale.getCreatedAt(),
+                sale.getTipoVenda(),
+                sale.getIdLoteOrigem());
     }
 }
