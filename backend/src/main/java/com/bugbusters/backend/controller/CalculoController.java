@@ -36,7 +36,7 @@ import jakarta.validation.Valid;
 
 @RestController 
 @RequestMapping("/api/v1")
-@Tag(name = "2. Motor de Cálculo e Auditoria", description = "Processamento de comissões individuais e por competência, com histórico de logs imutáveis")
+@Tag(name = "Motor de Cálculo e Auditoria", description = "Processamento de comissões individuais e por competência, com histórico de logs imutáveis")
 public class CalculoController {
 
     private final CalculoService calculoService;
@@ -117,12 +117,18 @@ public class CalculoController {
             @Parameter(description = "Atalho para data exata da venda (formato YYYY-MM-DD)")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataVenda,
 
+            @Parameter(description = "Tipo de origem da venda (INFORMADA ou IMPORTADA)")
+            @RequestParam(required = false) String tipoVenda,
+
+            @Parameter(description = "Identificador do lote de origem da venda")
+            @RequestParam(required = false) String idLoteOrigem,
+
             @PageableDefault(size = 20, sort = "executadoEm", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         LocalDate inicio = dataVenda != null ? dataVenda : dataInicio;
         LocalDate fim = dataVenda != null ? dataVenda : dataFim;
 
-        Page<LogCalculoResponse> logs = calculoService.listarLogs(idVenda, matricula, idRegra, inicio, fim, pageable);
+        Page<LogCalculoResponse> logs = calculoService.listarLogs(idVenda, matricula, idRegra, inicio, fim, tipoVenda, idLoteOrigem, pageable);
         return ResponseEntity.ok(logs);
     }
 

@@ -25,4 +25,20 @@ public interface LogCalculoRepository extends JpaRepository<LogCalculoImutavel, 
      * Busca logs associados à matrícula de um colaborador.
      */
     List<LogCalculoImutavel> findByMatricula(String matricula);
+
+    /**
+     * Blindagem de repositório contra exclusão acidental de registros imutáveis (BUG-23).
+     */
+    @Override
+    default void delete(LogCalculoImutavel entity) {
+        throw new UnsupportedOperationException("Registros de log de cálculo imutável não podem ser excluídos.");
+    }
+
+    /**
+     * Blindagem de repositório contra exclusão acidental por ID de registros imutáveis (BUG-23).
+     */
+    @Override
+    default void deleteById(UUID id) {
+        throw new UnsupportedOperationException("Registros de log de cálculo imutável não podem ser excluídos.");
+    }
 }

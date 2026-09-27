@@ -514,6 +514,8 @@ class CalculoServiceTest {
         sale.setValue(new BigDecimal("1000.00"));
         sale.setSaleDate(LocalDate.of(2026, 9, 10));
         sale.setSaleChannel("LOJA_FISICA");
+        sale.setTipoVenda("IMPORTADA");
+        sale.setIdLoteOrigem("LOTE-RECALC");
 
         ResultadoCalculo existente = new ResultadoCalculo(
                 UUID.randomUUID(), idVenda, "MATRIC-RECALC", 10, 75, 100, 1L,
@@ -529,7 +531,7 @@ class CalculoServiceTest {
         when(saleRepository.findByIdForUpdate(idVenda)).thenReturn(Optional.of(sale));
         when(resultadoCalculoRepository.findByIdVenda(idVenda)).thenReturn(Optional.of(existente));
         when(taxaComissaoResolver.resolverTaxa(sale))
-                .thenReturn(ResolucaoTaxaResult.sucesso(new BigDecimal("0.0300"), 99L, "REGRA_NEGOCIO"));
+                .thenReturn(ResolucaoTaxaResult.sucesso(new BigDecimal("0.0300"), 99L, "REGRA_NEGOCIO", "REGRA#99 - Campanha atual", null));
         when(resultadoCalculoRepository.save(any(ResultadoCalculo.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -546,6 +548,11 @@ class CalculoServiceTest {
         ArgumentCaptor<LogCalculoImutavel> logCaptor = ArgumentCaptor.forClass(LogCalculoImutavel.class);
         verify(logCalculoRepository).save(logCaptor.capture());
         assertEquals("REGRA_NEGOCIO", logCaptor.getValue().getOrigemTaxa());
+        assertEquals("IMPORTADA", logCaptor.getValue().getTipoVenda());
+        assertEquals("LOTE-RECALC", logCaptor.getValue().getIdLoteOrigem());
+        assertEquals("REGRA#99 - Campanha atual", logCaptor.getValue().getVersaoOuReferenciaRegra());
+        assertTrue(logCaptor.getValue().getParametrosAplicados().contains("\"taxaAplicada\":0.0300"));
+        assertTrue(logCaptor.getValue().getParametrosAplicados().contains("\"valorComissao\":30.00"));
     }
 
     @Test

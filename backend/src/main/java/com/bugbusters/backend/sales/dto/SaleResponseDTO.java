@@ -36,6 +36,24 @@ public record SaleResponseDTO(
         String saleChannel,
 
         @Schema(description = "Momento em que o registro foi criado no sistema")
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
 
-) {}
+        @Schema(description = "Tipo de origem da venda (INFORMADA ou IMPORTADA)", example = "INFORMADA")
+        String tipoVenda,
+
+        @Schema(description = "Identificador do lote de origem, caso aplicável", example = "LOTE-2026-09")
+        String idLoteOrigem
+
+) {
+    public SaleResponseDTO(
+            UUID id,
+            Registration registration,
+            Brand brand,
+            Store store,
+            LocalDate saleDate,
+            BigDecimal value,
+            String saleChannel,
+            OffsetDateTime createdAt) {
+        this(id, registration, brand, store, saleDate, value, saleChannel, createdAt, "INFORMADA", null);
+    }
+}

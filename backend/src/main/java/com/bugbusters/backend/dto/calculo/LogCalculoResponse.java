@@ -62,14 +62,40 @@ public record LogCalculoResponse(
     String usuarioExecutor,
 
     @Schema(description = "Data e hora de execução", example = "2026-09-14T09:30:00Z")
-    OffsetDateTime executadoEm
+    OffsetDateTime executadoEm,
+
+    @Schema(description = "Tipo de origem da venda (INFORMADA ou IMPORTADA)", example = "INFORMADA")
+    String tipoVenda,
+
+    @Schema(description = "Identificador do lote de origem quando houver", example = "LOTE-2026-09")
+    String idLoteOrigem,
+
+    @Schema(description = "Versão ou referência descritiva da regra ou tabela base aplicada", example = "REGRA#1 - Campanha Verão")
+    String versaoRegra,
+
+    @Schema(description = "Cópia dos parâmetros efetivamente aplicados no momento da execução em formato estruturado", example = "{\"taxaAplicada\":0.1000,...}")
+    String parametrosAplicados
 ) {
 
     /**
-     * Construtor de compatibilidade para código ou testes que utilizam a assinatura simplificada prévia.
+     * Construtor de compatibilidade para código ou testes com 17 parâmetros.
+     */
+    public LogCalculoResponse(
+            UUID idLog, UUID protocolo, UUID idVenda, String matricula, Integer codCargo,
+            Integer codLoja, Integer codMarca, BigDecimal valorOriginal, BigDecimal valorVenda,
+            BigDecimal taxaAplicada, BigDecimal valorComissao, Long idRegra, LocalDate dataVenda,
+            String canal, String origemExecucao, String usuarioExecutor, OffsetDateTime executadoEm
+    ) {
+        this(idLog, protocolo, idVenda, matricula, codCargo, codLoja, codMarca, valorOriginal, valorVenda,
+                taxaAplicada, valorComissao, idRegra, null, dataVenda, canal, origemExecucao, usuarioExecutor,
+                executadoEm, "INFORMADA", null, "REGRA#" + idRegra, null);
+    }
+
+    /**
+     * Construtor de compatibilidade para código ou testes que utilizam a assinatura simplificada prévia (7 parâmetros).
      */
     public LogCalculoResponse(UUID idLog, String matricula, Long idRegra, BigDecimal valorOriginal, BigDecimal taxaAplicada, BigDecimal valorComissao, OffsetDateTime executadoEm) {
-        this(idLog, null, null, matricula, null, null, null, valorOriginal, valorOriginal, taxaAplicada, valorComissao, idRegra, null, null, null, null, null, executadoEm);
+        this(idLog, null, null, matricula, null, null, null, valorOriginal, valorOriginal, taxaAplicada, valorComissao, idRegra, null, null, null, null, executadoEm);
     }
 
     /**
@@ -97,7 +123,11 @@ public record LogCalculoResponse(
                 log.getCanal(),
                 log.getOrigemExecucao(),
                 log.getUsuarioExecutor(),
-                log.getExecutadoEm()
+                log.getExecutadoEm(),
+                log.getTipoVenda(),
+                log.getIdLoteOrigem(),
+                log.getVersaoOuReferenciaRegra(),
+                log.getParametrosAplicados()
         );
     }
 }

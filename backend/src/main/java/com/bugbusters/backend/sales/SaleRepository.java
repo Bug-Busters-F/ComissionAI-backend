@@ -24,7 +24,11 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
     java.util.Optional<Sale> findByIdForUpdate(@Param("id") UUID id);
 
     @Override
-    @EntityGraph(attributePaths = { "registration", "registration.position", "brand", "store" })
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    java.util.Optional<Sale> findById(UUID id);
+
+    @Override
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     Page<Sale> findAll(Pageable pageable);
 
     boolean existsByRegistrationId(UUID registrationId);

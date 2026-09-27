@@ -31,7 +31,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/vendas")
-@Tag(name = "3. Vendas Individuais", description = "Registro, consulta e exclusão de vendas individuais para posterior cálculo de comissionamento")
+@Tag(name = "Vendas Individuais", description = "Registro, consulta e exclusão de vendas individuais para posterior cálculo de comissionamento")
 public class SaleController {
 
     private final SaleService saleService;
@@ -73,6 +73,17 @@ public class SaleController {
 
         Pageable pageable = PageRequest.of(page, size);
         return saleService.readAllSales(pageable);
+    }
+
+    @Operation(summary = "Buscar venda por ID", description = "Recupera os detalhes de uma venda individual pelo seu identificador único (UUID).")
+    @ApiResponse(responseCode = "200", description = "Venda recuperada com sucesso")
+    @ApiResponse(responseCode = "404", description = "Venda não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/{id}")
+    public ResponseEntity<SaleResponseDTO> buscarVendaPorId(
+            @Parameter(description = "ID (UUID) da venda a ser consultada", example = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+            @PathVariable UUID id) {
+        SaleResponseDTO response = saleService.buscarVendaPorId(id);
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Excluir venda", description = "Remove uma venda individual pelo seu ID.")
