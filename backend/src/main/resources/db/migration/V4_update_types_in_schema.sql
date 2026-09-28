@@ -1,3 +1,0 @@
-ALTER TABLE tb_position
-    ALTER COLUMN code TYPE INTEGER
-    USING code::INTEGER;
