@@ -2,7 +2,6 @@ package com.bugbusters.backend.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +15,7 @@ import com.bugbusters.backend.dto.interpretador.proposta.PendenciaPropostaDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.PeriodoVigenciaDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.PropostaRegraDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
+import com.bugbusters.backend.model.CatalogoDominioDomRock;
 
 @Service
 public class ArtefatoExplicativoService {
@@ -115,6 +115,22 @@ public class ArtefatoExplicativoService {
         );
         if (!temFiltroPublico) {
             pendencias.add(PendenciaPropostaDTO.aviso("filtros", "PUBLICO_GERAL", "Nenhum filtro de público-alvo restrito identificado. A regra se aplicará de forma genérica a todas as vendas."));
+        } else {
+            if (filtros.matricula() != null && !filtros.matricula().isBlank()) {
+                if (!CatalogoDominioDomRock.isMatriculaValida(filtros.matricula())) {
+                    pendencias.add(PendenciaPropostaDTO.aviso("filtros.matricula", "FORMATO_MATRICULA",
+                            "A matrícula '" + filtros.matricula() + "' não segue o padrão cadastral da rede (ex: MATRIC-123)."));
+                }
+            }
+            if (filtros.codLoja() != null) {
+                if (filtros.codLoja() <= 0) {
+                    pendencias.add(PendenciaPropostaDTO.impedimento("filtros.codLoja", "LOJA_INVALIDA",
+                            "O código da loja deve ser um número positivo."));
+                } else if (!CatalogoDominioDomRock.isLojaValida(filtros.codLoja())) {
+                    pendencias.add(PendenciaPropostaDTO.aviso("filtros.codLoja", "LOJA_FORA_CATALOGO",
+                            "Código da loja (" + filtros.codLoja() + ") fora do catálogo ativo da rede (Lojas 1 a 80)."));
+                }
+            }
         }
 
         // 3. Validação de Faixa de Valor Monetário

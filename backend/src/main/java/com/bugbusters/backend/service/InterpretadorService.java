@@ -19,6 +19,8 @@ import com.bugbusters.backend.dto.interpretador.proposta.ReinterpretarBlocoReque
 import com.bugbusters.backend.dto.interpretador.proposta.ReinterpretarBlocoResponse;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
+import com.bugbusters.backend.model.Cargo;
+import com.bugbusters.backend.model.CatalogoDominioDomRock;
 import com.bugbusters.backend.model.Marca;
 import com.bugbusters.backend.service.client.AiServiceClient;
 import org.springframework.stereotype.Service;
@@ -33,31 +35,12 @@ import java.util.Map;
 @Service
 public class InterpretadorService {
 
-    public static final Map<Integer, String> MARCAS_CONHECIDAS = Map.of(
-            10, "PRETO",
-            20, "BRANCO",
-            30, "AZUL",
-            40, "VERMELHO",
-            50, "AMARELO",
-            60, "CINZA"
-    );
+    public static final Map<Integer, String> MARCAS_CONHECIDAS = CatalogoDominioDomRock.MARCAS;
+    public static final Map<Integer, String> CARGOS_CONHECIDOS = CatalogoDominioDomRock.CARGOS_POR_CODIGO;
+    public static final List<String> CANAIS_CONHECIDOS = CatalogoDominioDomRock.CANAIS;
+    public static final Map<Integer, String> LOJAS_CONHECIDAS = CatalogoDominioDomRock.LOJAS;
 
-    public static final Map<Integer, String> CARGOS_CONHECIDOS = Map.of(
-            100, "VENDEDOR LOJA",
-            150, "GERENTE DE LOJA",
-            200, "VENDEDOR BALCAO",
-            300, "ASSISTENTE DE VENDAS"
-    );
-
-    public static final List<String> CANAIS_CONHECIDOS = List.of(
-            "LOJA_FISICA", "ECOMMERCE", "BALCAO", "QUIOSQUE", "APP", "PADRAO"
-    );
-
-    public static final Map<String, Object> DICIONARIO_CAMPOS_RECONHECIDOS = Map.of(
-            "marcas", MARCAS_CONHECIDAS,
-            "cargos", CARGOS_CONHECIDOS,
-            "canais", CANAIS_CONHECIDOS
-    );
+    public static final Map<String, Object> DICIONARIO_CAMPOS_RECONHECIDOS = CatalogoDominioDomRock.obterDicionarioDimensoes();
 
     private final AiServiceClient aiClient;
     private final ArtefatoExplicativoService artefatoService;
@@ -119,11 +102,17 @@ public class InterpretadorService {
         Integer codCargo = respostaBruta.codCargo();
         String descriCargo = respostaBruta.descriCargo() != null ? respostaBruta.descriCargo().trim().toUpperCase() : null;
         if (descriCargo != null && codCargo == null) {
-            for (var entry : CARGOS_CONHECIDOS.entrySet()) {
-                if (entry.getValue().equalsIgnoreCase(descriCargo)) {
-                    codCargo = entry.getKey();
-                    descriCargo = entry.getValue();
-                    break;
+            var cargoOpt = Cargo.buscarPorDescricao(descriCargo);
+            if (cargoOpt.isPresent()) {
+                codCargo = cargoOpt.get().getCodigo();
+                descriCargo = cargoOpt.get().getDescricao();
+            } else {
+                for (var entry : CARGOS_CONHECIDOS.entrySet()) {
+                    if (entry.getValue().equalsIgnoreCase(descriCargo)) {
+                        codCargo = entry.getKey();
+                        descriCargo = entry.getValue();
+                        break;
+                    }
                 }
             }
             if (codCargo == null && descriCargo.contains("QUIOSQUE")) {
@@ -140,11 +129,18 @@ public class InterpretadorService {
             }
         }
 
-        // Validação de Loja (codLoja)
+        // Validação e extração de Loja (codLoja)
         Integer codLoja = respostaBruta.codLoja();
-        if (codLoja != null && codLoja <= 0) {
-            pendencias.add("Código da loja inválido (" + codLoja + "). Deve ser um número positivo.");
-            codLoja = null;
+        if (codLoja == null) {
+            codLoja = CatalogoDominioDomRock.extrairCodigoLoja(request.texto()).orElse(null);
+        }
+        if (codLoja != null) {
+            if (codLoja <= 0) {
+                pendencias.add("Código da loja inválido (" + codLoja + "). Deve ser um número positivo.");
+                codLoja = null;
+            } else if (!CatalogoDominioDomRock.isLojaValida(codLoja)) {
+                pendencias.add("Código da loja (" + codLoja + ") está fora da faixa de lojas cadastradas na rede (Lojas 1 a 80).");
+            }
         }
 
         // Verificação de dimensões: aceitar qualquer dimensão válida sem descartar parâmetros
@@ -347,18 +343,28 @@ public class InterpretadorService {
     }
 
     private PropostaRegraDTO converterParaProposta(InterpretacaoRegraResponse resp, String blocoId, String trechoOrigem, Map<String, Object> contexto) {
+        String matricula = CatalogoDominioDomRock.extrairMatricula(trechoOrigem).orElse(null);
+        Integer codLoja = resp.codLoja() != null ? resp.codLoja() : CatalogoDominioDomRock.extrairCodigoLoja(trechoOrigem).orElse(null);
+
         FiltrosRegraDTO filtros = new FiltrosRegraDTO(
                 resp.canal(),
                 resp.codMarca(),
                 resp.descrMarca(),
-                resp.codLoja(),
+                codLoja,
                 resp.codCargo(),
                 resp.descriCargo(),
-                null
+                matricula
         );
 
         FaixaValorDTO faixa = extrairFaixaValor(trechoOrigem);
-        OperacaoBaseDTO operacao = extrairOperacaoBase(trechoOrigem, resp.taxa());
+        OperacaoBaseDTO operacao = extrairOperacaoBase(
+                trechoOrigem,
+                resp.taxa(),
+                resp.codMarca(),
+                resp.descrMarca(),
+                resp.codCargo(),
+                resp.descriCargo()
+        );
         BigDecimal taxaFinal = artefatoService.calcularTaxaEfetiva(operacao);
         if (taxaFinal == null) {
             taxaFinal = resp.taxa();
@@ -367,8 +373,9 @@ public class InterpretadorService {
         Map<String, OrigemCampo> origens = new HashMap<>();
         if (resp.canal() != null) origens.put("canal", OrigemCampo.TEXTO);
         if (resp.codMarca() != null) origens.put("marca", OrigemCampo.TEXTO);
-        if (resp.codLoja() != null) origens.put("loja", OrigemCampo.TEXTO);
+        if (codLoja != null) origens.put("loja", OrigemCampo.TEXTO);
         if (resp.codCargo() != null) origens.put("cargo", OrigemCampo.TEXTO);
+        if (matricula != null) origens.put("matricula", OrigemCampo.TEXTO);
         if (resp.taxa() != null) origens.put("taxa", OrigemCampo.TEXTO);
         if (faixa.possuiFaixa()) origens.put("condicaoValor", OrigemCampo.TEXTO);
 
@@ -381,6 +388,12 @@ public class InterpretadorService {
         }
         if (resp.descriCargo() != null && resp.codCargo() != null) {
             referencias.add(new ReferenciaConsultadaDTO("CARGO", "cod_cargo=" + resp.codCargo(), "Cargo " + resp.descriCargo()));
+        }
+        if (matricula != null) {
+            referencias.add(new ReferenciaConsultadaDTO("MATRICULA", "matricula=" + matricula, "Colaborador " + matricula));
+        }
+        if (codLoja != null) {
+            referencias.add(new ReferenciaConsultadaDTO("LOJA", "cod_loja=" + codLoja, CatalogoDominioDomRock.formatarLoja(codLoja)));
         }
         if (operacao.referenciaBase() != null) {
             referencias.add(new ReferenciaConsultadaDTO("BASE_COMISS", operacao.referenciaBase().tipoBase(), operacao.referenciaBase().descricao()));
@@ -436,20 +449,38 @@ public class InterpretadorService {
     }
 
     private PropostaRegraDTO mesclarProposta(PropostaRegraDTO anterior, InterpretacaoRegraResponse novo, String instrucao, Map<String, Object> contexto) {
+        String matricula = anterior.filtros().matricula();
+        var matOpt = CatalogoDominioDomRock.extrairMatricula(instrucao);
+        if (matOpt.isPresent()) {
+            matricula = matOpt.get();
+        }
+
+        Integer codLoja = novo.codLoja() != null ? novo.codLoja() : anterior.filtros().codLoja();
+        if (codLoja == null) {
+            codLoja = CatalogoDominioDomRock.extrairCodigoLoja(instrucao).orElse(null);
+        }
+
         FiltrosRegraDTO filtros = new FiltrosRegraDTO(
                 novo.canal() != null ? novo.canal() : anterior.filtros().canal(),
                 novo.codMarca() != null ? novo.codMarca() : anterior.filtros().codMarca(),
                 novo.descrMarca() != null ? novo.descrMarca() : anterior.filtros().descrMarca(),
-                novo.codLoja() != null ? novo.codLoja() : anterior.filtros().codLoja(),
+                codLoja,
                 novo.codCargo() != null ? novo.codCargo() : anterior.filtros().codCargo(),
                 novo.descriCargo() != null ? novo.descriCargo() : anterior.filtros().descriCargo(),
-                anterior.filtros().matricula()
+                matricula
         );
 
         FaixaValorDTO faixaNova = extrairFaixaValor(instrucao);
         FaixaValorDTO faixa = faixaNova.possuiFaixa() ? faixaNova : anterior.condicaoValor();
 
-        OperacaoBaseDTO opNova = extrairOperacaoBase(instrucao, novo.taxa());
+        OperacaoBaseDTO opNova = extrairOperacaoBase(
+                instrucao,
+                novo.taxa(),
+                filtros.codMarca(),
+                filtros.descrMarca(),
+                filtros.codCargo(),
+                filtros.descriCargo()
+        );
         OperacaoBaseDTO operacao = (opNova.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA || novo.taxa() != null)
                 ? opNova
                 : anterior.operacaoBase();
@@ -533,35 +564,49 @@ public class InterpretadorService {
         return new FaixaValorDTO(min, minInc, max, maxInc);
     }
 
-    private OperacaoBaseDTO extrairOperacaoBase(String texto, BigDecimal taxaExtraida) {
+    public OperacaoBaseDTO extrairOperacaoBase(String texto, BigDecimal taxaExtraida) {
+        return extrairOperacaoBase(texto, taxaExtraida, null, null, null, null);
+    }
+
+    public OperacaoBaseDTO extrairOperacaoBase(
+            String texto,
+            BigDecimal taxaExtraida,
+            Integer codMarca,
+            String descrMarca,
+            Integer codCargo,
+            String descriCargo
+    ) {
         if (texto == null) return OperacaoBaseDTO.definirTaxa(taxaExtraida);
         String t = texto.toLowerCase();
+
+        BigDecimal taxaBaseReferencia = CatalogoDominioDomRock.obterTaxaBaseComFallback(codMarca, codCargo, descriCargo);
+        String descrReferencia = CatalogoDominioDomRock.gerarDescricaoReferencia(codMarca, descrMarca, codCargo, descriCargo);
 
         // 1. Acréscimo sobre a base
         if (t.contains("acréscimo") || t.contains("acrescimo") || t.contains("taxa base +") || t.contains("base +") || t.contains("+") && t.contains("base")) {
             BigDecimal ajuste = extrairPercentualOuNumero(t);
-            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", new BigDecimal("0.0300"), "Taxa Contratual Padrão");
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
             return new OperacaoBaseDTO(TipoOperacaoBase.ACRESCIMO_PONTOS, ajuste != null ? ajuste : new BigDecimal("0.0150"), ref);
         }
 
         // 2. Desconto sobre a base
         if (t.contains("desconto") || t.contains("taxa base -") || t.contains("base -") || t.contains("-") && t.contains("base")) {
             BigDecimal ajuste = extrairPercentualOuNumero(t);
-            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", new BigDecimal("0.0300"), "Taxa Contratual Padrão");
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
             return new OperacaoBaseDTO(TipoOperacaoBase.DESCONTO_PONTOS, ajuste != null ? ajuste : new BigDecimal("0.0050"), ref);
         }
 
         // 3. Multiplicador da base
         if (t.contains("multiplicad") || t.contains("fator") || t.contains("x a base") || t.contains("vezes a base")) {
             BigDecimal fator = extrairNumero(t);
-            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", new BigDecimal("0.0300"), "Taxa Contratual Padrão");
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
             return new OperacaoBaseDTO(TipoOperacaoBase.MULTIPLICADOR_BASE, fator != null ? fator : new BigDecimal("1.5000"), ref);
         }
 
         // 4. Divisor da base
         if (t.contains("dividid") || t.contains("divisor") || t.contains("/ a base") || t.contains("metade da base") || t.contains("/ 2")) {
             BigDecimal fator = t.contains("metade") ? new BigDecimal("2.0000") : extrairNumero(t);
-            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", new BigDecimal("0.0300"), "Taxa Contratual Padrão");
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
             return new OperacaoBaseDTO(TipoOperacaoBase.DIVISOR_BASE, fator != null ? fator : new BigDecimal("2.0000"), ref);
         }
 

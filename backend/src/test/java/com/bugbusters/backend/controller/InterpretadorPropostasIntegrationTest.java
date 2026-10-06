@@ -20,6 +20,7 @@ import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -202,5 +203,24 @@ class InterpretadorPropostasIntegrationTest {
                 .andExpect(jsonPath("$.explicacao", containsString("ECOMMERCE")))
                 .andExpect(jsonPath("$.pythonEquivalente", containsString("0.0600")))
                 .andExpect(jsonPath("$.completa", is(true)));
+    }
+
+    @Test
+    @DisplayName("Deve consultar catálogo de informações de domínio conhecidas do cliente")
+    void deveConsultarCatalogoDominioCompleto() throws Exception {
+        mockMvc.perform(get("/api/v1/interpretador/catalogo"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.marcas['10']", is("PRETO")))
+                .andExpect(jsonPath("$.marcas['20']", is("BRANCO")))
+                .andExpect(jsonPath("$.marcas['30']", is("AZUL")))
+                .andExpect(jsonPath("$.marcas['40']", is("VERMELHO")))
+                .andExpect(jsonPath("$.marcas['50']", is("AMARELO")))
+                .andExpect(jsonPath("$.marcas['60']", is("CINZA")))
+                .andExpect(jsonPath("$.cargos['100']", is("VENDEDOR LOJA")))
+                .andExpect(jsonPath("$.cargosDetalhados", hasSize(5)))
+                .andExpect(jsonPath("$.lojas['1']", is("LOJA-1")))
+                .andExpect(jsonPath("$.lojas['80']", is("LOJA-80")))
+                .andExpect(jsonPath("$.faixaMatriculas", is("MATRIC-1 a MATRIC-600")))
+                .andExpect(jsonPath("$.taxasContratuaisBase", hasSize(30)));
     }
 }
