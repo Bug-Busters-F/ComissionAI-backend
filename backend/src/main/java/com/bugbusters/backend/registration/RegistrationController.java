@@ -25,7 +25,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/v1/matriculas")
-@Tag(name = "8. Matrículas", description = "Consulta e exclusão de matrículas de colaboradores, criadas a partir da importação da base de RH")
+@Tag(name = "Matrículas", description = "Consulta e exclusão de matrículas de colaboradores, criadas a partir da importação da base de RH")
 public class RegistrationController {
     private final RegistrationService service;
 

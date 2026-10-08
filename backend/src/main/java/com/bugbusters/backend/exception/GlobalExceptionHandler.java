@@ -135,7 +135,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleGenericException(
             Exception ex, HttpServletRequest request) {
 
-                ApiErrorResponse error = new ApiErrorResponse(
+        ApiErrorResponse error = new ApiErrorResponse(
                                 OffsetDateTime.now(),
                                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                                 "Internal Server Error",

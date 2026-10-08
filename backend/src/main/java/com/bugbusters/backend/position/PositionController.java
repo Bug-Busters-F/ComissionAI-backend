@@ -25,7 +25,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/v1/cargos")
-@Tag(name = "7. Cargos", description = "Consulta e exclusão de cargos, criados a partir da importação da base de RH")
+@Tag(name = "Cargos", description = "Consulta e exclusão de cargos, criados a partir da importação da base de RH")
 public class PositionController {
 
     private final PositionService service;

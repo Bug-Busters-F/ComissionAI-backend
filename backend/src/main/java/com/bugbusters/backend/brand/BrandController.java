@@ -25,7 +25,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/v1/marcas")
-@Tag(name = "6. Marcas", description = "Consulta e exclusão de marcas, criadas a partir da importação da base de Vendas")
+@Tag(name = "Marcas", description = "Consulta e exclusão de marcas, criadas a partir da importação da base de Vendas")
 public class BrandController {
     private final BrandService service;
 

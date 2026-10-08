@@ -2,7 +2,10 @@ package com.bugbusters.backend.service;
 
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
+import com.bugbusters.backend.dto.campanha.RegraItemRequest;
+import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
+import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Campanha;
 import com.bugbusters.backend.model.EstadoCampanha;
@@ -25,6 +28,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -54,74 +58,104 @@ class CampanhaServiceTest {
         regra.setNome("Regra - Campanha Natal");
         regra.setTaxa(new BigDecimal("0.0500"));
         regra.setStatus(StatusRegra.DRAFT);
+        regra.setCompleta(true);
     }
 
     @Test
-    @DisplayName("criarCampanha - Deve criar campanha e regra vinculada com estado padrão DRAFT")
+    @DisplayName("criarCampanha - Deve criar campanha e coleção de regras com estado padrão DRAFT")
     void deveCriarCampanhaComEstadoDraft() {
+        RegraItemRequest regraItem = new RegraItemRequest(
+                "bloco-1", "Comissão 5%", "Regra - Campanha Natal", "ECOMMERCE",
+                null, null, null, null, null, null,
+                null, null, null, null,
+                TipoOperacaoBase.DEFINIR_TAXA, new BigDecimal("0.0500"),
+                null, null, null, new BigDecimal("0.0500"),
+                null, null, List.of(), true, StatusRegra.DRAFT
+        );
+
         CampanhaRequest request = new CampanhaRequest(
-                "Campanha Natal", "Comissão 5%", "ECOMMERCE",
-                new BigDecimal("0.0500"), LocalDate.now(), LocalDate.now().plusDays(30)
+                "Campanha Natal", "Comissão 5%", LocalDate.now(), LocalDate.now().plusDays(30),
+                EstadoCampanha.DRAFT, List.of(regraItem)
         );
 
         when(campanhaRepository.save(any(Campanha.class))).thenReturn(campanha);
-        when(regraRepository.save(any(Regra.class))).thenReturn(regra);
+        when(regraRepository.saveAll(anyList())).thenReturn(List.of(regra));
 
         CampanhaResponse response = campanhaService.criarCampanha(request);
 
         assertThat(response).isNotNull();
         assertThat(response.estado()).isEqualTo(EstadoCampanha.DRAFT);
-        assertThat(response.regra().status()).isEqualTo(StatusRegra.DRAFT);
+        assertThat(response.regras()).hasSize(1);
+        assertThat(response.regras().get(0).status()).isEqualTo(StatusRegra.DRAFT);
         verify(campanhaRepository).save(any(Campanha.class));
-        verify(regraRepository).save(any(Regra.class));
+        verify(regraRepository).saveAll(anyList());
     }
 
     @Test
-    @DisplayName("listarAtivas - Deve buscar estritamente campanhas com estado ATIVA")
+    @DisplayName("listarAtivas - Deve buscar estritamente campanhas com estado ATIVA e carregar coleção")
     void deveListarApenasCampanhasAtivas() {
         Campanha campanhaAtiva = new Campanha("Campanha Ativa", "Texto", LocalDate.now(), LocalDate.now().plusDays(30));
         campanhaAtiva.setId(11L);
         campanhaAtiva.setEstado(EstadoCampanha.ATIVA);
+        regra.setCampanha(campanhaAtiva);
 
         when(campanhaRepository.findAllByEstadoAndRemovidoEmIsNullOrderByCriadoEmDesc(EstadoCampanha.ATIVA))
                 .thenReturn(List.of(campanhaAtiva));
-        when(regraRepository.findByCampanhaIdAndRemovidoEmIsNull(11L)).thenReturn(Optional.of(regra));
+        when(regraRepository.findAllByCampanhaIdInAndRemovidoEmIsNull(List.of(11L)))
+                .thenReturn(List.of(regra));
 
         List<CampanhaResponse> resultado = campanhaService.listarAtivas();
 
         assertThat(resultado).hasSize(1);
         assertThat(resultado.get(0).estado()).isEqualTo(EstadoCampanha.ATIVA);
+        assertThat(resultado.get(0).regras()).hasSize(1);
         verify(campanhaRepository).findAllByEstadoAndRemovidoEmIsNullOrderByCriadoEmDesc(EstadoCampanha.ATIVA);
     }
 
     @Test
-    @DisplayName("alterarEstado - Deve transicionar para ATIVA e sincronizar Regra para ATIVA")
+    @DisplayName("alterarEstado - Deve transicionar para ATIVA e sincronizar todas as regras para ATIVA")
     void deveAlterarEstadoParaAtivaESincronizarRegra() {
         when(campanhaRepository.findByIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(campanha));
         when(campanhaRepository.save(any(Campanha.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(regraRepository.findByCampanhaIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(regra));
-        when(regraRepository.save(any(Regra.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(10L)).thenReturn(List.of(regra));
+        when(regraRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
         CampanhaResponse response = campanhaService.alterarEstado(10L, EstadoCampanha.ATIVA);
 
         assertThat(response.estado()).isEqualTo(EstadoCampanha.ATIVA);
-        assertThat(response.regra().status()).isEqualTo(StatusRegra.ATIVA);
+        assertThat(response.regras().get(0).status()).isEqualTo(StatusRegra.ATIVA);
         assertThat(campanha.getEstado()).isEqualTo(EstadoCampanha.ATIVA);
         assertThat(regra.getStatus()).isEqualTo(StatusRegra.ATIVA);
     }
 
     @Test
-    @DisplayName("alterarEstado - Deve transicionar para INATIVA/CANCELADA/CONCLUIDA e sincronizar Regra para INATIVA")
+    @DisplayName("alterarEstado - Deve rejeitar ativação de campanha contendo regras incompletas")
+    void deveRejeitarAtivacaoDeCampanhaComRegrasIncompletas() {
+        Regra regraIncompleta = new Regra();
+        regraIncompleta.setId(21L);
+        regraIncompleta.setCompleta(false);
+        regraIncompleta.setTaxa(null);
+
+        when(campanhaRepository.findByIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(campanha));
+        when(regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(10L)).thenReturn(List.of(regraIncompleta));
+
+        assertThatThrownBy(() -> campanhaService.alterarEstado(10L, EstadoCampanha.ATIVA))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Não é permitido ativar campanha contendo regras ou propostas incompletas");
+    }
+
+    @Test
+    @DisplayName("alterarEstado - Deve transicionar para INATIVA/CANCELADA/CONCLUIDA e sincronizar regras para INATIVA")
     void deveAlterarEstadoParaInativaESincronizarRegra() {
         when(campanhaRepository.findByIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(campanha));
         when(campanhaRepository.save(any(Campanha.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(regraRepository.findByCampanhaIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(regra));
-        when(regraRepository.save(any(Regra.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(10L)).thenReturn(List.of(regra));
+        when(regraRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
         CampanhaResponse response = campanhaService.alterarEstado(10L, EstadoCampanha.INATIVA);
 
         assertThat(response.estado()).isEqualTo(EstadoCampanha.INATIVA);
-        assertThat(response.regra().status()).isEqualTo(StatusRegra.INATIVA);
+        assertThat(response.regras().get(0).status()).isEqualTo(StatusRegra.INATIVA);
     }
 
     @Test
@@ -135,10 +169,10 @@ class CampanhaServiceTest {
     }
 
     @Test
-    @DisplayName("removerLogicamente - Deve marcar removidoEm, alterar estado para CANCELADA e desativar regra")
+    @DisplayName("removerLogicamente - Deve marcar removidoEm, alterar estado para CANCELADA e inativar regras")
     void deveRemoverLogicamenteCampanha() {
         when(campanhaRepository.findByIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(campanha));
-        when(regraRepository.findByCampanhaIdAndRemovidoEmIsNull(10L)).thenReturn(Optional.of(regra));
+        when(regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(10L)).thenReturn(List.of(regra));
 
         campanhaService.removerLogicamente(10L);
 
@@ -147,6 +181,6 @@ class CampanhaServiceTest {
         assertThat(regra.getRemovidoEm()).isNotNull();
         assertThat(regra.getStatus()).isEqualTo(StatusRegra.INATIVA);
         verify(campanhaRepository).save(campanha);
-        verify(regraRepository).save(regra);
+        verify(regraRepository).saveAll(anyList());
     }
 }

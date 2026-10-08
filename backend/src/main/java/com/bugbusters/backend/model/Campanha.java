@@ -3,6 +3,8 @@ package com.bugbusters.backend.model;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "tb_campanha")
@@ -28,6 +30,9 @@ public class Campanha {
     @Column(nullable = false, length = 50)
     private EstadoCampanha estado = EstadoCampanha.DRAFT;
 
+    @OneToMany(mappedBy = "campanha", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Regra> regras = new ArrayList<>();
+
     @Column(name = "removido_em")
     private OffsetDateTime removidoEm;
 
@@ -51,6 +56,34 @@ public class Campanha {
     public void prePersist() {
         if (this.criadoEm == null) {
             this.criadoEm = OffsetDateTime.now();
+        }
+    }
+
+    // Gestão da Coleção de Regras
+    public List<Regra> getRegras() {
+        return regras;
+    }
+
+    public void setRegras(List<Regra> regras) {
+        this.regras.clear();
+        if (regras != null) {
+            for (Regra r : regras) {
+                adicionarRegra(r);
+            }
+        }
+    }
+
+    public void adicionarRegra(Regra regra) {
+        if (regra != null) {
+            this.regras.add(regra);
+            regra.setCampanha(this);
+        }
+    }
+
+    public void removerRegra(Regra regra) {
+        if (regra != null) {
+            this.regras.remove(regra);
+            regra.setCampanha(null);
         }
     }
 

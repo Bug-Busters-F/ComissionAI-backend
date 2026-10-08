@@ -7,7 +7,7 @@ spring:
 
 ai:
   service:
-    url: ${AI_SERVICE_URL:http://localhost:8000}
+    url: ${AI_SERVICE_URL:http://host.docker.internal:8000}
     endpoint: /api/v1/interpretar
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT:3000}
     read-timeout-ms: ${AI_READ_TIMEOUT:35000}
@@ -71,3 +71,7 @@ spring:
       initialize-schema: embedded
     job:
       enabled: false
+
+ai:
+  service:
+    url: http://localhost:8000

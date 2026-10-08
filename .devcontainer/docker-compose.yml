@@ -18,6 +18,9 @@ services:
       PGUSER: ${POSTGRES_USER:-postgres}
       PGDATABASE: ${POSTGRES_DB:-comissai_db}
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      AI_SERVICE_URL: http://host.docker.internal:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     volumes:
       - ..:/workspaces/${localWorkspaceFolderBasename:-comissionai-backend}:cached

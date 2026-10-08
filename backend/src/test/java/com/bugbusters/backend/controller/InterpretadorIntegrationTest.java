@@ -9,12 +9,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
+import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -25,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @ActiveProfiles("test")
+@TestPropertySource(properties = "ai.service.url=http://localhost:8000")
 class InterpretadorIntegrationTest {
 
     @Autowired
@@ -61,7 +64,7 @@ class InterpretadorIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(org.hamcrest.Matchers.endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -87,7 +90,7 @@ class InterpretadorIntegrationTest {
     @Test
     @DisplayName("Deve retornar 503 quando o serviço de IA em Python retornar erro interno")
     void deveRetornar503QuandoAiRetornarErro() throws Exception {
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withServerError());
 
@@ -122,7 +125,7 @@ class InterpretadorIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaComInconsistencias, MediaType.APPLICATION_JSON));
 
@@ -180,7 +183,7 @@ class InterpretadorIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -229,7 +232,7 @@ class InterpretadorIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.contexto.ano_referencia").exists())
                 .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.contexto.dicionario_dimensoes.cargos").exists())

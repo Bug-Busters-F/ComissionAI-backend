@@ -1,7 +1,6 @@
 package com.bugbusters.backend.controller;
 
 import com.bugbusters.backend.service.client.AiServiceClient;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -27,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @ActiveProfiles("test")
+@TestPropertySource(properties = "ai.service.url=http://localhost:8000")
 class InterpretadorPropostasIntegrationTest {
 
     @Autowired
@@ -40,7 +41,6 @@ class InterpretadorPropostasIntegrationTest {
 
     private MockMvc mockMvc;
     private MockRestServiceServer mockServer;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
@@ -84,11 +84,11 @@ class InterpretadorPropostasIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython1, MediaType.APPLICATION_JSON));
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython2, MediaType.APPLICATION_JSON));
 
@@ -135,7 +135,7 @@ class InterpretadorPropostasIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 

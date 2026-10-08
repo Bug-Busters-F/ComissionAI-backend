@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/interpretador")
-@Tag(name = "4. Assistência por IA (NLP)", description = "Integração do Spring Boot ao serviço de interpretação Python")
+@Tag(name = "Assistência por IA (NLP)", description = "Integração do Spring Boot ao serviço de interpretação Python")
 public class InterpretadorController {
 
     private final InterpretadorService interpretadorService;
@@ -35,7 +35,8 @@ public class InterpretadorController {
         this.interpretadorService = interpretadorService;
     }
 
-    @Operation(summary = "Interpretar regra em linguagem natural", 
+    // Rota antiga de extração de regra, mantida até que a nova rota se consolide
+    @Operation(summary = "Interpretar regra em linguagem natural (Legado Sprint 1)", 
                description = "Envia comando em texto e contexto para o serviço Python, valida os campos no Spring e devolve a sugestão com pendências para o front-end.")
     @ApiResponse(responseCode = "200", description = "Texto interpretado e validado")
     @ApiResponse(responseCode = "400", description = "Comando vazio ou inválido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))

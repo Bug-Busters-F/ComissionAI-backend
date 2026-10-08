@@ -16,6 +16,10 @@ import com.bugbusters.backend.model.Regra;
 public interface RegraRepository extends JpaRepository<Regra, Long> {
     Optional<Regra> findByCampanhaIdAndRemovidoEmIsNull(Long campanhaId);
 
+    List<Regra> findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(Long campanhaId);
+
+    List<Regra> findAllByCampanhaIdInAndRemovidoEmIsNull(List<Long> campanhaIds);
+
     @Query("""
         SELECT r FROM Regra r
         WHERE r.status = :status

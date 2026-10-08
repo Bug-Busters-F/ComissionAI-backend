@@ -25,7 +25,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/v1/lojas")
-@Tag(name = "5. Lojas", description = "Consulta e exclusão de lojas, criadas a partir da importação das bases de RH e Vendas")
+@Tag(name = "Lojas", description = "Consulta e exclusão de lojas, criadas a partir da importação das bases de RH e Vendas")
 public class StoreController {
     private final StoreService service;
 

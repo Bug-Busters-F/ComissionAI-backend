@@ -10,12 +10,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
+import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -28,14 +30,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Prova que o JSON devolvido por /api/v1/interpretador/extrair-regra é
  * diretamente compatível com o payload aceito por /api/v1/campanhas —
  * simulando o passo de revisão humana entre as duas chamadas, exatamente como o
- * front faria: recebe a proposta, deixa o usuário revisar/editar, e só então
- * envia o pedido de salvar como rascunho.
- *
- * Se um dos dois DTOs (InterpretacaoRegraResponse / CampanhaRequest) divergir no
- * futuro, este teste quebra antes de virar um bug de integração em produção.
+ * front faria: recebe a proposta, deixa o usuário revisar/editar, e envia a coleção
+ * de regras para salvar como rascunho.
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@TestPropertySource(properties = "ai.service.url=http://localhost:8000")
 class InterpretacaoParaCampanhaIntegrationTest {
 
     @Autowired
@@ -59,7 +59,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
     }
 
     @Test
-    @DisplayName("Fluxo completo: interpretar -> revisão humana -> salvar como rascunho, sem perda de campos")
+    @DisplayName("Fluxo completo: interpretar -> revisão humana -> salvar coleção como rascunho, sem perda de campos")
     void deveIntegrarInterpretacaoAoCadastroDeCampanha() throws Exception {
         // 1. Simula a resposta do serviço Python, no formato real de InterpretacaoRegraResponse
         String respostaSimuladaPython = """
@@ -78,7 +78,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -96,20 +96,23 @@ class InterpretacaoParaCampanhaIntegrationTest {
 
         JsonNode proposta = objectMapper.readTree(resultadoInterpretacao);
 
-        // 3. Revisão humana: usuário confirma os campos propostos e informa título
-        //    (título e texto original não vêm da IA — são inseridos pelo usuário no form)
-        String payloadCampanha = objectMapper.createObjectNode()
-                .put("titulo", "Campanha Vendedores Marca Preto - Outubro")
-                .put("textoOriginal", "Comissão de 3.5% para os vendedores da marca PRETO na loja 75 em outubro")
-                .put("codMarca", proposta.get("codMarca").asInt())
-                .put("descrMarca", proposta.get("descrMarca").asText())
-                .put("codLoja", proposta.get("codLoja").asInt())
-                .put("codCargo", proposta.get("codCargo").asInt())
-                .put("descriCargo", proposta.get("descriCargo").asText())
-                .put("taxa", proposta.get("taxa").decimalValue())
-                .put("dataInicio", proposta.get("dataInicio").asText())
-                .put("dataFim", proposta.get("dataFim").asText())
-                .toString();
+        // 3. Revisão humana: usuário confirma os campos propostos, informa título e empacota na coleção de regras
+        var root = objectMapper.createObjectNode();
+        root.put("titulo", "Campanha Vendedores Marca Preto - Outubro");
+        root.put("textoOriginal", "Comissão de 3.5% para os vendedores da marca PRETO na loja 75 em outubro");
+        root.put("dataInicio", proposta.get("dataInicio").asText());
+        root.put("dataFim", proposta.get("dataFim").asText());
+
+        var regrasNode = root.putArray("regras");
+        var item = regrasNode.addObject();
+        item.put("codMarca", proposta.get("codMarca").asInt());
+        item.put("descrMarca", proposta.get("descrMarca").asText());
+        item.put("codLoja", proposta.get("codLoja").asInt());
+        item.put("codCargo", proposta.get("codCargo").asInt());
+        item.put("descriCargo", proposta.get("descriCargo").asText());
+        item.put("taxa", proposta.get("taxa").decimalValue());
+
+        String payloadCampanha = root.toString();
 
         // 4. Front envia o pedido de salvar como rascunho
         mockMvc.perform(post("/api/v1/campanhas")
@@ -118,19 +121,20 @@ class InterpretacaoParaCampanhaIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.estado").value("DRAFT"))
-                .andExpect(jsonPath("$.regra.status").value("DRAFT"))
-                .andExpect(jsonPath("$.regra.codMarca").value(10))
-                .andExpect(jsonPath("$.regra.descrMarca").value("PRETO"))
-                .andExpect(jsonPath("$.regra.codLoja").value(75))
-                .andExpect(jsonPath("$.regra.codCargo").value(100))
-                .andExpect(jsonPath("$.regra.descriCargo").value("VENDEDOR LOJA"))
-                .andExpect(jsonPath("$.regra.taxa").value(0.0350))
-                .andExpect(jsonPath("$.regra.dataInicio").value("2026-10-01"))
-                .andExpect(jsonPath("$.regra.dataFim").value("2026-10-31"));
+                .andExpect(jsonPath("$.regras").isArray())
+                .andExpect(jsonPath("$.regras[0].status").value("DRAFT"))
+                .andExpect(jsonPath("$.regras[0].codMarca").value(10))
+                .andExpect(jsonPath("$.regras[0].descrMarca").value("PRETO"))
+                .andExpect(jsonPath("$.regras[0].codLoja").value(75))
+                .andExpect(jsonPath("$.regras[0].codCargo").value(100))
+                .andExpect(jsonPath("$.regras[0].descriCargo").value("VENDEDOR LOJA"))
+                .andExpect(jsonPath("$.regras[0].taxa").value(0.0350))
+                .andExpect(jsonPath("$.regras[0].dataInicio").value("2026-10-01"))
+                .andExpect(jsonPath("$.regras[0].dataFim").value("2026-10-31"));
     }
 
     @Test
-    @DisplayName("Interpretação com data final ausente preserva o null até o Spring aplicar os 30 dias padrão")
+    @DisplayName("Interpretação com data final ausente preserva o null até o Spring aplicar os 30 dias padrão na campanha e regras")
     void devePreservarAusenciaDeDataFimAteSalvarComoRascunho() throws Exception {
         String respostaSimuladaPython = """
             {
@@ -148,7 +152,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -166,20 +170,26 @@ class InterpretacaoParaCampanhaIntegrationTest {
 
         JsonNode proposta = objectMapper.readTree(resultadoInterpretacao);
 
-        String payloadCampanha = objectMapper.createObjectNode()
-                .put("titulo", "Campanha Ecommerce Sem Data Fim")
-                .put("textoOriginal", "Comissão de 5% no ecommerce a partir de outubro")
-                .put("canal", proposta.get("canal").asText())
-                .put("taxa", proposta.get("taxa").decimalValue())
-                .put("dataInicio", proposta.get("dataInicio").asText())
-                .toString();
+        var root = objectMapper.createObjectNode();
+        root.put("titulo", "Campanha Ecommerce Sem Data Fim");
+        root.put("textoOriginal", "Comissão de 5% no ecommerce a partir de outubro");
+        root.put("dataInicio", proposta.get("dataInicio").asText());
 
-        // O Spring aplica os 30 dias padrão só no momento de salvar como rascunho
+        var regrasNode = root.putArray("regras");
+        var item = regrasNode.addObject();
+        item.put("canal", proposta.get("canal").asText());
+        item.put("taxa", proposta.get("taxa").decimalValue());
+
+        String payloadCampanha = root.toString();
+
+        // O Spring aplica os 30 dias padrão no momento de salvar a campanha e propaga para todas as regras
         mockMvc.perform(post("/api/v1/campanhas")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payloadCampanha))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.regra.dataInicio").value("2026-10-01"))
-                .andExpect(jsonPath("$.regra.dataFim").value("2026-10-31"));
+                .andExpect(jsonPath("$.dataInicio").value("2026-10-01"))
+                .andExpect(jsonPath("$.dataFim").value("2026-10-31"))
+                .andExpect(jsonPath("$.regras[0].dataInicio").value("2026-10-01"))
+                .andExpect(jsonPath("$.regras[0].dataFim").value("2026-10-31"));
     }
 }
