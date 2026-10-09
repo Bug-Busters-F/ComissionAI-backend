@@ -34,18 +34,33 @@ public class RegistrationController {
     }
 
     @Operation(summary = "Listar matrículas", description = """
-            Retorna as matrículas de colaboradores de forma paginada, incluindo cargo, loja,
-            data de admissão e data de demissão (quando houver).
+            Retorna as matrículas de colaboradores de forma paginada, permitindo filtros opcionais
+            por código de loja, código de cargo e número de matrícula.
             """)
     @ApiResponse(responseCode = "200", description = "Matrículas recuperadas com sucesso")
     @GetMapping
     public Page<RegistrationResponseDTO> findAll(
+            @Parameter(description = "Código numérico da loja (opcional)", example = "101") @RequestParam(required = false) Integer lojaCodigo,
+            @Parameter(description = "Código numérico do cargo (opcional)", example = "10") @RequestParam(required = false) Integer cargoCodigo,
+            @Parameter(description = "Matrícula do colaborador (opcional, busca parcial)", example = "M12345") @RequestParam(required = false) String matricula,
             @Parameter(description = "Número da página, começando em 0", example = "0") @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Quantidade de itens por página (mínimo 1)", example = "20") @RequestParam(defaultValue = "20") int size) {
 
         Pageable pageable = PageRequest.of(page, size);
-        return service.findAll(pageable);
+        return service.findAll(lojaCodigo, cargoCodigo, matricula, pageable);
     }
+
+    @Operation(summary = "Buscar matrícula exata", description = "Busca os detalhes cadastrais de uma matrícula específica.")
+    @ApiResponse(responseCode = "200", description = "Matrícula encontrada com sucesso")
+    @ApiResponse(responseCode = "404", description = "Matrícula não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/buscar/{matricula}")
+    public ResponseEntity<RegistrationResponseDTO> findByRegistration(
+            @Parameter(description = "Número da matrícula do colaborador", example = "M00001") @PathVariable String matricula) {
+        return service.findByRegistration(matricula)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new com.bugbusters.backend.exception.ResourceNotFoundException("Matrícula não encontrada: " + matricula));
+    }
+
 
     @Operation(summary = "Excluir matrícula", description = """
             Remove uma matrícula pelo seu ID. A exclusão é bloqueada caso existam vendas

@@ -42,4 +42,16 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
             @Param("canal") String canal,
             @Param("status") StatusRegra status
     );
+
+    @Query("""
+        SELECT r FROM Regra r
+        LEFT JOIN FETCH r.campanha c
+        WHERE r.status = :status
+          AND r.removidoEm IS NULL
+          AND r.id <> 1L
+        ORDER BY r.id DESC
+    """)
+    List<Regra> findRegrasAtivasComCampanha(@Param("status") StatusRegra status);
+
+
 }

@@ -136,15 +136,16 @@ public class GlobalExceptionHandler {
             Exception ex, HttpServletRequest request) {
 
         ApiErrorResponse error = new ApiErrorResponse(
-                                OffsetDateTime.now(),
-                                HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                                "Internal Server Error",
-                                "Ocorreu um erro interno no servidor.",
-                                request.getRequestURI(),
-                                List.of());
+                OffsetDateTime.now(),
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "Internal Server Error",
+                ex.getMessage() != null ? ex.getMessage() : "Ocorreu um erro interno no servidor.",
+                request.getRequestURI(),
+                List.of());
 
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
-        }
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+    }
+
 
         @ExceptionHandler(AiServiceUnavailableException.class)
         public ResponseEntity<ApiErrorResponse> handleAiUnavailable(AiServiceUnavailableException ex,

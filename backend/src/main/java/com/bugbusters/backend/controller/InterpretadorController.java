@@ -84,4 +84,17 @@ public class InterpretadorController {
     public ResponseEntity<CatalogoDominioResponseDTO> obterCatalogoDominio() {
         return ResponseEntity.ok(CatalogoDominioResponseDTO.construir());
     }
+
+    @Operation(summary = "Validação defensiva de proposta contra cadastros reais e regras concorrentes",
+               description = """
+                   Valida se as dimensões da proposta (marca, cargo, loja, canal, matrícula) existem no cadastro
+                   real do banco de dados (com fallback gracioso em memória), verifica consistência cadastral
+                   do colaborador, e executa a análise de concorrência com regras ativas no período.
+                   """)
+    @ApiResponse(responseCode = "200", description = "Proposta validada com sucesso (com status, erros, avisos e análise concorrencial)")
+    @PostMapping("/validar-proposta")
+    public ResponseEntity<com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaResponse> validarProposta(
+            @RequestBody com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaRequest request) {
+        return ResponseEntity.ok(interpretadorService.validarProposta(request));
+    }
 }

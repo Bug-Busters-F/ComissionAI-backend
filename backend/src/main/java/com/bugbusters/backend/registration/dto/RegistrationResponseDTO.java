@@ -14,10 +14,13 @@ public record RegistrationResponseDTO(
     @Schema(description = "Identificador interno gerado pelo sistema", example = "1")
     UUID id,
 
+    @Schema(description = "Código ou número de matrícula do colaborador", example = "MATRIC-123")
+    String registration,
+
     @Schema(description = "Posição relacionada")
     Position position,
 
-    @Schema(description = "Loja onde a venda foi realizada", example = "LOJA_SP_01")
+    @Schema(description = "Loja onde o colaborador está alocado", example = "LOJA_SP_01")
     Store store,
 
     @Schema(description = "Data de admissão", example = "2026-09-13")
@@ -25,5 +28,6 @@ public record RegistrationResponseDTO(
 
     @Schema(description = "Data de demissão", example = "2026-09-13")
     LocalDate demissDate
+
 
 ) {}

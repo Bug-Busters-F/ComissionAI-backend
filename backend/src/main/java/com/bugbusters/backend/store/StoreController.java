@@ -44,6 +44,24 @@ public class StoreController {
         return service.findAll(pageable);
     }
 
+    @Operation(summary = "Listar todas as lojas", description = "Retorna todas as lojas cadastradas sem paginação.")
+    @ApiResponse(responseCode = "200", description = "Lojas recuperadas com sucesso")
+    @GetMapping("/todas")
+    public java.util.List<StoreResponseDTO> findAllList() {
+        return service.findAllList();
+    }
+
+    @Operation(summary = "Buscar loja por código", description = "Busca uma loja pelo código numérico da Dom Rock.")
+    @ApiResponse(responseCode = "200", description = "Loja encontrada com sucesso")
+    @ApiResponse(responseCode = "404", description = "Loja não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/codigo/{codigo}")
+    public ResponseEntity<StoreResponseDTO> findByCode(@PathVariable Integer codigo) {
+        return service.findByCode(codigo)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new com.bugbusters.backend.exception.ResourceNotFoundException("Loja não encontrada para o código: " + codigo));
+    }
+
+
     @Operation(summary = "Excluir loja", description = """
             Remove uma loja pelo seu ID. A exclusão é bloqueada caso existam vendas ou
             matrículas vinculadas à loja.

@@ -31,4 +31,29 @@ public interface BaseComissRepository extends JpaRepository<BaseComiss, UUID> {
             Integer brandCode,
             Integer positionCode
     );
+
+    @org.springframework.data.jpa.repository.Query("""
+        SELECT b FROM BaseComiss b
+        WHERE (:brandCode IS NULL OR b.brand.code = :brandCode)
+          AND (:positionCode IS NULL OR b.position.code = :positionCode)
+          AND (:referenceMonth IS NULL OR b.referenceMonth = :referenceMonth)
+        ORDER BY b.brand.code ASC, b.position.code ASC, b.referenceMonth DESC
+    """)
+    org.springframework.data.domain.Page<BaseComiss> findByFiltros(
+            @org.springframework.data.repository.query.Param("brandCode") Integer brandCode,
+            @org.springframework.data.repository.query.Param("positionCode") Integer positionCode,
+            @org.springframework.data.repository.query.Param("referenceMonth") LocalDate referenceMonth,
+            org.springframework.data.domain.Pageable pageable
+    );
+
+    @org.springframework.data.jpa.repository.Query("""
+        SELECT b FROM BaseComiss b
+        WHERE (:brandCode IS NULL OR b.brand.code = :brandCode)
+          AND (:positionCode IS NULL OR b.position.code = :positionCode)
+        ORDER BY b.brand.code ASC, b.position.code ASC, b.referenceMonth DESC
+    """)
+    java.util.List<BaseComiss> findAllByFiltros(
+            @org.springframework.data.repository.query.Param("brandCode") Integer brandCode,
+            @org.springframework.data.repository.query.Param("positionCode") Integer positionCode
+    );
 }

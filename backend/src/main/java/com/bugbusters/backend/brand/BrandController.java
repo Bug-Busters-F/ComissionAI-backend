@@ -44,6 +44,24 @@ public class BrandController {
         return service.findAllBrands(pageable);
     }
 
+    @Operation(summary = "Listar todas as marcas", description = "Retorna todas as marcas cadastradas sem paginação.")
+    @ApiResponse(responseCode = "200", description = "Marcas recuperadas com sucesso")
+    @GetMapping("/todas")
+    public java.util.List<BrandResponseDTO> findAllList() {
+        return service.findAllList();
+    }
+
+    @Operation(summary = "Buscar marca por código", description = "Busca uma marca pelo código numérico da Dom Rock.")
+    @ApiResponse(responseCode = "200", description = "Marca encontrada com sucesso")
+    @ApiResponse(responseCode = "404", description = "Marca não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/codigo/{codigo}")
+    public ResponseEntity<BrandResponseDTO> findByCode(@PathVariable Integer codigo) {
+        return service.findByCode(codigo)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new com.bugbusters.backend.exception.ResourceNotFoundException("Marca não encontrada para o código: " + codigo));
+    }
+
+
     @Operation(summary = "Excluir marca", description = """
             Remove uma marca pelo seu ID. A exclusão é bloqueada caso existam vendas
             vinculadas à marca.

@@ -45,6 +45,24 @@ public class PositionController {
         return service.findAll(pageable);
     }
 
+    @Operation(summary = "Listar todos os cargos", description = "Retorna todos os cargos cadastrados sem paginação.")
+    @ApiResponse(responseCode = "200", description = "Cargos recuperados com sucesso")
+    @GetMapping("/todos")
+    public java.util.List<PositionResponseDTO> findAllList() {
+        return service.findAllList();
+    }
+
+    @Operation(summary = "Buscar cargo por código", description = "Busca um cargo pelo código numérico da Dom Rock.")
+    @ApiResponse(responseCode = "200", description = "Cargo encontrado com sucesso")
+    @ApiResponse(responseCode = "404", description = "Cargo não encontrado", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/codigo/{codigo}")
+    public ResponseEntity<PositionResponseDTO> findByCode(@PathVariable Integer codigo) {
+        return service.findByCode(codigo)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new com.bugbusters.backend.exception.ResourceNotFoundException("Cargo não encontrado para o código: " + codigo));
+    }
+
+
     @Operation(summary = "Excluir cargo", description = """
             Remove um cargo pelo seu ID. A exclusão é bloqueada caso existam matrículas
             vinculadas ao cargo.
