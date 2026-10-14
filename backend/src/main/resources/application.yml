@@ -71,3 +71,7 @@ spring:
       initialize-schema: embedded
     job:
       enabled: false
+
+ai:
+  service:
+    url: http://localhost:8000

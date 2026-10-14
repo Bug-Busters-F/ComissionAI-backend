@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "ai.service.url=http://localhost:8000")
 @ActiveProfiles("test")
 class ControllerRoutesTest {
 
@@ -29,6 +29,9 @@ class ControllerRoutesTest {
 
     @Autowired
     private com.bugbusters.backend.importbase.ImportService importService;
+
+    @org.springframework.beans.factory.annotation.Value("${ai.service.url:http://localhost:8000}")
+    private String aiServiceUrl;
 
     @Autowired
     private org.springframework.web.client.RestClient.Builder aiRestClientBuilder;
@@ -348,7 +351,7 @@ class ControllerRoutesTest {
             }
             """;
 
-        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(aiServiceUrl + "/api/v1/interpretar"))
                 .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.POST))
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 

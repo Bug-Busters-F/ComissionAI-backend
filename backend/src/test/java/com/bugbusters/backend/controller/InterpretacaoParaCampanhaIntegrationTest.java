@@ -34,12 +34,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Se um dos dois DTOs (InterpretacaoRegraResponse / CampanhaRequest) divergir no
  * futuro, este teste quebra antes de virar um bug de integração em produção.
  */
-@SpringBootTest
+@SpringBootTest(properties = "ai.service.url=http://localhost:8000")
 @ActiveProfiles("test")
 class InterpretacaoParaCampanhaIntegrationTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
+
+    @org.springframework.beans.factory.annotation.Value("${ai.service.url:http://localhost:8000}")
+    private String aiServiceUrl;
 
     @Autowired
     private RestClient.Builder aiRestClientBuilder;
@@ -78,7 +81,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(aiServiceUrl + "/api/v1/interpretar"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -148,7 +151,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(requestTo(aiServiceUrl + "/api/v1/interpretar"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
