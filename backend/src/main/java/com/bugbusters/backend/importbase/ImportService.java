@@ -1,118 +1,104 @@
 package com.bugbusters.backend.importbase;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
-import java.util.Objects;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.UUID;
 
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.parameters.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobOperator;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.bugbusters.backend.basecomiss.BaseComiss;
-import com.bugbusters.backend.basecomiss.BaseComissMapper;
-import com.bugbusters.backend.basecomiss.BaseComissRepository;
-import com.bugbusters.backend.importbase.dto.CommissFileRow;
-import com.bugbusters.backend.importbase.dto.HrFileRow;
-import com.bugbusters.backend.importbase.dto.SalesFileRow;
-import com.bugbusters.backend.importbase.reader.FileReader;
-import com.bugbusters.backend.registration.Registration;
-import com.bugbusters.backend.registration.RegistrationMapper;
-import com.bugbusters.backend.registration.RegistrationRepository;
-import com.bugbusters.backend.sales.Sale;
-import com.bugbusters.backend.sales.SaleMapper;
-import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.exception.ResourceNotFoundException;
+import com.bugbusters.backend.importbase.batch.ImportJobListener;
 
 @Service
 public class ImportService {
+    private final JobOperator jobOperator;
+    private final Job job;
+    private final JobRepository repository;
+    private final ImportJobListener listener;
 
-    private final FileReaderFactory readerFactory;
-
-    private final RegistrationMapper registrationMapper;
-    private final RegistrationRepository registrationRepository;
-
-    private final SaleMapper saleMapper;
-    private final SaleRepository saleRepository;
-
-    private final BaseComissMapper baseComissMapper;
-    private final BaseComissRepository baseComissRepository;
-
-    public ImportService(
-            FileReaderFactory readerFactory,
-            RegistrationMapper registrationMapper,
-            RegistrationRepository registrationRepository,
-            SaleMapper saleMapper,
-            SaleRepository saleRepository,
-            BaseComissMapper baseComissMapper,
-            BaseComissRepository baseComissRepository
-    ) {
-        this.readerFactory = readerFactory;
-        this.registrationMapper = registrationMapper;
-        this.registrationRepository = registrationRepository;
-        this.saleMapper = saleMapper;
-        this.saleRepository = saleRepository;
-        this.baseComissMapper = baseComissMapper;
-        this.baseComissRepository = baseComissRepository;
+    public ImportService(@Qualifier("importJobOperator") JobOperator jobOperator,
+            @Qualifier("importJob") Job job, JobRepository repository, ImportJobListener listener) {
+        this.jobOperator = jobOperator;
+        this.job = job;
+        this.repository = repository;
+        this.listener = listener;
     }
 
     public ImportResponse processImport(MultipartFile file, ImportType importType) {
-        FileReader<?> reader = readerFactory.getFileReader(importType);
-
-        try (InputStream input = file.getInputStream()) {
-            List<?> dados = reader.read(input);
-
-            int totalSalvo = switch (importType) {
-                case HR -> saveHr(dados);
-                case SALES -> saveSales(dados);
-                case COMISSIONS -> saveCommissions(dados);
-            };
-
-            return new ImportResponse(
-                    file.getOriginalFilename(),
-                    importType,
-                    totalSalvo
-            );
-
-        } catch (IOException e) {
-            throw new RuntimeException("Erro ao ler arquivo", e);
+        if (file == null || file.isEmpty() || importType == null) {
+            throw new BusinessException("Informe um arquivo não vazio e o tipo de importação.");
+        }
+        Path upload = null;
+        boolean submitted = false;
+        try {
+            upload = Files.createTempFile("commission-import-", ".upload");
+            try (InputStream input = file.getInputStream()) {
+                Files.copy(input, upload, StandardCopyOption.REPLACE_EXISTING);
+            }
+            String filename = file.getOriginalFilename() == null ? "arquivo" : file.getOriginalFilename();
+            var parameters = new JobParametersBuilder()
+                    .addString("requestId", UUID.randomUUID().toString())
+                    .addString("importType", importType.name())
+                    .addString("filename", filename, false)
+                    .addString("filePath", upload.toString(), false)
+                    .toJobParameters();
+            var execution = jobOperator.start(job, parameters);
+            submitted = true;
+            // Executor rejection does not invoke afterJob; its execution is marked FAILED.
+            if (execution.getStatus() == BatchStatus.FAILED) {
+                listener.deleteUpload(upload);
+            }
+            // Query persisted metadata instead of sharing the worker's mutable JobExecution.
+            return getReport(execution.getId());
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("Não foi possível iniciar a importação.", ex);
+        } finally {
+            if (!submitted && upload != null) {
+                listener.deleteUpload(upload);
+            }
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private int saveHr(List<?> dados) {
-        List<HrFileRow> rows = (List<HrFileRow>) dados;
-
-        List<Registration> entities = rows.stream()
-                .map(registrationMapper::toEntity)
-                .filter(Objects::nonNull)
-                .toList();
-
-        registrationRepository.saveAll(entities);
-        return entities.size();
-    }
-
-    @SuppressWarnings("unchecked")
-    private int saveSales(List<?> dados) {
-        List<SalesFileRow> rows = (List<SalesFileRow>) dados;
-
-        List<Sale> entities = rows.stream()
-                .map(saleMapper::toEntity)
-                .filter(Objects::nonNull)
-                .toList();
-
-        saleRepository.saveAll(entities);
-        return entities.size();
-    }
-
-    @SuppressWarnings("unchecked")
-    private int saveCommissions(List<?> dados) {
-        List<CommissFileRow> rows = (List<CommissFileRow>) dados;
-
-        List<BaseComiss> entities = rows.stream()
-                .map(baseComissMapper::toEntity)
-                .filter(Objects::nonNull)
-                .toList();
-
-        baseComissRepository.saveAll(entities);
-        return entities.size();
+    public ImportResponse getReport(long reportId) {
+        JobExecution execution;
+        try {
+            execution = repository.getJobExecution(reportId);
+        } catch (EmptyResultDataAccessException ex) {
+            throw new ResourceNotFoundException("Relatório de importação não encontrado: " + reportId);
+        }
+        if (execution == null || !job.getName().equals(execution.getJobInstance().getJobName())) {
+            throw new ResourceNotFoundException("Relatório de importação não encontrado: " + reportId);
+        }
+        ImportStatus status = switch (execution.getStatus()) {
+            case STARTING -> ImportStatus.PENDENTE;
+            case STARTED, STOPPING -> ImportStatus.PROCESSANDO;
+            case COMPLETED -> ImportStatus.CONCLUIDO;
+            case FAILED, STOPPED, ABANDONED, UNKNOWN -> ImportStatus.FALHOU;
+        };
+        Long count = null;
+        if (status == ImportStatus.CONCLUIDO) {
+            count = execution.getStepExecutions().stream().mapToLong(step -> step.getWriteCount()).sum();
+        } else if (status == ImportStatus.FALHOU) {
+            count = 0L;
+        }
+        String message = status == ImportStatus.FALHOU
+                ? execution.getExecutionContext().getString("failureMessage", "Não foi possível concluir a importação.")
+                : null;
+        return new ImportResponse(reportId, execution.getJobParameters().getString("filename"),
+                ImportType.valueOf(execution.getJobParameters().getString("importType")), status, count, message);
     }
 }

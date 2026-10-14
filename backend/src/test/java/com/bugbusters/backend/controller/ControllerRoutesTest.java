@@ -28,6 +28,9 @@ class ControllerRoutesTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private com.bugbusters.backend.importbase.ImportService importService;
+
+    @Autowired
     private org.springframework.web.client.RestClient.Builder aiRestClientBuilder;
 
     @Autowired
@@ -388,8 +391,8 @@ class ControllerRoutesTest {
     // 4. Importacao Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart SALES com 201 CREATED")
-    void deveRealizarUploadMultipart() throws Exception {
+    @DisplayName("Upload SALES sem dados retorna 202 e relatório final FALHOU")
+    void deveRejeitarUploadMultipartSemDados() throws Exception {
         byte[] excelBytes;
         try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
              java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
@@ -407,17 +410,25 @@ class ControllerRoutesTest {
                 excelBytes
         );
 
-        mockMvc.perform(multipart("/api/v1/imports/upload")
+        var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
                 .param("importType", "SALES"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.xlsx"))
-                .andExpect(jsonPath("$.tipoBase").value("SALES"))
-                .andExpect(jsonPath("$.totalLinhas").value(0));
+                .andExpect(status().isAccepted())
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.reportId").isNumber())
+                .andReturn();
+        long id = ((Number) com.jayway.jsonpath.JsonPath.read(accepted.getResponse().getContentAsString(), "$.reportId")).longValue();
+        awaitImport(id);
+        mockMvc.perform(get("/api/v1/imports/{reportId}", id))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.status").value("FALHOU"))
+                .andExpect(jsonPath("$.totalLinhas").value(0))
+                .andExpect(jsonPath("$.mensagem").value("Arquivo sem linhas de dados."));
     }
 
     @Test
-    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart HR com 201 CREATED e persistir matricula")
+    @DisplayName("Upload HR retorna 202 e relatório final CONCLUIDO")
     void deveRealizarUploadHRComSucesso() throws Exception {
         byte[] excelBytes;
         try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
@@ -452,13 +463,49 @@ class ControllerRoutesTest {
                 excelBytes
         );
 
-        mockMvc.perform(multipart("/api/v1/imports/upload")
+        var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
                 .param("importType", "HR"))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.nomeArquivo").value("base_rh.xlsx"))
                 .andExpect(jsonPath("$.tipoBase").value("HR"))
+                .andExpect(jsonPath("$.reportId").isNumber())
+                .andReturn();
+        long id = ((Number) com.jayway.jsonpath.JsonPath.read(accepted.getResponse().getContentAsString(), "$.reportId")).longValue();
+        org.junit.jupiter.api.Assertions.assertEquals("/api/v1/imports/" + id, accepted.getResponse().getHeader("Location"));
+        awaitImport(id);
+        mockMvc.perform(get("/api/v1/imports/{reportId}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportId").value(id))
+                .andExpect(jsonPath("$.status").value("CONCLUIDO"))
                 .andExpect(jsonPath("$.totalLinhas").value(1));
+    }
+
+    @Test
+    void deveRetornar404ParaReportInexistente() throws Exception {
+        mockMvc.perform(get("/api/v1/imports/{reportId}", Long.MAX_VALUE))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void swaggerDocumentaUploadAssincronoEConsultaDeReport() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/v1/imports/{reportId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/imports/upload'].post.responses['202']").exists());
+    }
+
+    private void awaitImport(long id) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+        do {
+            var report = importService.getReport(id);
+            if (report.status() == com.bugbusters.backend.importbase.ImportStatus.CONCLUIDO
+                    || report.status() == com.bugbusters.backend.importbase.ImportStatus.FALHOU) {
+                return;
+            }
+            Thread.sleep(25);
+        } while (System.nanoTime() < deadline);
+        throw new AssertionError("Importação não finalizou: " + id);
     }
 
     // ==========================================
