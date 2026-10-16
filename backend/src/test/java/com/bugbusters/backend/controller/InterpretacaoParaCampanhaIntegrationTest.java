@@ -33,13 +33,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * front faria: recebe a proposta, deixa o usuário revisar/editar, e envia a coleção
  * de regras para salvar como rascunho.
  */
-@SpringBootTest
+@SpringBootTest(properties = "ai.service.url=http://localhost:8000")
 @ActiveProfiles("test")
 @TestPropertySource(properties = "ai.service.url=http://localhost:8000")
 class InterpretacaoParaCampanhaIntegrationTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
+
+    @org.springframework.beans.factory.annotation.Value("${ai.service.url:http://localhost:8000}")
+    private String aiServiceUrl;
 
     @Autowired
     private RestClient.Builder aiRestClientBuilder;
@@ -78,7 +81,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
+        mockServer.expect(requestTo(aiServiceUrl + "/api/v1/interpretar"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -152,7 +155,7 @@ class InterpretacaoParaCampanhaIntegrationTest {
             }
             """;
 
-        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
+        mockServer.expect(requestTo(aiServiceUrl + "/api/v1/interpretar"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
