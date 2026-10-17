@@ -39,6 +39,7 @@ public class CampanhaService {
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
         }
+        validarFaixas(request.regras());
 
         boolean possuiIncompleta = request.regras().stream().anyMatch(this::isRegraIncompleta);
 
@@ -149,6 +150,7 @@ public class CampanhaService {
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
         }
+        validarFaixas(request.regras());
 
         boolean possuiIncompleta = request.regras().stream().anyMatch(this::isRegraIncompleta);
         EstadoCampanha estadoDesejado = request.estado() != null ? request.estado() : campanha.getEstado();
@@ -206,6 +208,17 @@ public class CampanhaService {
         regraRepository.saveAll(regras);
     }
 
+    /** Faixa com mínimo acima do máximo nunca aceitaria venda nenhuma: é recusada em vez de salva. */
+    private void validarFaixas(List<RegraItemRequest> regras) {
+        for (RegraItemRequest item : regras) {
+            if (item.valorMinimo() != null && item.valorMaximo() != null
+                    && item.valorMinimo().compareTo(item.valorMaximo()) > 0) {
+                throw new BusinessException("Faixa de valor incoerente na regra '" + (item.nome() != null ? item.nome() : item.blocoId())
+                        + "': o valor mínimo (" + item.valorMinimo() + ") é maior que o máximo (" + item.valorMaximo() + ").");
+            }
+        }
+    }
+
     private boolean isRegraIncompleta(RegraItemRequest item) {
         if (Boolean.FALSE.equals(item.completa())) {
             return true;
@@ -244,6 +257,8 @@ public class CampanhaService {
         r.setTaxaBaseConsultada(item.taxaBaseConsultada());
         r.setDescricaoReferencia(item.descricaoReferencia());
         r.setTaxa(item.taxa());
+        r.setBonusPercentual(item.bonusPercentual());
+        r.setBonusValorFixo(item.bonusValorFixo());
 
         r.setBlocoId(item.blocoId());
         r.setTrechoOrigem(item.trechoOrigem());
@@ -323,7 +338,9 @@ public class CampanhaService {
                 r.getCompleta(),
                 r.getDataInicio(),
                 r.getDataFim(),
-                r.getStatus()
+                r.getStatus(),
+                r.getBonusPercentual(),
+                r.getBonusValorFixo()
         )).toList() : List.of();
 
         boolean possuiIncompletas = regrasDTO.stream()

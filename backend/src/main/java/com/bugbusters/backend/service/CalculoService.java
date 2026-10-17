@@ -154,7 +154,8 @@ public class CalculoService {
         garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
         // 3. Aplica percentual básico com precisão decimal e arredondamento HALF_UP
-        BigDecimal comissao = sale.getValue().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
+        ComissaoCalculada calculada = calcularComissaoTotal(sale.getValue(), taxaAplicada, resolucao);
+        BigDecimal comissao = calculada.total();
         UUID protocolo = UUID.randomUUID();
 
         Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
@@ -178,6 +179,8 @@ public class CalculoService {
                 "INDIVIDUAL"
         );
         novoResultado.setOrigemTaxa(resolucao.origemTaxa());
+        novoResultado.setValorBonusPercentual(calculada.bonusPercentual());
+        novoResultado.setValorBonusFixo(calculada.bonusFixo());
 
         try {
             ResultadoCalculo salvo = resultadoCalculoRepository.save(novoResultado);
@@ -190,7 +193,7 @@ public class CalculoService {
                     sale.getValue(), taxaAplicada, comissao, idRegra, resolucao.origemTaxa(), versaoRegra,
                     sale.getSaleDate(), matricula, codCargo, codLoja, codMarca,
                     sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
-                    tipoVenda, idLoteOrigem
+                    tipoVenda, idLoteOrigem, calculada
             );
 
             LogCalculoImutavel logImutavel = new LogCalculoImutavel(
@@ -213,6 +216,8 @@ public class CalculoService {
                     parametrosSnapshot
             );
             logImutavel.setOrigemTaxa(resolucao.origemTaxa());
+            logImutavel.setValorBonusPercentual(calculada.bonusPercentual());
+            logImutavel.setValorBonusFixo(calculada.bonusFixo());
             logCalculoRepository.save(logImutavel);
 
             return CalculoIndividualResponseDTO.sucesso(
@@ -348,7 +353,8 @@ public class CalculoService {
             Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
             garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
-            BigDecimal comissao = sale.getValue().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
+            ComissaoCalculada calculada = calcularComissaoTotal(sale.getValue(), taxaAplicada, resolucao);
+            BigDecimal comissao = calculada.total();
             Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
                     ? sale.getRegistration().getPosition().getCode() : null;
             Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
@@ -360,6 +366,8 @@ public class CalculoService {
                         existenteOpt.get(), idVenda, matricula, codMarca, codLoja, codCargo,
                         idRegra, sale, taxaAplicada, comissao, resolucao.origemTaxa()
                 );
+                resultado.setValorBonusPercentual(calculada.bonusPercentual());
+                resultado.setValorBonusFixo(calculada.bonusFixo());
             } else {
                 resultado = new ResultadoCalculo(
                         UUID.randomUUID(),
@@ -376,6 +384,8 @@ public class CalculoService {
                         "COMPETENCIA"
                 );
                 resultado.setOrigemTaxa(resolucao.origemTaxa());
+                resultado.setValorBonusPercentual(calculada.bonusPercentual());
+                resultado.setValorBonusFixo(calculada.bonusFixo());
             }
 
             ResultadoCalculo salvo = resultadoCalculoRepository.save(resultado);
@@ -479,7 +489,8 @@ public class CalculoService {
                 resultado.getValorVenda(), resultado.getTaxaAplicada(), resultado.getValorComissao(),
                 resultado.getRegraId(), resolucao.origemTaxa(), versaoRegra, resultado.getDataVenda(),
                 resultado.getMatricula(), resultado.getCodCargo(), resultado.getCodLoja(), resultado.getCodMarca(),
-                canal, tipoVenda, sale.getIdLoteOrigem()
+                canal, tipoVenda, sale.getIdLoteOrigem(),
+                new ComissaoCalculada(resultado.getValorComissao(), resultado.getValorBonusPercentual(), resultado.getValorBonusFixo())
         );
         LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                 resultado.getProtocoloCalculo(),
@@ -501,8 +512,27 @@ public class CalculoService {
                 parametrosSnapshot
         );
         logImutavel.setOrigemTaxa(resolucao.origemTaxa());
+        logImutavel.setValorBonusPercentual(resultado.getValorBonusPercentual());
+        logImutavel.setValorBonusFixo(resultado.getValorBonusFixo());
         logCalculoRepository.save(logImutavel);
     }
+
+    /**
+     * Comissão total = valor × taxa + valor × bônus percentual + bônus de valor fixo (por venda elegível).
+     * Cada parcela é arredondada separadamente em escala 2 com HALF_UP; o total é a soma das parcelas arredondadas.
+     */
+    private ComissaoCalculada calcularComissaoTotal(BigDecimal valorVenda, BigDecimal taxa, ResolucaoTaxaResult resolucao) {
+        BigDecimal base = valorVenda.multiply(taxa).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal bonusPercentual = resolucao.bonusPercentual() != null
+                ? valorVenda.multiply(resolucao.bonusPercentual()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2);
+        BigDecimal bonusFixo = resolucao.bonusValorFixo() != null
+                ? resolucao.bonusValorFixo().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2);
+        return new ComissaoCalculada(base.add(bonusPercentual).add(bonusFixo), bonusPercentual, bonusFixo);
+    }
+
+    private record ComissaoCalculada(BigDecimal total, BigDecimal bonusPercentual, BigDecimal bonusFixo) {}
 
     /**
      * Processa o cálculo de comissão garantindo proteção contra cálculo duplicado (idempotência).
@@ -710,6 +740,22 @@ public class CalculoService {
                 .stream()
                 .map(LogCalculoResponse::fromEntity)
                 .toList();
+    }
+
+    private String montarSnapshotParametros(
+            BigDecimal valorVenda, BigDecimal taxaAplicada, BigDecimal valorComissao,
+            Long idRegra, String origemTaxa, String versaoRegra,
+            LocalDate dataVenda, String matricula, Integer codCargo, Integer codLoja, Integer codMarca,
+            String canal, String tipoVenda, String idLoteOrigem, ComissaoCalculada calculada
+    ) {
+        String base = montarSnapshotParametros(valorVenda, taxaAplicada, valorComissao, idRegra, origemTaxa, versaoRegra,
+                dataVenda, matricula, codCargo, codLoja, codMarca, canal, tipoVenda, idLoteOrigem);
+        if (calculada == null || (calculada.bonusPercentual().signum() == 0 && calculada.bonusFixo().signum() == 0)) {
+            return base;
+        }
+        return base.substring(0, base.length() - 1)
+                + ",\"valorBonusPercentual\":" + calculada.bonusPercentual()
+                + ",\"valorBonusFixo\":" + calculada.bonusFixo() + "}";
     }
 
     private String montarSnapshotParametros(

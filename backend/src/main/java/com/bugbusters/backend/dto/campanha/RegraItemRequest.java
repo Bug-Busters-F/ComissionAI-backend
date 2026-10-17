@@ -6,6 +6,8 @@ import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.model.Marca;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Positive;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -85,8 +87,28 @@ public record RegraItemRequest(
         Boolean completa,
 
         @Schema(description = "Status individual desejado para a regra (opcional)", example = "DRAFT")
-        StatusRegra status
+        StatusRegra status,
+        @Schema(description = "Bônus percentual adicional sobre o valor da venda (0 < x <= 1; opcional)", example = "0.0100")
+        @Positive(message = "O bônus percentual deve ser maior que zero")
+        @DecimalMax(value = "1.0000", message = "O bônus percentual não pode ultrapassar 1.0000 (100%)")
+        BigDecimal bonusPercentual,
+        @Schema(description = "Bônus em valor fixo (R$) adicionado por venda elegível (opcional)", example = "50.00")
+        @Positive(message = "O bônus de valor fixo deve ser maior que zero")
+        BigDecimal bonusValorFixo
 ) {
+    /** Item sem bônus (contrato anterior ao bônus). */
+    public RegraItemRequest(String blocoId, String trechoOrigem, String nome, String canal, Integer codMarca,
+                            String descrMarca, Integer codLoja, Integer codCargo, String descriCargo, String matricula,
+                            BigDecimal valorMinimo, Boolean minInclusivo, BigDecimal valorMaximo, Boolean maxInclusivo,
+                            TipoOperacaoBase tipoOperacao, BigDecimal valorAjuste, String tipoBaseReferencia,
+                            BigDecimal taxaBaseConsultada, String descricaoReferencia, BigDecimal taxa, String explicacao,
+                            String pythonEquivalente, List<String> pendencias, Boolean completa, StatusRegra status) {
+        this(blocoId, trechoOrigem, nome, canal, codMarca, descrMarca, codLoja, codCargo, descriCargo, matricula,
+                valorMinimo, minInclusivo, valorMaximo, maxInclusivo, tipoOperacao, valorAjuste, tipoBaseReferencia,
+                taxaBaseConsultada, descricaoReferencia, taxa, explicacao, pythonEquivalente, pendencias, completa, status,
+                null, null);
+    }
+
     public RegraItemRequest {
         if (descrMarca != null && !descrMarca.isBlank()) {
             descrMarca = Marca.padronizar(descrMarca);
@@ -134,7 +156,9 @@ public record RegraItemRequest(
                 p.pythonEquivalente(),
                 p.pendencias() != null ? p.pendencias().stream().map(PendenciaPropostaDTO::mensagem).toList() : List.of(),
                 p.completa(),
-                StatusRegra.DRAFT
+                StatusRegra.DRAFT,
+                p.bonusPercentual(),
+                p.bonusValorFixo()
         );
     }
 }

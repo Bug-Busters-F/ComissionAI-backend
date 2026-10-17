@@ -52,6 +52,12 @@ public class Regra {
     @Column(name = "data_fim", nullable = false)
     private LocalDate dataFim;
 
+    @Column(name = "bonus_percentual", precision = 6, scale = 4)
+    private BigDecimal bonusPercentual;
+
+    @Column(name = "bonus_valor_fixo", precision = 15, scale = 2)
+    private BigDecimal bonusValorFixo;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private StatusRegra status = StatusRegra.ATIVA;
@@ -200,6 +206,21 @@ public class Regra {
 
     public LocalDate getDataFim() { return dataFim; }
     public void setDataFim(LocalDate dataFim) { this.dataFim = dataFim; }
+
+    public BigDecimal getBonusPercentual() { return bonusPercentual; }
+    public void setBonusPercentual(BigDecimal bonusPercentual) { this.bonusPercentual = bonusPercentual; }
+
+    public BigDecimal getBonusValorFixo() { return bonusValorFixo; }
+    public void setBonusValorFixo(BigDecimal bonusValorFixo) { this.bonusValorFixo = bonusValorFixo; }
+
+    /** Indica se a regra restringe o valor da venda por faixa (mínimo e/ou máximo). */
+    public boolean possuiFaixa() { return valorMinimo != null || valorMaximo != null; }
+
+    /** Limite mínimo inclusivo; nulo conta como inclusivo. */
+    public boolean minEhInclusivo() { return !Boolean.FALSE.equals(minInclusivo); }
+
+    /** Limite máximo inclusivo; nulo conta como inclusivo. */
+    public boolean maxEhInclusivo() { return !Boolean.FALSE.equals(maxInclusivo); }
 
     public StatusRegra getStatus() { return status; }
     public void setStatus(StatusRegra status) { this.status = status; }

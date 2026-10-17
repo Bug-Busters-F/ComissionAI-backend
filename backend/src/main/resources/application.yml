@@ -10,7 +10,12 @@ ai:
     url: ${AI_SERVICE_URL:http://host.docker.internal:8000}
     endpoint: /api/v1/interpretar
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT:3000}
-    read-timeout-ms: ${AI_READ_TIMEOUT:35000}
+    # O agente da Sprint 2 pode fazer várias chamadas ao LLM e consultas ao backend;
+    # mantenha este valor acima de AGENT_MAX_DURATION_SECONDS do serviço de IA (45s).
+    read-timeout-ms: ${AI_READ_TIMEOUT:60000}
+    v2:
+      # Agente de interpretação usado por /api/v1/interpretador/extrair-propostas
+      endpoint: /api/v2/interpretar
 
 ---
 # Perfil de Desenvolvimento Local (PostgreSQL)

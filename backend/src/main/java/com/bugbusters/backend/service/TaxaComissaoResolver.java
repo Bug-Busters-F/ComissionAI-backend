@@ -138,6 +138,15 @@ public class TaxaComissaoResolver {
                     .filter(r -> calcularEspecificidade(r) == maiorEspecificidade)
                     .toList();
 
+            // Desempate adicional: com a mesma especificidade, a regra que restringe o valor por faixa
+            // prevalece sobre a que não possui faixa. Os pesos documentados não são alterados.
+            if (regrasMaisEspecificas.size() > 1) {
+                List<Regra> comFaixa = regrasMaisEspecificas.stream().filter(Regra::possuiFaixa).toList();
+                if (!comFaixa.isEmpty() && comFaixa.size() < regrasMaisEspecificas.size()) {
+                    regrasMaisEspecificas = comFaixa;
+                }
+            }
+
             // Empate na maior especificidade com múltiplas regras concorrentes: conflito/ambiguidade bloqueado
             if (regrasMaisEspecificas.size() > 1) {
                 List<Long> idsConflitantes = regrasMaisEspecificas.stream().map(Regra::getId).toList();
@@ -223,7 +232,7 @@ public class TaxaComissaoResolver {
                 ));
             }
             String versaoRegra = "REGRA#" + regra.getId() + " - " + regra.getNome();
-            return ResolucaoTaxaResult.sucesso(taxa.setScale(4, RoundingMode.HALF_UP), regra.getId(), "REGRA_NEGOCIO", versaoRegra, null);
+            return sucessoPorRegra(regra, taxa.setScale(4, RoundingMode.HALF_UP), versaoRegra);
         }
 
         // Caso 2: Operações de ajuste sobre a taxa base contratual (tb_basecomiss)
@@ -311,7 +320,7 @@ public class TaxaComissaoResolver {
                 regra.getId(), regra.getNome(), operacao, taxaBase,
                 sinalOperacao, valorAjuste, taxaCalculada);
 
-        return ResolucaoTaxaResult.sucesso(taxaCalculada, regra.getId(), "REGRA_NEGOCIO", versaoRegra, null);
+        return sucessoPorRegra(regra, taxaCalculada, versaoRegra);
     }
 
     /**
@@ -355,23 +364,35 @@ public class TaxaComissaoResolver {
      * - Marca: 1
      */
     private int calcularEspecificidade(Regra regra) {
+        return especificidade(regra.getCodMarca(), regra.getCodLoja(), regra.getCodCargo(),
+                regra.getMatricula(), regra.getCanal());
+    }
+
+    /** Peso de especificidade por dimensão informada (fonte única, reutilizada nas consultas da IA). */
+    public static int especificidade(Integer codMarca, Integer codLoja, Integer codCargo, String matricula, String canal) {
         int peso = 0;
-        if (regra.getMatricula() != null && !regra.getMatricula().isBlank()) {
+        if (matricula != null && !matricula.isBlank()) {
             peso += 16;
         }
-        if (regra.getCodLoja() != null) {
+        if (codLoja != null) {
             peso += 8;
         }
-        if (regra.getCodCargo() != null) {
+        if (codCargo != null) {
             peso += 4;
         }
-        if (regra.getCanal() != null && !regra.getCanal().isBlank() && !"PADRAO".equalsIgnoreCase(regra.getCanal())) {
+        if (canal != null && !canal.isBlank() && !"PADRAO".equalsIgnoreCase(canal)) {
             peso += 2;
         }
-        if (regra.getCodMarca() != null) {
+        if (codMarca != null) {
             peso += 1;
         }
         return peso;
+    }
+
+    /** Sucesso por regra de negócio, levando o bônus da regra vencedora (nunca somado entre regras). */
+    private ResolucaoTaxaResult sucessoPorRegra(Regra regra, BigDecimal taxa, String versaoRegra) {
+        return ResolucaoTaxaResult.sucesso(taxa, regra.getId(), "REGRA_NEGOCIO", versaoRegra, null,
+                regra.getBonusPercentual(), regra.getBonusValorFixo());
     }
 
     /** Exclui o registro técnico usado como referência para a taxa base. */

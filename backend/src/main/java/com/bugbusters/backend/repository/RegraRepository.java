@@ -14,9 +14,14 @@ import com.bugbusters.backend.model.Regra;
 
 @Repository
 public interface RegraRepository extends JpaRepository<Regra, Long> {
-    Optional<Regra> findByCampanhaIdAndRemovidoEmIsNull(Long campanhaId);
+    /** Primeira regra não removida da campanha (compatibilidade com o contrato de uma regra). */
+    default Optional<Regra> findByCampanhaIdAndRemovidoEmIsNull(Long campanhaId) {
+        return findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanhaId).stream().findFirst();
+    }
 
     List<Regra> findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(Long campanhaId);
+
+    List<Regra> findAllByStatusAndRemovidoEmIsNull(StatusRegra status);
 
     List<Regra> findAllByCampanhaIdInAndRemovidoEmIsNull(List<Long> campanhaIds);
 
@@ -52,6 +57,5 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
         ORDER BY r.id DESC
     """)
     List<Regra> findRegrasAtivasComCampanha(@Param("status") StatusRegra status);
-
 
 }

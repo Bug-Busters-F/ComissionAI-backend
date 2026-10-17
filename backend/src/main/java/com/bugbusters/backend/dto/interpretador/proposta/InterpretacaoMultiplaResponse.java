@@ -23,8 +23,16 @@ public record InterpretacaoMultiplaResponse(
         Boolean todasCompletas,
 
         @Schema(description = "Nível de confiança consolidado do modelo na extração (0.00 a 1.00)", example = "0.92")
-        BigDecimal confiancaGeral
+        BigDecimal confiancaGeral,
+
+        @Schema(description = "Pendências que não pertencem a uma proposta: falha ou limite do agente e trechos do texto que não viraram regra")
+        List<PendenciaPropostaDTO> pendenciasGerais
 ) {
+    public InterpretacaoMultiplaResponse(String tituloSugerido, List<PropostaRegraDTO> propostas, Integer quantidadeBlocos,
+                                         Boolean possuiPendencias, Boolean todasCompletas, BigDecimal confiancaGeral) {
+        this(tituloSugerido, propostas, quantidadeBlocos, possuiPendencias, todasCompletas, confiancaGeral, null);
+    }
+
     public InterpretacaoMultiplaResponse {
         if (propostas == null) {
             propostas = List.of();
@@ -37,6 +45,9 @@ public record InterpretacaoMultiplaResponse(
         }
         if (todasCompletas == null) {
             todasCompletas = propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa()));
+        }
+        if (pendenciasGerais == null) {
+            pendenciasGerais = List.of();
         }
     }
 }

@@ -52,45 +52,43 @@ class InterpretadorPropostasIntegrationTest {
     @Test
     @DisplayName("Deve extrair múltiplas propostas de regras com faixas e ajustes sobre a base")
     void deveExtrairMultiplasPropostasComSucesso() throws Exception {
-        String respostaSimuladaPython1 = """
+        // Resposta do agente (/api/v2/interpretar): ele separa as regras e resolve o cadastro, mas deixa o
+        // ajuste sobre a taxa base sem taxa e com pendência; o backend calcula o ajuste a partir do trecho.
+        String respostaAgente = """
             {
-              "canal": "ECOMMERCE",
-              "codMarca": 10,
-              "descrMarca": "PRETO",
-              "codCargo": null,
-              "descriCargo": null,
-              "codLoja": null,
-              "taxa": 0.0500,
-              "dataInicio": "2026-10-01",
-              "dataFim": "2026-10-31",
-              "confianca": 0.95,
-              "pendencias": []
+              "status": "PROPOSTA_COM_PENDENCIAS",
+              "propostas": [
+                {
+                  "idLocal": "p1",
+                  "condicoes": {"canal": "ECOMMERCE", "codMarca": 10, "descrMarca": "PRETO"},
+                  "taxa": "0.0500",
+                  "dataInicio": "2026-10-01", "dataFim": "2026-10-31",
+                  "origem": {"trecho": "Pagar 5% no canal ecommerce durante outubro"},
+                  "referencias": [{"fonte": "CADASTRO", "chave": {"marca": 10}}],
+                  "confianca": "0.95",
+                  "pendencias": []
+                },
+                {
+                  "idLocal": "p2",
+                  "condicoes": {"codLoja": 75, "faixaValor": {"campo": "VENDA", "min": "5000.00", "max": null, "minInclusivo": false, "maxInclusivo": false}},
+                  "taxa": null,
+                  "dataInicio": "2026-10-01", "dataFim": "2026-10-31",
+                  "origem": {"trecho": "Para a loja 75, pagar taxa base + 1.5% em vendas acima de R$ 5.000."},
+                  "referencias": [{"fonte": "CADASTRO", "chave": {"loja": 75}}],
+                  "confianca": "0.80",
+                  "pendencias": [{"codigo": "CAMPO_AUSENTE", "campo": "taxa",
+                                  "mensagem": "Ajuste sobre a taxa base ('taxa base + 1.5%') depende da comissão base; a taxa final ainda não foi calculada."}]
+                }
+              ],
+              "pendenciasGerais": [],
+              "trechosNaoMapeados": [],
+              "trilhaFerramentas": []
             }
             """;
 
-        String respostaSimuladaPython2 = """
-            {
-              "canal": null,
-              "codMarca": null,
-              "descrMarca": null,
-              "codCargo": null,
-              "descriCargo": null,
-              "codLoja": 75,
-              "taxa": 0.0450,
-              "dataInicio": "2026-10-01",
-              "dataFim": "2026-10-31",
-              "confianca": 0.92,
-              "pendencias": []
-            }
-            """;
-
-        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
+        mockServer.expect(requestTo(endsWith("/api/v2/interpretar")))
                 .andExpect(method(HttpMethod.POST))
-                .andRespond(withSuccess(respostaSimuladaPython1, MediaType.APPLICATION_JSON));
-
-        mockServer.expect(requestTo(endsWith("/api/v1/interpretar")))
-                .andExpect(method(HttpMethod.POST))
-                .andRespond(withSuccess(respostaSimuladaPython2, MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(respostaAgente, MediaType.APPLICATION_JSON));
 
         mockMvc.perform(post("/api/v1/interpretador/extrair-propostas")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -98,7 +96,7 @@ class InterpretadorPropostasIntegrationTest {
                             {
                                 "texto": "1. Pagar 5% no canal ecommerce durante outubro.\\n2. Para a loja 75, pagar taxa base + 1.5% em vendas acima de R$ 5.000.",
                                 "contexto": {
-                                    "ano_referencia": 2026
+                                    "vigenciaCampanha": {"inicio": "2026-10-01", "fim": "2026-10-31"}
                                 }
                             }
                             """))
@@ -108,12 +106,18 @@ class InterpretadorPropostasIntegrationTest {
                 .andExpect(jsonPath("$.propostas[0].blocoId", is("bloco-1")))
                 .andExpect(jsonPath("$.propostas[0].filtros.canal", is("ECOMMERCE")))
                 .andExpect(jsonPath("$.propostas[0].taxaFinal", is(0.0500)))
+                .andExpect(jsonPath("$.propostas[0].origensPorCampo.marca", is("BASE_DADOS")))
+                .andExpect(jsonPath("$.propostas[0].origensPorCampo.dataInicio", is("CONTEXTO")))
                 .andExpect(jsonPath("$.propostas[1].blocoId", is("bloco-2")))
                 .andExpect(jsonPath("$.propostas[1].filtros.codLoja", is(75)))
-                .andExpect(jsonPath("$.propostas[1].condicaoValor.valorMinimo", is(5000)))
+                .andExpect(jsonPath("$.propostas[1].condicaoValor.valorMinimo", is(5000.0)))
+                .andExpect(jsonPath("$.propostas[1].condicaoValor.minInclusivo", is(false)))
                 .andExpect(jsonPath("$.propostas[1].operacaoBase.tipoOperacao", is("ACRESCIMO_PONTOS")))
+                .andExpect(jsonPath("$.propostas[1].taxaFinal", notNullValue()))
+                .andExpect(jsonPath("$.propostas[1].pendencias[?(@.campo == 'taxa')]", hasSize(0)))
                 .andExpect(jsonPath("$.propostas[1].explicacao", notNullValue()))
                 .andExpect(jsonPath("$.propostas[1].pythonEquivalente", containsString("def calcular_comissao")));
+        mockServer.verify();
     }
 
     @Test

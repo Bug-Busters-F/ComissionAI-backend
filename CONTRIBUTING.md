@@ -188,6 +188,12 @@ No painel do SQLTools na barra lateral do VS Code, clique com o botão direito n
 
 ---
 
+## Casos de ouro de cálculo (compartilhados com o serviço de IA)
+
+`backend/src/test/resources/golden/golden_cases.json` descreve regras + venda → comissão esperada e é executado por `GoldenCasesTest` (`mvn test`). O mesmo arquivo existe em `ComissionAI-ai/tests/golden/golden_cases.json`; os dois repositórios precisam ficar idênticos. Se você alterar a lógica de cálculo, precedência, faixa, bônus ou arredondamento, atualize o arquivo, copie-o para o repo de IA e rode os testes dos dois lados. Detalhes em [`docs/PRECEDENCIA_E_SELECAO_TAXAS.md`](./docs/PRECEDENCIA_E_SELECAO_TAXAS.md) (seção 6).
+
+---
+
 ## Enviando uma Contribuição
 
 1. Crie uma branch para sua alteração:

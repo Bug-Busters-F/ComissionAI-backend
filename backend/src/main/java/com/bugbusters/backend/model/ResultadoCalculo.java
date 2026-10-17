@@ -47,6 +47,12 @@ public class ResultadoCalculo {
     @Column(name = "valor_comissao", nullable = false, precision = 15, scale = 2)
     private BigDecimal valorComissao;
 
+    @Column(name = "valor_bonus_percentual", nullable = false, precision = 15, scale = 2)
+    private BigDecimal valorBonusPercentual = BigDecimal.ZERO;
+
+    @Column(name = "valor_bonus_fixo", nullable = false, precision = 15, scale = 2)
+    private BigDecimal valorBonusFixo = BigDecimal.ZERO;
+
     @Column(name = "tipo_calculo", nullable = false, length = 50)
     private String tipoCalculo;
 
@@ -213,5 +219,23 @@ public class ResultadoCalculo {
 
     public void setCalculadoEm(OffsetDateTime calculadoEm) {
         this.calculadoEm = calculadoEm;
+    }
+
+    /** Parcela de bônus percentual sobre a venda (já incluída em valorComissao). */
+    public BigDecimal getValorBonusPercentual() {
+        return valorBonusPercentual;
+    }
+
+    public void setValorBonusPercentual(BigDecimal valorBonusPercentual) {
+        this.valorBonusPercentual = valorBonusPercentual != null ? valorBonusPercentual : BigDecimal.ZERO;
+    }
+
+    /** Parcela de bônus em valor fixo por venda (já incluída em valorComissao). */
+    public BigDecimal getValorBonusFixo() {
+        return valorBonusFixo;
+    }
+
+    public void setValorBonusFixo(BigDecimal valorBonusFixo) {
+        this.valorBonusFixo = valorBonusFixo != null ? valorBonusFixo : BigDecimal.ZERO;
     }
 }

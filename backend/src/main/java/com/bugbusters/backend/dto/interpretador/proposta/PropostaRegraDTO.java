@@ -55,8 +55,24 @@ public record PropostaRegraDTO(
 
         @Schema(description = "Período temporal de vigência da proposta")
         @Valid
-        PeriodoVigenciaDTO vigencia
+        PeriodoVigenciaDTO vigencia,
+
+        @Schema(description = "Bônus percentual adicional sobre o valor da venda (0 < x <= 1)", example = "0.0100")
+        BigDecimal bonusPercentual,
+
+        @Schema(description = "Bônus em valor fixo (R$) por venda elegível", example = "20.00")
+        BigDecimal bonusValorFixo
 ) {
+    /** Proposta sem bônus. */
+    public PropostaRegraDTO(String blocoId, String trechoOrigem, FiltrosRegraDTO filtros, FaixaValorDTO condicaoValor,
+                            OperacaoBaseDTO operacaoBase, BigDecimal taxaFinal,
+                            List<ReferenciaConsultadaDTO> referenciasConsultadas, Map<String, OrigemCampo> origensPorCampo,
+                            List<PendenciaPropostaDTO> pendencias, Boolean completa, String explicacao,
+                            String pythonEquivalente, PeriodoVigenciaDTO vigencia) {
+        this(blocoId, trechoOrigem, filtros, condicaoValor, operacaoBase, taxaFinal, referenciasConsultadas,
+                origensPorCampo, pendencias, completa, explicacao, pythonEquivalente, vigencia, null, null);
+    }
+
     public PropostaRegraDTO {
         if (referenciasConsultadas == null) {
             referenciasConsultadas = List.of();

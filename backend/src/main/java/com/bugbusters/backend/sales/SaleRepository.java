@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
@@ -16,7 +18,7 @@ import java.util.UUID;
 import jakarta.persistence.LockModeType;
 
 @Repository
-public interface SaleRepository extends JpaRepository<Sale, UUID> {
+public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificationExecutor<Sale> {
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
 
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
@@ -37,6 +39,10 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
     @Override
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     Page<Sale> findAll(Pageable pageable);
+
+    @Override
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    Page<Sale> findAll(Specification<Sale> spec, Pageable pageable);
 
     boolean existsByRegistrationId(UUID registrationId);
 

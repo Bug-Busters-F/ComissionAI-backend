@@ -76,3 +76,33 @@ Toda seleção bem-sucedida ou impedida gera um resultado rastreável (`Resoluca
 - `idRegra`: identificador da regra aplicada (ou ID 1 para BaseComiss).
 - `origemTaxa`: `"REGRA_NEGOCIO"` ou `"BASE_COMISS"`.
 - `motivoImpedimento`: justificativa contratual caso a venda não possa ser calculada.
+
+---
+
+## 6. Faixa de valor, desempate e bônus (Sprint 2)
+
+### 6.1 Faixa de valor por venda
+Uma regra pode restringir o **valor de cada venda** com `valor_minimo`, `valor_maximo`, `min_inclusivo` e `max_inclusivo` (nulo conta como inclusivo). Sem faixa, a regra aceita qualquer valor.
+- A regra **só entra na disputa** se o valor da venda estiver na faixa; regras fora da faixa são descartadas antes da comparação de especificidade.
+- Faixas contíguas (`[0, 1000)` e `[1000, +∞)`) não se sobrepõem quando o limite é exclusivo de um lado.
+- A faixa é **por venda**, não acumulada no período (acumulado exigiria estado e não é suportado).
+
+### 6.2 Desempate adicional
+Os pesos de especificidade da seção 4 **não mudam**. Com empate no maior peso:
+1. se algumas das regras empatadas têm faixa de valor e outras não, **prevalecem as que têm faixa**;
+2. se ainda restar mais de uma regra, o cálculo é bloqueado por conflito (mensagem da seção 4).
+
+### 6.3 Bônus
+Uma regra pode somar um bônus **sobre a venda**, em percentual e/ou valor fixo (nunca sobre salário):
+
+```
+comissão = valor × taxa  +  valor × bonus_percentual  +  bonus_valor_fixo
+```
+- Cada parcela é arredondada **separadamente** em escala 2 com `HALF_UP`; o total é a soma das parcelas arredondadas (ex.: venda 10,10 com 5% + bônus 5% → 0,51 + 0,51 = 1,02).
+- `bonus_valor_fixo` vale **por venda elegível** (venda dentro da vigência, do público e da faixa da regra).
+- O bônus pertence à regra vencedora; não é somado entre regras (a regra "nunca somar percentuais" continua valendo).
+- `valor_comissao` guarda o **total**; `valor_bonus_percentual` e `valor_bonus_fixo` são registrados à parte em `tb_resultado_calculo` e no log imutável (o snapshot dos parâmetros inclui as duas parcelas quando há bônus).
+- Validações: `bonus_percentual` > 0 e ≤ 1; `bonus_valor_fixo` > 0; ambos nulos = sem bônus.
+
+### 6.4 Casos de ouro
+`backend/src/test/resources/golden/golden_cases.json` reúne os casos de referência (faixas e fronteiras, bônus, arredondamento, precedência, empate, vigência, canal). O teste `GoldenCasesTest` os executa contra o motor real; o mesmo arquivo é copiado para o repositório do serviço de IA (`tests/golden/golden_cases.json`) e usado nos testes dos templates/sandbox Python. **Ao mudar uma regra de cálculo, atualize o arquivo nos dois repositórios e rode os dois lados.**

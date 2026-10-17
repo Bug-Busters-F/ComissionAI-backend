@@ -18,8 +18,12 @@ sequenceDiagram
 
     Gestor->>Front: Digita comando em linguagem natural
     Front->>Back: POST /api/v1/interpretador/extrair-propostas
-    Back->>AI: POST /api/v1/interpretar (NLP)
-    AI-->>Back: JSON com blocos extraídos
+    Back->>AI: POST /api/v2/interpretar (agente)
+    loop Consultas do agente
+        AI->>Back: GET/POST /api/v1/consultas-ia (marcas, lojas, cargos, matrícula, bases, regras concorrentes)
+        Back-->>AI: Cadastro real (encontrado / não encontrado)
+    end
+    AI-->>Back: Propostas com trecho de origem, pendências e trilha de consultas
     Note over Back: Validação defensiva (Zero-Trust), enriquecimento cadastral,<br/>cálculo de taxa efetiva e geração de artefatos (XAI e Python)
     Back-->>Front: InterpretacaoMultiplaResponse (Lista de PropostaRegraDTO)
     Front-->>Gestor: Renderiza cards interativos com propostas, pendências e artefatos
@@ -152,11 +156,16 @@ Classificação de pendências para tratamento em Human-in-the-Loop (HITL):
 {
   "texto": "1. Pagar 5% no canal ecommerce durante outubro.\n2. Para a loja 75, pagar taxa base + 1.5% em vendas acima de R$ 5.000.",
   "contexto": {
-    "ano_referencia": 2026,
-    "mes_referencia": 10
+    "vigenciaCampanha": {"inicio": "2026-10-01", "fim": "2026-10-31"},
+    "competencia": "2026-10"
   }
 }
 ```
+* `contexto.vigenciaCampanha` e `contexto.competencia` são repassados ao agente; todas as propostas herdam a vigência da campanha (período diferente citado no texto vira pendência `VIGENCIA_INCOMPATIVEL`). Ids da campanha (`campanhaId`, `revisao`, `origem`, `substituiVersao`) também podem ir em `contexto`.
+* A separação das regras, o trecho de origem e a resolução de marca, cargo, loja e matrícula vêm do agente; o ajuste sobre a taxa base (`ACRESCIMO_PONTOS` etc.), a validação e os artefatos (explicação e Python) são calculados no backend.
+* Campos adicionais na resposta: `bonusPercentual` e `bonusValorFixo` em cada proposta; `pendenciasGerais` na raiz (falha ou limite do agente e trechos do texto que não viraram regra, código `TRECHO_NAO_MAPEADO`).
+* Pendências do agente viram `IMPEDIMENTO`, exceto `VIGENCIA_INCOMPATIVEL` e `TRECHO_INCOMPLETO`, que são `AVISO`.
+
 * **Resposta (Status 200 OK):**
 ```json
 {

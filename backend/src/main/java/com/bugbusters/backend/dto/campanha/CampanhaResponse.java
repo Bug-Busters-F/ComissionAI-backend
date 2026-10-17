@@ -51,6 +51,8 @@ public record CampanhaResponse(
             Boolean completa,
             LocalDate dataInicio,
             LocalDate dataFim,
-            StatusRegra status
+            StatusRegra status,
+            BigDecimal bonusPercentual,
+            BigDecimal bonusValorFixo
     ) {}
 }
