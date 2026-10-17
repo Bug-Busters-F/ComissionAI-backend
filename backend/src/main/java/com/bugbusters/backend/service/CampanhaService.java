@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -43,6 +44,11 @@ public class CampanhaService {
         campanha.setEstado(estadoInicial);
 
         Campanha campanhaSalva = campanhaRepository.save(campanha);
+
+        if (request.possuiRegras()) {
+            List<Regra> salvas = criarRegras(campanhaSalva, request, periodo, estadoInicial);
+            return mapearParaResponse(campanhaSalva, salvas);
+        }
 
         Regra regra = new Regra();
         regra.setCampanha(campanhaSalva);
@@ -76,11 +82,7 @@ public class CampanhaService {
                 : campanhaRepository.findAllByRemovidoEmIsNullOrderByCriadoEmDesc();
 
         return campanhas.stream()
-                .map(campanha -> {
-                    Regra regra = regraRepository.findByCampanhaIdAndRemovidoEmIsNull(campanha.getId())
-                            .orElse(null);
-                    return mapearParaResponse(campanha, regra);
-                })
+                .map(campanha -> mapearParaResponse(campanha, carregarRegras(campanha.getId())))
                 .toList();
     }
 
@@ -89,10 +91,7 @@ public class CampanhaService {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
         
-        Regra regra = regraRepository.findByCampanhaIdAndRemovidoEmIsNull(campanha.getId())
-                .orElse(null);
-
-        return mapearParaResponse(campanha, regra);
+        return mapearParaResponse(campanha, carregarRegras(campanha.getId()));
     }
 
     @Transactional
@@ -104,13 +103,13 @@ public class CampanhaService {
         campanha.setAtualizadoEm(OffsetDateTime.now());
         Campanha campanhaAtualizada = campanhaRepository.save(campanha);
 
-        Regra regraAtualizada = regraRepository.findByCampanhaIdAndRemovidoEmIsNull(id).map(regra -> {
+        List<Regra> regrasAtualizadas = carregarRegras(id).stream().map(regra -> {
             regra.setStatus(mapearEstadoParaStatusRegra(novoEstado));
             regra.setAtualizadoEm(OffsetDateTime.now());
             return regraRepository.save(regra);
-        }).orElse(null);
+        }).toList();
 
-        return mapearParaResponse(campanhaAtualizada, regraAtualizada);
+        return mapearParaResponse(campanhaAtualizada, regrasAtualizadas);
     }
 
     @Transactional
@@ -130,6 +129,19 @@ public class CampanhaService {
         campanha.setAtualizadoEm(OffsetDateTime.now());
 
         Campanha campanhaAtualizada = campanhaRepository.save(campanha);
+
+        if (request.possuiRegras()) {
+            // Contrato com lista: as regras vigentes são substituídas (remoção lógica) pelas informadas.
+            OffsetDateTime agora = OffsetDateTime.now();
+            carregarRegras(id).forEach(antiga -> {
+                antiga.setRemovidoEm(agora);
+                antiga.setStatus(StatusRegra.INATIVA);
+                regraRepository.save(antiga);
+            });
+            EstadoCampanha estadoEfetivo = campanhaAtualizada.getEstado();
+            List<Regra> novas = criarRegras(campanhaAtualizada, request, periodo, estadoEfetivo);
+            return mapearParaResponse(campanhaAtualizada, novas);
+        }
 
         Regra regra = regraRepository.findByCampanhaIdAndRemovidoEmIsNull(id)
                 .orElseGet(() -> {
@@ -170,7 +182,7 @@ public class CampanhaService {
         campanha.setEstado(EstadoCampanha.CANCELADA);
         campanhaRepository.save(campanha);
 
-        regraRepository.findByCampanhaIdAndRemovidoEmIsNull(id).ifPresent(regra -> {
+        carregarRegras(id).forEach(regra -> {
             regra.setRemovidoEm(agora);
             regra.setStatus(StatusRegra.INATIVA);
             regraRepository.save(regra);
@@ -200,8 +212,83 @@ public class CampanhaService {
         return new PeriodoCalculado(inicio, fim);
     }
 
+    /** Regras não removidas da campanha; cai no contrato de uma regra se a consulta em lista vier vazia. */
+    private List<Regra> carregarRegras(Long campanhaId) {
+        List<Regra> regras = regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanhaId);
+        if (regras != null && !regras.isEmpty()) {
+            return regras;
+        }
+        return regraRepository.findByCampanhaIdAndRemovidoEmIsNull(campanhaId).map(List::of).orElse(List.of());
+    }
+
+    private List<Regra> criarRegras(Campanha campanha, CampanhaRequest request, PeriodoCalculado periodo, EstadoCampanha estado) {
+        List<Regra> salvas = new ArrayList<>();
+        int indice = 1;
+        for (CampanhaRequest.RegraRequest item : request.regras()) {
+            validarFaixa(item);
+            Regra regra = new Regra();
+            regra.setCampanha(campanha);
+            regra.setNome(item.nome() != null && !item.nome().isBlank()
+                    ? item.nome().trim()
+                    : "Regra " + indice + " - " + request.titulo());
+            regra.setCanal(item.canal() != null && !item.canal().isBlank() ? item.canal().toUpperCase().trim() : null);
+            regra.setCodMarca(item.codMarca());
+            regra.setDescrMarca(item.descrMarca());
+            regra.setCodLoja(item.codLoja());
+            regra.setCodCargo(item.codCargo());
+            regra.setDescriCargo(item.descriCargo());
+            regra.setMatricula(item.matricula());
+            regra.setTaxa(item.taxa());
+            regra.setValorMin(item.valorMin());
+            regra.setValorMax(item.valorMax());
+            regra.setMinInclusivo(item.minInclusivo() == null || item.minInclusivo());
+            regra.setMaxInclusivo(item.maxInclusivo() == null || item.maxInclusivo());
+            regra.setBonusPercentual(item.bonusPercentual());
+            regra.setBonusValorFixo(item.bonusValorFixo());
+            // Todas as regras herdam a vigência da campanha.
+            regra.setDataInicio(periodo.inicio());
+            regra.setDataFim(periodo.fim());
+            regra.setStatus(mapearEstadoParaStatusRegra(estado));
+            salvas.add(regraRepository.save(regra));
+            indice++;
+        }
+        return salvas;
+    }
+
+    private void validarFaixa(CampanhaRequest.RegraRequest item) {
+        if (item.valorMin() != null && item.valorMax() != null) {
+            int c = item.valorMin().compareTo(item.valorMax());
+            boolean min = item.minInclusivo() == null || item.minInclusivo();
+            boolean max = item.maxInclusivo() == null || item.maxInclusivo();
+            if (c > 0 || (c == 0 && !(min && max))) {
+                throw new BusinessException("Faixa de valor incoerente: o valor mínimo (" + item.valorMin()
+                        + ") não pode ser maior que o máximo (" + item.valorMax() + ") nem formar um intervalo vazio.");
+            }
+        }
+    }
+
     private CampanhaResponse mapearParaResponse(Campanha c, Regra r) {
-        RegraVinculadaDTO regraDTO = r != null ? new RegraVinculadaDTO(
+        return mapearParaResponse(c, r != null ? List.of(r) : List.<Regra>of());
+    }
+
+    private CampanhaResponse mapearParaResponse(Campanha c, List<Regra> regras) {
+        List<RegraVinculadaDTO> dtos = regras.stream().map(this::mapearRegra).toList();
+        return new CampanhaResponse(
+                c.getId(),
+                c.getTitulo(),
+                c.getTextoOriginal(),
+                c.getEstado(),
+                c.getDataInicio(),
+                c.getDataFim(),
+                dtos.isEmpty() ? null : dtos.get(0),
+                c.getCriadoEm(),
+                c.getAtualizadoEm(),
+                dtos
+        );
+    }
+
+    private RegraVinculadaDTO mapearRegra(Regra r) {
+        return new RegraVinculadaDTO(
                 r.getId(),
                 r.getNome(),
                 r.getCanal(),
@@ -214,19 +301,13 @@ public class CampanhaService {
                 r.getTaxa(),
                 r.getDataInicio(),
                 r.getDataFim(),
-                r.getStatus()
-        ) : null;
-
-        return new CampanhaResponse(
-                c.getId(),
-                c.getTitulo(),
-                c.getTextoOriginal(),
-                c.getEstado(),
-                c.getDataInicio(),
-                c.getDataFim(),
-                regraDTO,
-                c.getCriadoEm(),
-                c.getAtualizadoEm()
+                r.getStatus(),
+                r.getValorMin(),
+                r.getValorMax(),
+                r.isMinInclusivo(),
+                r.isMaxInclusivo(),
+                r.getBonusPercentual(),
+                r.getBonusValorFixo()
         );
     }
 

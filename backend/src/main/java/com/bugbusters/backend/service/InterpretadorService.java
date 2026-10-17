@@ -2,6 +2,7 @@ package com.bugbusters.backend.service;
 
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraRequest;
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraResponse;
+import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Marca;
 import com.bugbusters.backend.service.client.AiServiceClient;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,26 @@ public class InterpretadorService {
 
     public Map<String, Object> getDicionarioCamposReconhecidos() {
         return DICIONARIO_CAMPOS_RECONHECIDOS;
+    }
+
+    /**
+     * Interpretação v2 (lista de propostas). Disponível apenas com ai.service.v2.enabled=true; o v1 segue sendo o padrão.
+     * Enriquece o contexto como no v1 e repassa a resposta do serviço de IA sem aprovar nem persistir nada.
+     */
+    public Map<String, Object> processarInterpretacaoV2(InterpretacaoRegraRequest request) {
+        if (!aiClient.isV2Enabled()) {
+            throw new ResourceNotFoundException("A interpretação v2 está desabilitada (ai.service.v2.enabled=false).");
+        }
+        Map<String, Object> contexto = new HashMap<>();
+        if (request.contexto() != null) {
+            contexto.putAll(request.contexto());
+        }
+        contexto.putIfAbsent("ano_referencia", LocalDate.now().getYear());
+        contexto.putIfAbsent("dicionario_dimensoes", DICIONARIO_CAMPOS_RECONHECIDOS);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("texto", request.texto());
+        payload.put("contexto", contexto);
+        return aiClient.chamarServicoPythonV2(payload);
     }
 
     public InterpretacaoRegraResponse processarInterpretacao(InterpretacaoRegraRequest request) {

@@ -1,8 +1,10 @@
 package com.bugbusters.backend.service.client;
 
 import java.net.SocketTimeoutException;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -19,6 +21,12 @@ import com.bugbusters.backend.exception.AiTimeoutException;
 public class AiServiceClient {
     private RestClient aiRestClient;
     private final String endpoint;
+
+    @Value("${ai.service.v2.enabled:false}")
+    private boolean v2Enabled;
+
+    @Value("${ai.service.v2.endpoint:/api/v2/interpretar}")
+    private String v2Endpoint;
 
     public AiServiceClient(RestClient aiRestClient, @Value("${ai.service.endpoint:/api/v1/interpretar}") String endpoint) {
         this.aiRestClient = aiRestClient;
@@ -44,6 +52,39 @@ public class AiServiceClient {
                         throw new AiServiceUnavailableException("O serviço de IA retornou status HTTP " + res.getStatusCode().value());
                     })
                     .body(InterpretacaoRegraResponse.class);
+        } catch (ResourceAccessException ex) {
+            if (ex.getCause() instanceof SocketTimeoutException) {
+                throw new AiTimeoutException("O processamento da linguagem natural excedeu o tempo limite configurado.");
+            }
+            throw new AiServiceUnavailableException("Não foi possível conectar ao serviço de IA em Python. Verifique se o módulo está ativo.");
+        } catch (RestClientResponseException ex) {
+            throw new AiServiceUnavailableException("Erro retornado pelo orquestrador de IA: " + ex.getStatusText());
+        }
+    }
+
+    public boolean isV2Enabled() {
+        return v2Enabled;
+    }
+
+    public void setV2Enabled(boolean v2Enabled) {
+        this.v2Enabled = v2Enabled;
+    }
+
+    /**
+     * Chama a interpretação v2 do serviço Python (lista de propostas). A resposta é repassada como mapa
+     * porque o contrato v2 evolui junto com o serviço de IA; o v1 segue sendo o padrão.
+     */
+    public Map<String, Object> chamarServicoPythonV2(Map<String, Object> payload) {
+        try {
+            return aiRestClient.post()
+                    .uri(v2Endpoint)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (req, res) -> {
+                        throw new AiServiceUnavailableException("O serviço de IA retornou status HTTP " + res.getStatusCode().value());
+                    })
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {});
         } catch (ResourceAccessException ex) {
             if (ex.getCause() instanceof SocketTimeoutException) {
                 throw new AiTimeoutException("O processamento da linguagem natural excedeu o tempo limite configurado.");

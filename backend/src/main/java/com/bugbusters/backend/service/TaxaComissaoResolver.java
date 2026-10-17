@@ -109,15 +109,15 @@ public class TaxaComissaoResolver {
                 StatusRegra.ATIVA
         );
 
+        BigDecimal valorVenda = sale.getValue();
         regras = regras.stream()
                 .filter(regra -> !isRegraPadraoTecnica(regra))
+                .filter(regra -> regra.aceitaValor(valorVenda))
                 .toList();
 
         if (!regras.isEmpty()) {
             if (regras.size() == 1) {
-                Regra regra = regras.get(0);
-                String versaoRegra = "REGRA#" + regra.getId() + " - " + regra.getNome();
-                return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO", versaoRegra, null);
+                return sucessoPorRegra(regras.get(0));
             }
 
             // Múltiplas regras aplicáveis: aplicar critério determinístico por nível de especificidade
@@ -130,6 +130,15 @@ public class TaxaComissaoResolver {
                     .filter(r -> calcularEspecificidade(r) == maiorEspecificidade)
                     .toList();
 
+            // Desempate adicional: com a mesma especificidade, a regra que restringe o valor por faixa
+            // prevalece sobre a que não possui faixa. Os pesos documentados não são alterados.
+            if (regrasMaisEspecificas.size() > 1) {
+                List<Regra> comFaixa = regrasMaisEspecificas.stream().filter(Regra::possuiFaixa).toList();
+                if (!comFaixa.isEmpty() && comFaixa.size() < regrasMaisEspecificas.size()) {
+                    regrasMaisEspecificas = comFaixa;
+                }
+            }
+
             // Empate na maior especificidade com múltiplas regras concorrentes: conflito/ambiguidade bloqueado
             if (regrasMaisEspecificas.size() > 1) {
                 List<Long> idsConflitantes = regrasMaisEspecificas.stream().map(Regra::getId).toList();
@@ -141,9 +150,7 @@ public class TaxaComissaoResolver {
                 ));
             }
 
-            Regra regraVencedora = regrasMaisEspecificas.get(0);
-            String versaoRegra = "REGRA#" + regraVencedora.getId() + " - " + regraVencedora.getNome();
-            return ResolucaoTaxaResult.sucesso(regraVencedora.getTaxa(), regraVencedora.getId(), "REGRA_NEGOCIO", versaoRegra, null);
+            return sucessoPorRegra(regrasMaisEspecificas.get(0));
         }
 
         // 2ª Prioridade (Fallback): Buscar taxa padrão em tb_basecomiss (Marca + Cargo)
@@ -192,23 +199,35 @@ public class TaxaComissaoResolver {
      * - Marca: 1
      */
     private int calcularEspecificidade(Regra regra) {
+        return especificidade(regra.getCodMarca(), regra.getCodLoja(), regra.getCodCargo(),
+                regra.getMatricula(), regra.getCanal());
+    }
+
+    /** Peso de especificidade por dimensão informada (fonte única, reutilizada nas consultas da IA). */
+    public static int especificidade(Integer codMarca, Integer codLoja, Integer codCargo, String matricula, String canal) {
         int peso = 0;
-        if (regra.getMatricula() != null && !regra.getMatricula().isBlank()) {
+        if (matricula != null && !matricula.isBlank()) {
             peso += 16;
         }
-        if (regra.getCodLoja() != null) {
+        if (codLoja != null) {
             peso += 8;
         }
-        if (regra.getCodCargo() != null) {
+        if (codCargo != null) {
             peso += 4;
         }
-        if (regra.getCanal() != null && !regra.getCanal().isBlank() && !"PADRAO".equalsIgnoreCase(regra.getCanal())) {
+        if (canal != null && !canal.isBlank() && !"PADRAO".equalsIgnoreCase(canal)) {
             peso += 2;
         }
-        if (regra.getCodMarca() != null) {
+        if (codMarca != null) {
             peso += 1;
         }
         return peso;
+    }
+
+    private ResolucaoTaxaResult sucessoPorRegra(Regra regra) {
+        String versaoRegra = "REGRA#" + regra.getId() + " - " + regra.getNome();
+        return ResolucaoTaxaResult.sucesso(regra.getTaxa(), regra.getId(), "REGRA_NEGOCIO", versaoRegra, null,
+                regra.getBonusPercentual(), regra.getBonusValorFixo());
     }
     /** Exclui o registro técnico usado como referência para a taxa base. */
     private boolean isRegraPadraoTecnica(Regra regra) {

@@ -37,4 +37,15 @@ public class InterpretadorController {
     public ResponseEntity<InterpretacaoRegraResponse> interpretarRegra(@Valid @RequestBody InterpretacaoRegraRequest request) {
         return ResponseEntity.ok(interpretadorService.processarInterpretacao(request));
     }
+
+    @Operation(summary = "Interpretar campanha em linguagem natural (v2: lista de propostas)",
+               description = "Disponível somente com ai.service.v2.enabled=true. Repassa a proposta estruturada do serviço de IA (lista de propostas com pendências, origens e trilha de ferramentas); a aprovação continua com o usuário.")
+    @ApiResponse(responseCode = "200", description = "Propostas geradas")
+    @ApiResponse(responseCode = "404", description = "Interpretação v2 desabilitada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "Serviço de IA Python indisponível", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "504", description = "Tempo limite excedido na inferência", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/extrair-propostas")
+    public ResponseEntity<java.util.Map<String, Object>> interpretarPropostas(@Valid @RequestBody InterpretacaoRegraRequest request) {
+        return ResponseEntity.ok(interpretadorService.processarInterpretacaoV2(request));
+    }
 }

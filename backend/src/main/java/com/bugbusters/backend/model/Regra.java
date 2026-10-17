@@ -51,6 +51,24 @@ public class Regra {
     @Column(name = "data_fim", nullable = false)
     private LocalDate dataFim;
 
+    @Column(name = "valor_min", precision = 15, scale = 2)
+    private BigDecimal valorMin;
+
+    @Column(name = "valor_max", precision = 15, scale = 2)
+    private BigDecimal valorMax;
+
+    @Column(name = "min_inclusivo", nullable = false)
+    private boolean minInclusivo = true;
+
+    @Column(name = "max_inclusivo", nullable = false)
+    private boolean maxInclusivo = true;
+
+    @Column(name = "bonus_percentual", precision = 6, scale = 4)
+    private BigDecimal bonusPercentual;
+
+    @Column(name = "bonus_valor_fixo", precision = 15, scale = 2)
+    private BigDecimal bonusValorFixo;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private StatusRegra status = StatusRegra.ATIVA;
@@ -146,6 +164,47 @@ public class Regra {
 
     public LocalDate getDataFim() { return dataFim; }
     public void setDataFim(LocalDate dataFim) { this.dataFim = dataFim; }
+
+    public BigDecimal getValorMin() { return valorMin; }
+    public void setValorMin(BigDecimal valorMin) { this.valorMin = valorMin; }
+
+    public BigDecimal getValorMax() { return valorMax; }
+    public void setValorMax(BigDecimal valorMax) { this.valorMax = valorMax; }
+
+    public boolean isMinInclusivo() { return minInclusivo; }
+    public void setMinInclusivo(boolean minInclusivo) { this.minInclusivo = minInclusivo; }
+
+    public boolean isMaxInclusivo() { return maxInclusivo; }
+    public void setMaxInclusivo(boolean maxInclusivo) { this.maxInclusivo = maxInclusivo; }
+
+    public BigDecimal getBonusPercentual() { return bonusPercentual; }
+    public void setBonusPercentual(BigDecimal bonusPercentual) { this.bonusPercentual = bonusPercentual; }
+
+    public BigDecimal getBonusValorFixo() { return bonusValorFixo; }
+    public void setBonusValorFixo(BigDecimal bonusValorFixo) { this.bonusValorFixo = bonusValorFixo; }
+
+    /** Indica se a regra restringe o valor da venda por faixa (mínimo e/ou máximo). */
+    public boolean possuiFaixa() { return valorMin != null || valorMax != null; }
+
+    /** Verifica se o valor de uma venda pertence à faixa da regra (sem faixa = aceita qualquer valor). */
+    public boolean aceitaValor(BigDecimal valor) {
+        if (valor == null) {
+            return !possuiFaixa();
+        }
+        if (valorMin != null) {
+            int c = valor.compareTo(valorMin);
+            if (c < 0 || (c == 0 && !minInclusivo)) {
+                return false;
+            }
+        }
+        if (valorMax != null) {
+            int c = valor.compareTo(valorMax);
+            if (c > 0 || (c == 0 && !maxInclusivo)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     public StatusRegra getStatus() { return status; }
     public void setStatus(StatusRegra status) { this.status = status; }
