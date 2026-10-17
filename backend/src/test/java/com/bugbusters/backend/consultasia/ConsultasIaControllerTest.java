@@ -151,6 +151,21 @@ class ConsultasIaControllerTest {
                 .andExpect(jsonPath("$.itens[1].codigo", is(9302)));
     }
 
+    @Test
+    @DisplayName("Cargos: nome no plural casa com a descrição no singular (ambiguidade preservada)")
+    void deveConsultarCargosNoPlural() throws Exception {
+        mockMvc.perform(get(BASE + "/cargos").param("nome", "gerentes"))
+                .andExpect(jsonPath("$.encontrado", is(true)))
+                .andExpect(jsonPath("$.itens", hasSize(2)));
+
+        mockMvc.perform(get(BASE + "/cargos").param("nome", "gerentes de loja"))
+                .andExpect(jsonPath("$.itens", hasSize(1)))
+                .andExpect(jsonPath("$.itens[0].codigo", is(9301)));
+
+        mockMvc.perform(get(BASE + "/cargos").param("nome", "diretores"))
+                .andExpect(jsonPath("$.encontrado", is(false)));
+    }
+
     // ------------------------------------------------------------ matrícula
 
     @Test

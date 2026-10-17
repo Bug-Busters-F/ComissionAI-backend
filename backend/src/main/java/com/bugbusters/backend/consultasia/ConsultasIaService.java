@@ -116,7 +116,7 @@ public class ConsultasIaService {
         List<ItemCatalogoDTO> encontrados = itens.stream()
                 .filter(i -> codigo == null || codigo.equals(i.codigo()))
                 .filter(i -> nomeNormalizado.isEmpty()
-                        || normalizar(i.descricao()).contains(nomeNormalizado))
+                        || corresponde(normalizar(i.descricao()), nomeNormalizado))
                 .sorted(Comparator.comparing(ItemCatalogoDTO::codigo, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
         return new CatalogoResponse(!encontrados.isEmpty(), encontrados);
@@ -338,6 +338,38 @@ public class ConsultasIaService {
 
     private String blankToNull(String valor) {
         return valor == null || valor.isBlank() ? null : valor.trim();
+    }
+
+    /**
+     * A descrição casa com o nome buscado (ambos normalizados) se o contém, ou se cada palavra buscada, ou seu
+     * singular, inicia alguma palavra da descrição: "VENDEDORES" casa com "VENDEDOR LOJA" e "GERENTES DE LOJA"
+     * com "GERENTE DE LOJA". Sem isso, todo pedido no plural virava cadastro inexistente em vez de ambiguidade.
+     */
+    static boolean corresponde(String descricao, String nome) {
+        if (descricao.contains(nome)) {
+            return true;
+        }
+        List<String> palavrasDescricao = List.of(descricao.split(" "));
+        for (String palavra : nome.split(" ")) {
+            List<String> formas = formasSingulares(palavra);
+            boolean encontrada = palavrasDescricao.stream().anyMatch(d -> formas.stream().anyMatch(d::startsWith));
+            if (!encontrada) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A palavra e seus singulares regulares do português: "-ES" (VENDEDORES) e "-S" (GERENTES). */
+    private static List<String> formasSingulares(String palavra) {
+        List<String> formas = new ArrayList<>(List.of(palavra));
+        if (palavra.length() > 4 && palavra.endsWith("ES")) {
+            formas.add(palavra.substring(0, palavra.length() - 2));
+        }
+        if (palavra.length() > 3 && palavra.endsWith("S")) {
+            formas.add(palavra.substring(0, palavra.length() - 1));
+        }
+        return formas;
     }
 
     /** Maiúsculas, sem acentos e com espaços colapsados. Texto nulo vira vazio. */

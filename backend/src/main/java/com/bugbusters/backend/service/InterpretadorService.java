@@ -43,6 +43,9 @@ public class InterpretadorService {
             "canais", CANAIS_CONHECIDOS
     );
 
+    /** Chaves aceitas no contexto da requisição que o contrato v2 do serviço de IA espera no topo do payload. */
+    private static final List<String> CAMPOS_TOPO_V2 = List.of("vigenciaCampanha", "dataReferencia", "competencia", "catalogo");
+
     private final AiServiceClient aiClient;
 
     public InterpretadorService(AiServiceClient aiClient) {
@@ -55,7 +58,7 @@ public class InterpretadorService {
 
     /**
      * Interpretação v2 (lista de propostas). Disponível apenas com ai.service.v2.enabled=true; o v1 segue sendo o padrão.
-     * Enriquece o contexto como no v1 e repassa a resposta do serviço de IA sem aprovar nem persistir nada.
+     * Monta o payload no formato do contrato v2 e repassa a resposta do serviço de IA sem aprovar nem persistir nada.
      */
     public Map<String, Object> processarInterpretacaoV2(InterpretacaoRegraRequest request) {
         if (!aiClient.isV2Enabled()) {
@@ -65,10 +68,17 @@ public class InterpretadorService {
         if (request.contexto() != null) {
             contexto.putAll(request.contexto());
         }
-        contexto.putIfAbsent("ano_referencia", LocalDate.now().getYear());
-        contexto.putIfAbsent("dicionario_dimensoes", DICIONARIO_CAMPOS_RECONHECIDOS);
         Map<String, Object> payload = new HashMap<>();
         payload.put("texto", request.texto());
+        // No contrato v2, "contexto" guarda só os ids da campanha e o Python ignora as demais chaves dele;
+        // vigência, competência e catálogo vão no topo, senão se perdem e toda proposta volta sem vigência.
+        // O dicionário fixo do v1 não é enviado: o agente resolve marcas e cargos no banco pelas consultas-ia.
+        for (String campo : CAMPOS_TOPO_V2) {
+            Object valor = contexto.remove(campo);
+            if (valor != null) {
+                payload.put(campo, valor);
+            }
+        }
         payload.put("contexto", contexto);
         return aiClient.chamarServicoPythonV2(payload);
     }

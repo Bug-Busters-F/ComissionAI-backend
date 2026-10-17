@@ -17,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.match.MockRestRequestMatchers;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
@@ -72,6 +73,26 @@ class InterpretadorV2Test {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", is("PROPOSTA_COM_PENDENCIAS")))
                 .andExpect(jsonPath("$.propostas[1].idLocal", is("p2")));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("v2 habilitado: vigência e competência vão no topo do payload e o contexto só leva os ids da campanha")
+    void deveMoverVigenciaECompetenciaParaOTopoDoPayload() throws Exception {
+        aiServiceClient.setV2Enabled(true);
+        mockServer.expect(requestTo(containsString("/api/v2/interpretar")))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.vigenciaCampanha.inicio").value("2026-09-01"))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.vigenciaCampanha.fim").value("2026-09-30"))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.competencia").value("2026-09"))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.contexto.campanhaId").value("12"))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.contexto.vigenciaCampanha").doesNotExist())
+                .andExpect(MockRestRequestMatchers.jsonPath("$.contexto.dicionario_dimensoes").doesNotExist())
+                .andRespond(withSuccess("{\"status\":\"SEM_PROPOSTA\",\"propostas\":[]}", MediaType.APPLICATION_JSON));
+
+        String corpo = "{\"texto\":\"2% para gerentes\",\"contexto\":{\"campanhaId\":\"12\","
+                + "\"vigenciaCampanha\":{\"inicio\":\"2026-09-01\",\"fim\":\"2026-09-30\"},\"competencia\":\"2026-09\"}}";
+        mockMvc.perform(post("/api/v1/interpretador/extrair-propostas").contentType(MediaType.APPLICATION_JSON).content(corpo))
+                .andExpect(status().isOk());
         mockServer.verify();
     }
 }
