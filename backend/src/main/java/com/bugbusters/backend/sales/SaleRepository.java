@@ -21,6 +21,13 @@ import jakarta.persistence.LockModeType;
 public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificationExecutor<Sale> {
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
 
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    @Query("SELECT s FROM Sale s WHERE s.saleDate BETWEEN :inicio AND :fim ORDER BY s.saleDate ASC")
+    List<Sale> findVendasPorPeriodoComRelacionamentos(@Param("inicio") LocalDate inicio, @Param("fim") LocalDate fim);
+
+    @Query("SELECT DISTINCT YEAR(s.saleDate), MONTH(s.saleDate) FROM Sale s ORDER BY 1 DESC, 2 DESC")
+    List<Object[]> findDistinctAnosEMesesVendas();
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from Sale s where s.id = :id")
     java.util.Optional<Sale> findByIdForUpdate(@Param("id") UUID id);

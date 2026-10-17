@@ -256,16 +256,16 @@ public class ConsultasIaService {
         boolean minReq = req.minInclusivo() == null || req.minInclusivo();
         boolean maxReq = req.maxInclusivo() == null || req.maxInclusivo();
         // A termina antes de B começar?
-        if (req.valorMax() != null && r.getValorMin() != null) {
-            int cmp = req.valorMax().compareTo(r.getValorMin());
-            if (cmp < 0 || (cmp == 0 && !(maxReq && r.isMinInclusivo()))) {
+        if (req.valorMax() != null && r.getValorMinimo() != null) {
+            int cmp = req.valorMax().compareTo(r.getValorMinimo());
+            if (cmp < 0 || (cmp == 0 && !(maxReq && r.minEhInclusivo()))) {
                 return false;
             }
         }
         // B termina antes de A começar?
-        if (r.getValorMax() != null && req.valorMin() != null) {
-            int cmp = r.getValorMax().compareTo(req.valorMin());
-            if (cmp < 0 || (cmp == 0 && !(r.isMaxInclusivo() && minReq))) {
+        if (r.getValorMaximo() != null && req.valorMin() != null) {
+            int cmp = r.getValorMaximo().compareTo(req.valorMin());
+            if (cmp < 0 || (cmp == 0 && !(r.maxEhInclusivo() && minReq))) {
                 return false;
             }
         }

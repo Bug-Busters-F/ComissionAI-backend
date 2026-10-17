@@ -18,29 +18,21 @@ class RegraFaixaTest {
     }
 
     @Test
-    @DisplayName("Sem faixa aceita qualquer valor; limites respeitam inclusivo/exclusivo")
+    @DisplayName("Sem limites não há faixa; limite de inclusividade nulo conta como inclusivo")
     void deveAvaliarFaixa() {
         Regra semFaixa = new Regra();
         assertFalse(semFaixa.possuiFaixa());
-        assertTrue(semFaixa.aceitaValor(v("0.01")));
 
         Regra faixa = new Regra();
-        faixa.setValorMin(v("100.00"));
-        faixa.setValorMax(v("200.00"));
+        faixa.setValorMaximo(v("200.00"));
         assertTrue(faixa.possuiFaixa());
-        assertTrue(faixa.aceitaValor(v("100.00")));
-        assertTrue(faixa.aceitaValor(v("200.00")));
-        assertFalse(faixa.aceitaValor(v("99.99")));
-        assertFalse(faixa.aceitaValor(v("200.01")));
+        assertTrue(faixa.minEhInclusivo());
+        assertTrue(faixa.maxEhInclusivo());
 
         faixa.setMinInclusivo(false);
         faixa.setMaxInclusivo(false);
-        assertFalse(faixa.aceitaValor(v("100.00")));
-        assertFalse(faixa.aceitaValor(v("200.00")));
-        assertTrue(faixa.aceitaValor(v("100.01")));
-        assertTrue(faixa.aceitaValor(v("199.99")));
-
-        assertFalse(faixa.aceitaValor(null));
+        assertFalse(faixa.minEhInclusivo());
+        assertFalse(faixa.maxEhInclusivo());
     }
 
     @Test

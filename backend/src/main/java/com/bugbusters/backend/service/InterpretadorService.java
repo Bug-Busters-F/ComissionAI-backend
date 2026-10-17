@@ -2,8 +2,29 @@ package com.bugbusters.backend.service;
 
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraRequest;
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraResponse;
+import com.bugbusters.backend.dto.interpretador.proposta.AtualizarArtefatosRequest;
+import com.bugbusters.backend.dto.interpretador.proposta.AtualizarArtefatosResponse;
+import com.bugbusters.backend.dto.interpretador.proposta.FaixaValorDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.FiltrosRegraDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.InterpretacaoMultiplaRequest;
+import com.bugbusters.backend.dto.interpretador.proposta.InterpretacaoMultiplaResponse;
+import com.bugbusters.backend.dto.interpretador.proposta.OperacaoBaseDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.OrigemCampo;
+import com.bugbusters.backend.dto.interpretador.proposta.PendenciaPropostaDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.PeriodoVigenciaDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.PropostaRegraDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.ReferenciaBaseDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.ReferenciaConsultadaDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.ReinterpretarBlocoRequest;
+import com.bugbusters.backend.dto.interpretador.proposta.ReinterpretarBlocoResponse;
+import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
+import com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaRequest;
+import com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaResponse;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
+import com.bugbusters.backend.model.Cargo;
+import com.bugbusters.backend.model.CatalogoDominioDomRock;
 import com.bugbusters.backend.model.Marca;
+
 import com.bugbusters.backend.service.client.AiServiceClient;
 import org.springframework.stereotype.Service;
 
@@ -17,71 +38,57 @@ import java.util.Map;
 @Service
 public class InterpretadorService {
 
-    public static final Map<Integer, String> MARCAS_CONHECIDAS = Map.of(
-            10, "PRETO",
-            20, "BRANCO",
-            30, "AZUL",
-            40, "VERMELHO",
-            50, "AMARELO",
-            60, "CINZA"
-    );
+    public static final Map<Integer, String> MARCAS_CONHECIDAS = CatalogoDominioDomRock.MARCAS;
+    public static final Map<Integer, String> CARGOS_CONHECIDOS = CatalogoDominioDomRock.CARGOS_POR_CODIGO;
+    public static final List<String> CANAIS_CONHECIDOS = CatalogoDominioDomRock.CANAIS;
+    public static final Map<Integer, String> LOJAS_CONHECIDAS = CatalogoDominioDomRock.LOJAS;
 
-    public static final Map<Integer, String> CARGOS_CONHECIDOS = Map.of(
-            100, "VENDEDOR LOJA",
-            150, "GERENTE DE LOJA",
-            200, "VENDEDOR BALCAO",
-            300, "ASSISTENTE DE VENDAS"
-    );
+    public static final Map<String, Object> DICIONARIO_CAMPOS_RECONHECIDOS = CatalogoDominioDomRock.obterDicionarioDimensoes();
 
-    public static final List<String> CANAIS_CONHECIDOS = List.of(
-            "LOJA_FISICA", "ECOMMERCE", "BALCAO", "QUIOSQUE", "APP", "PADRAO"
-    );
+    /** Chaves aceitas no contexto da requisição que o agente de IA espera no topo do payload. */
+    private static final List<String> CAMPOS_TOPO_AGENTE = List.of("vigenciaCampanha", "dataReferencia", "competencia", "catalogo");
 
-    public static final Map<String, Object> DICIONARIO_CAMPOS_RECONHECIDOS = Map.of(
-            "marcas", MARCAS_CONHECIDAS,
-            "cargos", CARGOS_CONHECIDOS,
-            "canais", CANAIS_CONHECIDOS
-    );
-
-    /** Chaves aceitas no contexto da requisição que o contrato v2 do serviço de IA espera no topo do payload. */
-    private static final List<String> CAMPOS_TOPO_V2 = List.of("vigenciaCampanha", "dataReferencia", "competencia", "catalogo");
+    /** Pendências do agente que não impedem ativar a regra. */
+    private static final java.util.Set<String> PENDENCIAS_AGENTE_AVISO = java.util.Set.of("VIGENCIA_INCOMPATIVEL", "TRECHO_INCOMPLETO");
 
     private final AiServiceClient aiClient;
+    private final ArtefatoExplicativoService artefatoService;
+    private final DominioCatalogoService dominioService;
+    private final RegraConcorrenciaService regraConcorrenciaService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InterpretadorService(
+            AiServiceClient aiClient,
+            ArtefatoExplicativoService artefatoService,
+            DominioCatalogoService dominioService,
+            RegraConcorrenciaService regraConcorrenciaService) {
+        this.aiClient = aiClient;
+        this.artefatoService = artefatoService != null ? artefatoService : new ArtefatoExplicativoService();
+        this.dominioService = dominioService != null ? dominioService : new DominioCatalogoService(null, null, null, null, null);
+        this.regraConcorrenciaService = regraConcorrenciaService;
+    }
+
+    public InterpretadorService(AiServiceClient aiClient, ArtefatoExplicativoService artefatoService) {
+        this(aiClient, artefatoService, null, null);
+    }
 
     public InterpretadorService(AiServiceClient aiClient) {
-        this.aiClient = aiClient;
+        this(aiClient, new ArtefatoExplicativoService(), null, null);
     }
+
+    public ArtefatoExplicativoService getArtefatoService() {
+        return this.artefatoService;
+    }
+
+    public DominioCatalogoService getDominioService() {
+        return this.dominioService;
+    }
+
 
     public Map<String, Object> getDicionarioCamposReconhecidos() {
-        return DICIONARIO_CAMPOS_RECONHECIDOS;
+        return dominioService != null ? dominioService.obterDicionarioDimensoes() : DICIONARIO_CAMPOS_RECONHECIDOS;
     }
 
-    /**
-     * Interpretação v2 (lista de propostas). Disponível apenas com ai.service.v2.enabled=true; o v1 segue sendo o padrão.
-     * Monta o payload no formato do contrato v2 e repassa a resposta do serviço de IA sem aprovar nem persistir nada.
-     */
-    public Map<String, Object> processarInterpretacaoV2(InterpretacaoRegraRequest request) {
-        if (!aiClient.isV2Enabled()) {
-            throw new ResourceNotFoundException("A interpretação v2 está desabilitada (ai.service.v2.enabled=false).");
-        }
-        Map<String, Object> contexto = new HashMap<>();
-        if (request.contexto() != null) {
-            contexto.putAll(request.contexto());
-        }
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("texto", request.texto());
-        // No contrato v2, "contexto" guarda só os ids da campanha e o Python ignora as demais chaves dele;
-        // vigência, competência e catálogo vão no topo, senão se perdem e toda proposta volta sem vigência.
-        // O dicionário fixo do v1 não é enviado: o agente resolve marcas e cargos no banco pelas consultas-ia.
-        for (String campo : CAMPOS_TOPO_V2) {
-            Object valor = contexto.remove(campo);
-            if (valor != null) {
-                payload.put(campo, valor);
-            }
-        }
-        payload.put("contexto", contexto);
-        return aiClient.chamarServicoPythonV2(payload);
-    }
 
     public InterpretacaoRegraResponse processarInterpretacao(InterpretacaoRegraRequest request) {
         // 1. Enriquecer o contexto com o dicionário de dimensões reais antes de chamar o serviço de IA
@@ -90,8 +97,9 @@ public class InterpretadorService {
             contextoEnriquecido.putAll(request.contexto());
         }
         contextoEnriquecido.putIfAbsent("ano_referencia", LocalDate.now().getYear());
-        contextoEnriquecido.putIfAbsent("dicionario_dimensoes", DICIONARIO_CAMPOS_RECONHECIDOS);
+        contextoEnriquecido.putIfAbsent("dicionario_dimensoes", getDicionarioCamposReconhecidos());
         InterpretacaoRegraRequest requestPreparado = new InterpretacaoRegraRequest(request.texto(), contextoEnriquecido);
+
 
         // Chamar o serviço de IA em Python
         InterpretacaoRegraResponse respostaBruta = aiClient.chamarServicoPython(requestPreparado);
@@ -122,11 +130,17 @@ public class InterpretadorService {
         Integer codCargo = respostaBruta.codCargo();
         String descriCargo = respostaBruta.descriCargo() != null ? respostaBruta.descriCargo().trim().toUpperCase() : null;
         if (descriCargo != null && codCargo == null) {
-            for (var entry : CARGOS_CONHECIDOS.entrySet()) {
-                if (entry.getValue().equalsIgnoreCase(descriCargo)) {
-                    codCargo = entry.getKey();
-                    descriCargo = entry.getValue();
-                    break;
+            var cargoOpt = Cargo.buscarPorDescricao(descriCargo);
+            if (cargoOpt.isPresent()) {
+                codCargo = cargoOpt.get().getCodigo();
+                descriCargo = cargoOpt.get().getDescricao();
+            } else {
+                for (var entry : CARGOS_CONHECIDOS.entrySet()) {
+                    if (entry.getValue().equalsIgnoreCase(descriCargo)) {
+                        codCargo = entry.getKey();
+                        descriCargo = entry.getValue();
+                        break;
+                    }
                 }
             }
             if (codCargo == null && descriCargo.contains("QUIOSQUE")) {
@@ -143,11 +157,19 @@ public class InterpretadorService {
             }
         }
 
-        // Validação de Loja (codLoja)
+        // Validação e extração de Loja (codLoja)
         Integer codLoja = respostaBruta.codLoja();
-        if (codLoja != null && codLoja <= 0) {
-            pendencias.add("Código da loja inválido (" + codLoja + "). Deve ser um número positivo.");
-            codLoja = null;
+        if (codLoja == null) {
+            codLoja = CatalogoDominioDomRock.extrairCodigoLoja(request.texto()).orElse(null);
+        }
+        if (codLoja != null) {
+            if (codLoja <= 0) {
+                pendencias.add("Código da loja inválido (" + codLoja + "). Deve ser um número positivo.");
+                codLoja = null;
+            } else if (!dominioService.isLojaValida(codLoja)) {
+                pendencias.add("Código da loja (" + codLoja + ") está fora da faixa de lojas cadastradas na rede (Lojas 1 a 80).");
+            }
+
         }
 
         // Verificação de dimensões: aceitar qualquer dimensão válida sem descartar parâmetros
@@ -200,5 +222,623 @@ public class InterpretadorService {
                 respostaBruta.confianca() != null ? respostaBruta.confianca() : BigDecimal.ZERO,
                 pendencias
         );
+    }
+
+    /**
+     * Extrai as propostas de regras do texto livre usando o agente de interpretação do serviço de IA
+     * (/api/v2/interpretar), que separa as regras, guarda o trecho de origem de cada uma e confere marcas,
+     * cargos, lojas e matrículas no cadastro pelas consultas-ia. A resposta do agente é convertida para
+     * PropostaRegraDTO; ajustes sobre a taxa base e os artefatos explicativos continuam sendo calculados aqui.
+     * Nada é aprovado nem persistido.
+     */
+    public InterpretacaoMultiplaResponse processarInterpretacaoMultipla(InterpretacaoMultiplaRequest request) {
+        Map<String, Object> contexto = request.contexto() != null ? request.contexto() : Map.of();
+        Map<String, Object> resposta = aiClient.chamarServicoPythonV2(montarPayloadAgente(request.texto(), contexto));
+        boolean vigenciaDoContexto = contexto.get("vigenciaCampanha") != null;
+
+        List<Map<String, Object>> blocos = listaDeMapas(resposta.get("propostas"));
+        List<PropostaRegraDTO> propostas = new ArrayList<>();
+        BigDecimal somaConfianca = BigDecimal.ZERO;
+        for (int i = 0; i < blocos.size(); i++) {
+            propostas.add(converterBlocoDoAgente(blocos.get(i), "bloco-" + (i + 1), vigenciaDoContexto));
+            BigDecimal confianca = decimal(blocos.get(i).get("confianca"));
+            somaConfianca = somaConfianca.add(confianca != null ? confianca
+                    : Boolean.TRUE.equals(propostas.get(i).completa()) ? new BigDecimal("0.95") : new BigDecimal("0.70"));
+        }
+        BigDecimal confiancaGeral = propostas.isEmpty() ? BigDecimal.ZERO
+                : somaConfianca.divide(new BigDecimal(propostas.size()), 2, java.math.RoundingMode.HALF_UP);
+
+        List<PendenciaPropostaDTO> pendenciasGerais = new ArrayList<>();
+        for (Map<String, Object> p : listaDeMapas(resposta.get("pendenciasGerais"))) {
+            pendenciasGerais.add(PendenciaPropostaDTO.aviso(texto(p.get("campo"), "geral"), texto(p.get("codigo"), "AVISO_AGENTE"), texto(p.get("mensagem"), "")));
+        }
+        for (Map<String, Object> trecho : listaDeMapas(resposta.get("trechosNaoMapeados"))) {
+            pendenciasGerais.add(PendenciaPropostaDTO.aviso("texto", "TRECHO_NAO_MAPEADO",
+                    "Trecho do pedido que não virou regra: '" + texto(trecho.get("trecho"), "") + "'."));
+        }
+
+        return new InterpretacaoMultiplaResponse(
+                gerarTituloSugerido(propostas, request.texto()),
+                propostas,
+                propostas.size(),
+                !pendenciasGerais.isEmpty() || propostas.stream().anyMatch(p -> !p.pendencias().isEmpty()),
+                propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa())),
+                confiancaGeral,
+                pendenciasGerais
+        );
+    }
+
+    /**
+     * Reinterpreta um bloco específico dentro da proposta, preservando o contexto e os demais blocos.
+     */
+    public ReinterpretarBlocoResponse reinterpretarBloco(ReinterpretarBlocoRequest request) {
+        String blocoAlvoId = request.blocoId();
+        List<PropostaRegraDTO> propostasAtuais = request.propostasAtuais();
+
+        int indexAlvo = -1;
+        for (int i = 0; i < propostasAtuais.size(); i++) {
+            if (blocoAlvoId.equalsIgnoreCase(propostasAtuais.get(i).blocoId())) {
+                indexAlvo = i;
+                break;
+            }
+        }
+
+        if (indexAlvo == -1) {
+            throw new ResourceNotFoundException("Bloco com ID '" + blocoAlvoId + "' não encontrado na lista de propostas informada.");
+        }
+
+        InterpretacaoRegraRequest subRequest = new InterpretacaoRegraRequest(request.instrucaoAjuste(), request.contexto());
+        InterpretacaoRegraResponse respostaAjuste = processarInterpretacao(subRequest);
+
+        PropostaRegraDTO blocoAnterior = propostasAtuais.get(indexAlvo);
+        PropostaRegraDTO blocoAtualizado = mesclarProposta(blocoAnterior, respostaAjuste, request.instrucaoAjuste(), request.contexto());
+
+        List<PropostaRegraDTO> listaAtualizada = new ArrayList<>(propostasAtuais);
+        listaAtualizada.set(indexAlvo, blocoAtualizado);
+
+        String resumo = "Bloco '" + blocoAlvoId + "' reprocessado com sucesso com base na instrução de ajuste.";
+
+        return new ReinterpretarBlocoResponse(blocoAlvoId, resumo, listaAtualizada);
+    }
+
+    /**
+     * Atualiza os artefatos explicativos (XAI e Python equivalente) e recalcula taxas após edição manual de campos no front.
+     */
+    public AtualizarArtefatosResponse atualizarArtefatos(AtualizarArtefatosRequest request) {
+        PropostaRegraDTO p = request.proposta();
+
+        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(p.operacaoBase());
+        BigDecimal taxaFinal = taxaCalculada != null ? taxaCalculada : p.taxaFinal();
+
+        PropostaRegraDTO candidata = new PropostaRegraDTO(
+                p.blocoId(),
+                p.trechoOrigem(),
+                p.filtros(),
+                p.condicaoValor(),
+                p.operacaoBase(),
+                taxaFinal,
+                p.referenciasConsultadas(),
+                p.origensPorCampo(),
+                null,
+                null,
+                null,
+                null,
+                p.vigencia(),
+                p.bonusPercentual(),
+                p.bonusValorFixo()
+        );
+
+        List<PendenciaPropostaDTO> pendencias = artefatoService.validarProposta(candidata);
+        boolean completa = pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva);
+
+        String novaExplicacao = artefatoService.gerarExplicacao(candidata);
+        String novoPython = artefatoService.gerarPythonEquivalente(candidata);
+
+        return new AtualizarArtefatosResponse(
+                p.blocoId(),
+                taxaFinal,
+                novaExplicacao,
+                novoPython,
+                pendencias,
+                completa
+        );
+    }
+
+    // --- Métodos Auxiliares de Extração e Conversão ---
+
+
+    /**
+     * Payload do agente. O front manda vigência, competência e catálogo dentro de "contexto"; o agente os espera
+     * no topo e, em "contexto", guarda só os ids da campanha (o resto é ignorado e a vigência se perderia).
+     */
+    private Map<String, Object> montarPayloadAgente(String texto, Map<String, Object> contextoRecebido) {
+        Map<String, Object> contexto = new HashMap<>(contextoRecebido);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("texto", texto);
+        for (String campo : CAMPOS_TOPO_AGENTE) {
+            Object valor = contexto.remove(campo);
+            if (valor != null) {
+                payload.put(campo, valor);
+            }
+        }
+        payload.put("contexto", contexto);
+        return payload;
+    }
+
+    /** Converte um bloco devolvido pelo agente para o contrato de proposta do backend. */
+    private PropostaRegraDTO converterBlocoDoAgente(Map<String, Object> bloco, String blocoId, boolean vigenciaDoContexto) {
+        Map<String, Object> condicoes = mapa(bloco.get("condicoes"));
+        String trechoOrigem = texto(mapa(bloco.get("origem")).get("trecho"), null);
+
+        FiltrosRegraDTO filtros = new FiltrosRegraDTO(
+                texto(condicoes.get("canal"), null),
+                inteiro(condicoes.get("codMarca")),
+                texto(condicoes.get("descrMarca"), null),
+                inteiro(condicoes.get("codLoja")),
+                inteiro(condicoes.get("codCargo")),
+                texto(condicoes.get("descriCargo"), null),
+                texto(condicoes.get("matricula"), null)
+        );
+
+        Map<String, Object> faixaAgente = mapa(condicoes.get("faixaValor"));
+        FaixaValorDTO faixa = faixaAgente.isEmpty() ? FaixaValorDTO.semLimites() : new FaixaValorDTO(
+                decimal(faixaAgente.get("min")), (Boolean) faixaAgente.get("minInclusivo"),
+                decimal(faixaAgente.get("max")), (Boolean) faixaAgente.get("maxInclusivo"));
+
+        // O agente não calcula ajustes sobre a taxa base (pontos, multiplicador...); a extração determinística
+        // daqui resolve o ajuste a partir do trecho da regra, como antes.
+        BigDecimal taxaAgente = decimal(bloco.get("taxa"));
+        OperacaoBaseDTO operacao = extrairOperacaoBase(trechoOrigem, taxaAgente, filtros.codMarca(), filtros.descrMarca(),
+                filtros.codCargo(), filtros.descriCargo());
+        BigDecimal taxaFinal = artefatoService.calcularTaxaEfetiva(operacao);
+        if (taxaFinal == null) {
+            taxaFinal = taxaAgente;
+        }
+        boolean ajusteResolvido = operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA && taxaFinal != null;
+
+        Map<String, Object> bonus = mapa(bloco.get("bonus"));
+        LocalDate dataInicio = data(bloco.get("dataInicio"));
+        LocalDate dataFim = data(bloco.get("dataFim"));
+        PeriodoVigenciaDTO vigencia = PeriodoVigenciaDTO.de(dataInicio, dataFim);
+
+        List<ReferenciaConsultadaDTO> referencias = new ArrayList<>();
+        java.util.Set<String> dimensoesConsultadas = new java.util.HashSet<>();
+        for (Map<String, Object> ref : listaDeMapas(bloco.get("referencias"))) {
+            Map<String, Object> chave = mapa(ref.get("chave"));
+            if ("CADASTRO".equals(ref.get("fonte"))) {
+                chave.forEach((dimensao, valor) -> {
+                    dimensoesConsultadas.add(dimensao);
+                    referencias.add(referenciaDeCadastro(dimensao, valor, filtros));
+                });
+            } else {
+                referencias.add(new ReferenciaConsultadaDTO(texto(ref.get("fonte"), "REFERENCIA"), chave.toString(),
+                        "Taxa base " + texto(ref.get("taxaBase"), "não informada")));
+            }
+        }
+        if (operacao.referenciaBase() != null) {
+            referencias.add(new ReferenciaConsultadaDTO("BASE_COMISS", operacao.referenciaBase().tipoBase(), operacao.referenciaBase().descricao()));
+        }
+
+        Map<String, OrigemCampo> origens = new HashMap<>();
+        if (filtros.canal() != null) origens.put("canal", OrigemCampo.TEXTO);
+        if (filtros.codMarca() != null) origens.put("marca", dimensoesConsultadas.contains("marca") ? OrigemCampo.BASE_DADOS : OrigemCampo.TEXTO);
+        if (filtros.codLoja() != null) origens.put("loja", dimensoesConsultadas.contains("loja") ? OrigemCampo.BASE_DADOS : OrigemCampo.TEXTO);
+        if (filtros.codCargo() != null) origens.put("cargo", dimensoesConsultadas.contains("cargo") ? OrigemCampo.BASE_DADOS : OrigemCampo.TEXTO);
+        if (filtros.matricula() != null) origens.put("matricula", dimensoesConsultadas.contains("matricula") ? OrigemCampo.BASE_DADOS : OrigemCampo.TEXTO);
+        if (taxaAgente != null) origens.put("taxa", OrigemCampo.TEXTO);
+        if (faixa.possuiFaixa()) origens.put("condicaoValor", OrigemCampo.TEXTO);
+        OrigemCampo origemVigencia = vigenciaDoContexto ? OrigemCampo.CONTEXTO : OrigemCampo.TEXTO;
+        origens.put("dataInicio", dataInicio != null ? origemVigencia : OrigemCampo.PADRAO_SISTEMA);
+        origens.put("dataFim", dataFim != null ? origemVigencia : OrigemCampo.PADRAO_SISTEMA);
+
+        PropostaRegraDTO propostaBase = new PropostaRegraDTO(blocoId, trechoOrigem, filtros, faixa, operacao, taxaFinal,
+                referencias, origens, null, null, null, null, vigencia,
+                decimal(bonus.get("percentual")), decimal(bonus.get("valorFixo")));
+
+        List<PendenciaPropostaDTO> pendencias = new ArrayList<>(artefatoService.validarProposta(propostaBase));
+        for (Map<String, Object> p : listaDeMapas(bloco.get("pendencias"))) {
+            String campo = texto(p.get("campo"), "geral");
+            if (ajusteResolvido && "taxa".equals(campo)) {
+                continue; // a taxa do ajuste sobre a base foi calculada aqui
+            }
+            String mensagem = texto(p.get("mensagem"), "");
+            if (pendencias.stream().noneMatch(pen -> pen.mensagem().equalsIgnoreCase(mensagem))) {
+                pendencias.add(pendenciaDoAgente(campo, texto(p.get("codigo"), "AVISO_AGENTE"), mensagem));
+            }
+        }
+
+        return new PropostaRegraDTO(blocoId, trechoOrigem, filtros, faixa, operacao, taxaFinal, referencias, origens,
+                pendencias, pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva),
+                artefatoService.gerarExplicacao(propostaBase), artefatoService.gerarPythonEquivalente(propostaBase),
+                vigencia, propostaBase.bonusPercentual(), propostaBase.bonusValorFixo());
+    }
+
+    /**
+     * Vigência diferente da campanha (a da campanha é mantida) e trecho sem origem confirmada são avisos;
+     * o resto (ambiguidade, cadastro inexistente, taxa ausente, conflito...) impede ativar até o usuário resolver.
+     */
+    private static PendenciaPropostaDTO pendenciaDoAgente(String campo, String codigo, String mensagem) {
+        return PENDENCIAS_AGENTE_AVISO.contains(codigo)
+                ? PendenciaPropostaDTO.aviso(campo, codigo, mensagem)
+                : PendenciaPropostaDTO.impedimento(campo, codigo, mensagem);
+    }
+
+    private static ReferenciaConsultadaDTO referenciaDeCadastro(String dimensao, Object valor, FiltrosRegraDTO filtros) {
+        return switch (dimensao) {
+            case "marca" -> new ReferenciaConsultadaDTO("MARCA", "cod_marca=" + valor, "Marca " + (filtros.descrMarca() != null ? filtros.descrMarca() : valor));
+            case "cargo" -> new ReferenciaConsultadaDTO("CARGO", "cod_cargo=" + valor, "Cargo " + (filtros.descriCargo() != null ? filtros.descriCargo() : valor));
+            case "loja" -> new ReferenciaConsultadaDTO("LOJA", "cod_loja=" + valor, valor instanceof Number n ? CatalogoDominioDomRock.formatarLoja(n.intValue()) : "Loja " + valor);
+            case "matricula" -> new ReferenciaConsultadaDTO("MATRICULA", "matricula=" + valor, "Colaborador " + valor);
+            default -> new ReferenciaConsultadaDTO(dimensao.toUpperCase(), dimensao + "=" + valor, String.valueOf(valor));
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> mapa(Object valor) {
+        return valor instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> listaDeMapas(Object valor) {
+        if (!(valor instanceof List<?> lista)) {
+            return List.of();
+        }
+        return lista.stream().filter(Map.class::isInstance).map(i -> (Map<String, Object>) i).toList();
+    }
+
+    /** O serviço de IA serializa Decimal como texto ("0.0300"); números também são aceitos. */
+    private static BigDecimal decimal(Object valor) {
+        if (valor == null) return null;
+        if (valor instanceof BigDecimal b) return b;
+        String texto = valor.toString().trim();
+        return texto.isEmpty() ? null : new BigDecimal(texto);
+    }
+
+    private static Integer inteiro(Object valor) {
+        return valor instanceof Number n ? Integer.valueOf(n.intValue()) : null;
+    }
+
+    private static LocalDate data(Object valor) {
+        return valor == null ? null : LocalDate.parse(valor.toString());
+    }
+
+    private static String texto(Object valor, String padrao) {
+        return valor == null ? padrao : valor.toString();
+    }
+
+    private PropostaRegraDTO mesclarProposta(PropostaRegraDTO anterior, InterpretacaoRegraResponse novo, String instrucao, Map<String, Object> contexto) {
+        String matricula = anterior.filtros().matricula();
+        var matOpt = CatalogoDominioDomRock.extrairMatricula(instrucao);
+        if (matOpt.isPresent()) {
+            matricula = matOpt.get();
+        }
+
+        Integer codLoja = novo.codLoja() != null ? novo.codLoja() : anterior.filtros().codLoja();
+        if (codLoja == null) {
+            codLoja = CatalogoDominioDomRock.extrairCodigoLoja(instrucao).orElse(null);
+        }
+
+        FiltrosRegraDTO filtros = new FiltrosRegraDTO(
+                novo.canal() != null ? novo.canal() : anterior.filtros().canal(),
+                novo.codMarca() != null ? novo.codMarca() : anterior.filtros().codMarca(),
+                novo.descrMarca() != null ? novo.descrMarca() : anterior.filtros().descrMarca(),
+                codLoja,
+                novo.codCargo() != null ? novo.codCargo() : anterior.filtros().codCargo(),
+                novo.descriCargo() != null ? novo.descriCargo() : anterior.filtros().descriCargo(),
+                matricula
+        );
+
+        FaixaValorDTO faixaNova = extrairFaixaValor(instrucao);
+        FaixaValorDTO faixa = faixaNova.possuiFaixa() ? faixaNova : anterior.condicaoValor();
+
+        OperacaoBaseDTO opNova = extrairOperacaoBase(
+                instrucao,
+                novo.taxa(),
+                filtros.codMarca(),
+                filtros.descrMarca(),
+                filtros.codCargo(),
+                filtros.descriCargo()
+        );
+        OperacaoBaseDTO operacao = (opNova.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA || novo.taxa() != null)
+                ? opNova
+                : anterior.operacaoBase();
+
+        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(operacao);
+        BigDecimal taxaFinal = taxaCalculada != null ? taxaCalculada : (novo.taxa() != null ? novo.taxa() : anterior.taxaFinal());
+
+        PeriodoVigenciaDTO vigencia = new PeriodoVigenciaDTO(
+                novo.dataInicio() != null ? novo.dataInicio() : anterior.vigencia().dataInicio(),
+                novo.dataFim() != null ? novo.dataFim() : anterior.vigencia().dataFim()
+        );
+
+        PropostaRegraDTO propostaBase = new PropostaRegraDTO(
+                anterior.blocoId(),
+                anterior.trechoOrigem() + " [Ajuste: " + instrucao + "]",
+                filtros,
+                faixa,
+                operacao,
+                taxaFinal,
+                anterior.referenciasConsultadas(),
+                anterior.origensPorCampo(),
+                null,
+                null,
+                null,
+                null,
+                vigencia,
+                anterior.bonusPercentual(),
+                anterior.bonusValorFixo()
+        );
+
+        List<PendenciaPropostaDTO> pendencias = artefatoService.validarProposta(propostaBase);
+        boolean completa = pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva);
+        String explicacao = artefatoService.gerarExplicacao(propostaBase);
+        String python = artefatoService.gerarPythonEquivalente(propostaBase);
+
+        return new PropostaRegraDTO(
+                propostaBase.blocoId(),
+                propostaBase.trechoOrigem(),
+                filtros,
+                faixa,
+                operacao,
+                taxaFinal,
+                propostaBase.referenciasConsultadas(),
+                propostaBase.origensPorCampo(),
+                pendencias,
+                completa,
+                explicacao,
+                python,
+                vigencia,
+                anterior.bonusPercentual(),
+                anterior.bonusValorFixo()
+        );
+    }
+
+    private FaixaValorDTO extrairFaixaValor(String texto) {
+        if (texto == null) return FaixaValorDTO.semLimites();
+        String t = texto.toLowerCase();
+
+        BigDecimal min = null;
+        Boolean minInc = null;
+        BigDecimal max = null;
+        Boolean maxInc = null;
+
+        // Regex para valores como R$ 5.000, 5000, 5.000,00
+        var matcherMin = java.util.regex.Pattern.compile("(acima de|a partir de|superior a|maior que|m[ií]nimo de)\\s*(r\\$\\s*)?([0-9]+([.,][0-9]{3})*([.,][0-9]{1,2})?)").matcher(t);
+        if (matcherMin.find()) {
+            String termo = matcherMin.group(1);
+            String valorStr = matcherMin.group(3).replace(".", "").replace(",", ".");
+            try {
+                min = new BigDecimal(valorStr);
+                minInc = termo.contains("partir") || termo.contains("mínimo") || termo.contains("minimo");
+            } catch (Exception ignored) {}
+        }
+
+        var matcherMax = java.util.regex.Pattern.compile("(at[eé]|inferior a|menor que|m[aá]ximo de)\\s*(r\\$\\s*)?([0-9]+([.,][0-9]{3})*([.,][0-9]{1,2})?)").matcher(t);
+        if (matcherMax.find()) {
+            String termo = matcherMax.group(1);
+            String valorStr = matcherMax.group(3).replace(".", "").replace(",", ".");
+            try {
+                max = new BigDecimal(valorStr);
+                maxInc = termo.contains("até") || termo.contains("ate") || termo.contains("máximo") || termo.contains("maximo");
+            } catch (Exception ignored) {}
+        }
+
+        return new FaixaValorDTO(min, minInc, max, maxInc);
+    }
+
+    public OperacaoBaseDTO extrairOperacaoBase(String texto, BigDecimal taxaExtraida) {
+        return extrairOperacaoBase(texto, taxaExtraida, null, null, null, null);
+    }
+
+    public OperacaoBaseDTO extrairOperacaoBase(
+            String texto,
+            BigDecimal taxaExtraida,
+            Integer codMarca,
+            String descrMarca,
+            Integer codCargo,
+            String descriCargo
+    ) {
+        if (texto == null) return OperacaoBaseDTO.definirTaxa(taxaExtraida);
+        String t = texto.toLowerCase();
+
+        BigDecimal taxaBaseReferencia = dominioService.obterTaxaBaseComFallback(codMarca, codCargo, descriCargo);
+        String descrReferencia = dominioService.gerarDescricaoReferencia(codMarca, descrMarca, codCargo, descriCargo);
+
+
+        // 1. Acréscimo sobre a base
+        if (t.contains("acréscimo") || t.contains("acrescimo") || t.contains("taxa base +") || t.contains("base +") || t.contains("+") && t.contains("base")) {
+            BigDecimal ajuste = extrairPercentualOuNumero(t);
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
+            return new OperacaoBaseDTO(TipoOperacaoBase.ACRESCIMO_PONTOS, ajuste != null ? ajuste : new BigDecimal("0.0150"), ref);
+        }
+
+        // 2. Desconto sobre a base
+        if (t.contains("desconto") || t.contains("taxa base -") || t.contains("base -") || t.contains("-") && t.contains("base")) {
+            BigDecimal ajuste = extrairPercentualOuNumero(t);
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
+            return new OperacaoBaseDTO(TipoOperacaoBase.DESCONTO_PONTOS, ajuste != null ? ajuste : new BigDecimal("0.0050"), ref);
+        }
+
+        // 3. Multiplicador da base
+        if (t.contains("multiplicad") || t.contains("fator") || t.contains("x a base") || t.contains("vezes a base")) {
+            BigDecimal fator = extrairNumero(t);
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
+            return new OperacaoBaseDTO(TipoOperacaoBase.MULTIPLICADOR_BASE, fator != null ? fator : new BigDecimal("1.5000"), ref);
+        }
+
+        // 4. Divisor da base
+        if (t.contains("dividid") || t.contains("divisor") || t.contains("/ a base") || t.contains("metade da base") || t.contains("/ 2")) {
+            BigDecimal fator = t.contains("metade") ? new BigDecimal("2.0000") : extrairNumero(t);
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
+            return new OperacaoBaseDTO(TipoOperacaoBase.DIVISOR_BASE, fator != null ? fator : new BigDecimal("2.0000"), ref);
+        }
+
+        return OperacaoBaseDTO.definirTaxa(taxaExtraida);
+    }
+
+    private BigDecimal extrairPercentualOuNumero(String texto) {
+        var m = java.util.regex.Pattern.compile("([0-9]+([.,][0-9]+)?)\\s*%").matcher(texto);
+        if (m.find()) {
+            try {
+                BigDecimal valor = new BigDecimal(m.group(1).replace(",", "."));
+                return valor.divide(new BigDecimal("100"), 4, java.math.RoundingMode.HALF_UP);
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private BigDecimal extrairNumero(String texto) {
+        var m = java.util.regex.Pattern.compile("([0-9]+([.,][0-9]+)?)").matcher(texto);
+        if (m.find()) {
+            try {
+                return new BigDecimal(m.group(1).replace(",", ".")).setScale(4, java.math.RoundingMode.HALF_UP);
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private String gerarTituloSugerido(List<PropostaRegraDTO> propostas, String texto) {
+        if (propostas == null || propostas.isEmpty()) {
+            return "Nova Campanha";
+        }
+        if (propostas.size() == 1) {
+            PropostaRegraDTO p = propostas.get(0);
+            if (p.filtros().canal() != null) {
+                return "Campanha Canal " + p.filtros().canal();
+            }
+            if (p.filtros().descrMarca() != null) {
+                return "Campanha Marca " + p.filtros().descrMarca();
+            }
+        }
+        return "Campanha Múltiplas Regras (" + propostas.size() + " blocos)";
+    }
+
+    public ValidarPropostaResponse validarProposta(ValidarPropostaRequest request) {
+        if (request == null) {
+            return new ValidarPropostaResponse(false, List.of("Dados da proposta não fornecidos"), List.of(), List.of(), null);
+        }
+
+        List<String> erros = new ArrayList<>();
+        List<String> avisos = new ArrayList<>();
+        List<ReferenciaConsultadaDTO> referencias = new ArrayList<>();
+
+        // 1. Marca
+        if (request.codMarca() != null) {
+            if (!dominioService.isMarcaValida(request.codMarca())) {
+                erros.add("Marca com código " + request.codMarca() + " não foi encontrada no cadastro de marcas.");
+            } else {
+                String descr = dominioService.buscarDescricaoMarca(request.codMarca())
+                        .orElse(request.descrMarca() != null ? request.descrMarca() : "Marca " + request.codMarca());
+                referencias.add(new ReferenciaConsultadaDTO("MARCA", "cod_marca=" + request.codMarca(), descr));
+            }
+        }
+
+        // 2. Cargo
+        if (request.codCargo() != null) {
+            if (!dominioService.isCargoValido(request.codCargo())) {
+                erros.add("Cargo com código " + request.codCargo() + " não foi encontrado no cadastro de cargos.");
+            } else {
+                String descr = dominioService.buscarDescricaoCargo(request.codCargo())
+                        .orElse(request.descriCargo() != null ? request.descriCargo() : "Cargo " + request.codCargo());
+                referencias.add(new ReferenciaConsultadaDTO("CARGO", "cod_cargo=" + request.codCargo(), descr));
+            }
+        }
+
+        // 3. Loja
+        if (request.codLoja() != null) {
+            if (request.codLoja() <= 0 || !dominioService.isLojaValida(request.codLoja())) {
+                erros.add("Loja com código " + request.codLoja() + " não foi encontrada no cadastro de lojas ativas.");
+            } else {
+                String descr = dominioService.buscarDescricaoLoja(request.codLoja())
+                        .orElse("LOJA-" + request.codLoja());
+                referencias.add(new ReferenciaConsultadaDTO("LOJA", "cod_loja=" + request.codLoja(), descr));
+            }
+        }
+
+        // 4. Canal
+        if (request.canal() != null && !request.canal().isBlank() && !"PADRAO".equalsIgnoreCase(request.canal().trim())) {
+            if (!dominioService.isCanalValido(request.canal())) {
+                erros.add("Canal de venda '" + request.canal() + "' não é reconhecido. Canais válidos: " + dominioService.obterCanais());
+            } else {
+                referencias.add(new ReferenciaConsultadaDTO("CANAL", "canal=" + request.canal().trim().toUpperCase(), request.canal().trim().toUpperCase()));
+            }
+        }
+
+        // 5. Matrícula
+        if (request.matricula() != null && !request.matricula().isBlank()) {
+            if (!dominioService.isMatriculaValida(request.matricula())) {
+                erros.add("Matrícula '" + request.matricula() + "' não foi encontrada no cadastro de colaboradores.");
+            } else {
+                var regOpt = dominioService.buscarMatricula(request.matricula());
+                if (regOpt.isPresent()) {
+                    var reg = regOpt.get();
+                    referencias.add(new ReferenciaConsultadaDTO("COLABORADOR", "matricula=" + request.matricula(), "Colaborador " + request.matricula() + " (Ativo)"));
+
+                    if (request.codLoja() != null && reg.getStore() != null && reg.getStore().getCode() != null) {
+                        if (!reg.getStore().getCode().equals(request.codLoja())) {
+                            avisos.add("Divergência cadastral: a matrícula " + request.matricula() + " está alocada na Loja " + reg.getStore().getCode() + ", mas a proposta especifica a Loja " + request.codLoja() + ".");
+                        }
+                    }
+
+                    if (request.codCargo() != null && reg.getPosition() != null && reg.getPosition().getCode() != null) {
+                        if (!reg.getPosition().getCode().equals(request.codCargo())) {
+                            avisos.add("Divergência cadastral: a matrícula " + request.matricula() + " possui cargo com código " + reg.getPosition().getCode() + ", mas a proposta especifica o código de cargo " + request.codCargo() + ".");
+                        }
+                    }
+                } else {
+                    referencias.add(new ReferenciaConsultadaDTO("COLABORADOR", "matricula=" + request.matricula(), "Colaborador " + request.matricula()));
+                }
+            }
+        }
+
+        // 6. Taxa e Base Contratual
+        if (request.taxa() != null) {
+            if (request.taxa().compareTo(BigDecimal.ZERO) <= 0) {
+                erros.add("A taxa de comissão deve ser um valor estritamente positivo (> 0).");
+            } else if (request.taxa().compareTo(new BigDecimal("1.0")) > 0) {
+                avisos.add("A taxa informada (" + request.taxa() + ") é maior que 100%. Verifique se o valor não deveria estar no formato decimal (ex: 0.05 para 5%).");
+            }
+
+            var taxaBaseOpt = dominioService.obterTaxaBaseContratual(request.codMarca(), request.codCargo(), request.descriCargo());
+            if (taxaBaseOpt.isPresent()) {
+                referencias.add(new ReferenciaConsultadaDTO(
+                        "TAXA_BASE_CONTRATUAL",
+                        "cod_marca=" + request.codMarca() + ", cod_cargo=" + request.codCargo(),
+                        dominioService.gerarDescricaoReferencia(request.codMarca(), request.descrMarca(), request.codCargo(), request.descriCargo())
+                ));
+            }
+        }
+
+        // 7. Período
+        if (request.dataInicio() != null && request.dataFim() != null) {
+            if (request.dataInicio().isAfter(request.dataFim())) {
+                erros.add("A data de início (" + request.dataInicio() + ") não pode ser posterior à data de término (" + request.dataFim() + ").");
+            }
+        }
+
+        // 8. Análise de Concorrência
+        com.bugbusters.backend.dto.regra.ConsultaConcorrenciaResponse analiseConcorrencia = null;
+        if (regraConcorrenciaService != null) {
+            var reqConcorrencia = new com.bugbusters.backend.dto.regra.ConsultaConcorrenciaRequest(
+                    request.campanhaId(),
+                    request.codMarca(),
+                    request.codCargo(),
+                    request.codLoja(),
+                    request.canal(),
+                    request.matricula(),
+                    request.dataInicio(),
+                    request.dataFim()
+            );
+            analiseConcorrencia = regraConcorrenciaService.analisarConcorrencia(reqConcorrencia);
+            if (analiseConcorrencia.temEmpate()) {
+                avisos.add("Atenção: existem regras ativas concorrentes com o mesmo nível de prioridade (empate), o que gerará conflito em vendas simultâneas.");
+            }
+            if (analiseConcorrencia.temIdentica()) {
+                avisos.add("Atenção: já existe uma regra exatamente idêntica cadastrada no mesmo período.");
+            }
+        }
+
+        boolean valida = erros.isEmpty();
+        return new ValidarPropostaResponse(valida, erros, avisos, referencias, analiseConcorrencia);
     }
 }

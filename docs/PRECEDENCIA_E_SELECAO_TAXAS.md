@@ -82,7 +82,7 @@ Toda seleção bem-sucedida ou impedida gera um resultado rastreável (`Resoluca
 ## 6. Faixa de valor, desempate e bônus (Sprint 2)
 
 ### 6.1 Faixa de valor por venda
-Uma regra pode restringir o **valor de cada venda** com `valor_min`, `valor_max`, `min_inclusivo` e `max_inclusivo` (padrão: inclusivos). Sem faixa, a regra aceita qualquer valor.
+Uma regra pode restringir o **valor de cada venda** com `valor_minimo`, `valor_maximo`, `min_inclusivo` e `max_inclusivo` (nulo conta como inclusivo). Sem faixa, a regra aceita qualquer valor.
 - A regra **só entra na disputa** se o valor da venda estiver na faixa; regras fora da faixa são descartadas antes da comparação de especificidade.
 - Faixas contíguas (`[0, 1000)` e `[1000, +∞)`) não se sobrepõem quando o limite é exclusivo de um lado.
 - A faixa é **por venda**, não acumulada no período (acumulado exigiria estado e não é suportado).

@@ -22,9 +22,6 @@ public class AiServiceClient {
     private RestClient aiRestClient;
     private final String endpoint;
 
-    @Value("${ai.service.v2.enabled:false}")
-    private boolean v2Enabled;
-
     @Value("${ai.service.v2.endpoint:/api/v2/interpretar}")
     private String v2Endpoint;
 
@@ -62,17 +59,9 @@ public class AiServiceClient {
         }
     }
 
-    public boolean isV2Enabled() {
-        return v2Enabled;
-    }
-
-    public void setV2Enabled(boolean v2Enabled) {
-        this.v2Enabled = v2Enabled;
-    }
-
     /**
-     * Chama a interpretação v2 do serviço Python (lista de propostas). A resposta é repassada como mapa
-     * porque o contrato v2 evolui junto com o serviço de IA; o v1 segue sendo o padrão.
+     * Chama o agente de interpretação do serviço Python (/api/v2/interpretar: lista de propostas com consultas
+     * ao cadastro). A resposta vem como mapa e é convertida para PropostaRegraDTO pelo InterpretadorService.
      */
     public Map<String, Object> chamarServicoPythonV2(Map<String, Object> payload) {
         try {

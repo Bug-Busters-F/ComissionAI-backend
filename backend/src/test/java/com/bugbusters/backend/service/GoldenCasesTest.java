@@ -145,8 +145,8 @@ class GoldenCasesTest {
             regra.setCodCargo((Integer) r.get("codCargo"));
             regra.setMatricula((String) r.get("matricula"));
             regra.setTaxa(new BigDecimal((String) r.get("taxa")));
-            regra.setValorMin(decimal(r.get("valorMin")));
-            regra.setValorMax(decimal(r.get("valorMax")));
+            regra.setValorMinimo(decimal(r.get("valorMin")));
+            regra.setValorMaximo(decimal(r.get("valorMax")));
             regra.setMinInclusivo((Boolean) r.get("minInclusivo"));
             regra.setMaxInclusivo((Boolean) r.get("maxInclusivo"));
             regra.setBonusPercentual(decimal(r.get("bonusPercentual")));

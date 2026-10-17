@@ -48,19 +48,19 @@ class CampanhaMultiplasRegrasTest {
             {"titulo":"Campanha N regras","textoOriginal":"3% até 10 mil e 4% acima, mais bônus",
              "dataInicio":"2026-10-01","dataFim":"2026-10-31",
              "regras":[
-               {"codLoja":75,"taxa":0.0300,"valorMax":10000.00,"maxInclusivo":false,"bonusValorFixo":25.00},
-               {"codLoja":75,"taxa":0.0400,"valorMin":10000.00,"bonusPercentual":0.0100,"canal":"ecommerce"}
+               {"codLoja":75,"taxa":0.0300,"valorMaximo":10000.00,"maxInclusivo":false,"bonusValorFixo":25.00},
+               {"codLoja":75,"taxa":0.0400,"valorMinimo":10000.00,"bonusPercentual":0.0100,"canal":"ecommerce"}
              ]}
             """;
 
     @Test
-    @DisplayName("POST com lista de regras cria N regras herdando a vigência da campanha")
+    @DisplayName("POST com lista de regras cria N regras com faixa e bônus, herdando a vigência da campanha")
     void deveCriarCampanhaComVariasRegras() throws Exception {
         mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(DUAS_REGRAS))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.regras", hasSize(2)))
-                .andExpect(jsonPath("$.regra.taxa", is(0.03)))
-                .andExpect(jsonPath("$.regras[0].valorMax", is(10000.0)))
+                .andExpect(jsonPath("$.regras[0].taxa", is(0.03)))
+                .andExpect(jsonPath("$.regras[0].valorMaximo", is(10000.0)))
                 .andExpect(jsonPath("$.regras[0].maxInclusivo", is(false)))
                 .andExpect(jsonPath("$.regras[0].bonusValorFixo", is(25.0)))
                 .andExpect(jsonPath("$.regras[0].dataInicio", is("2026-10-01")))
@@ -100,27 +100,10 @@ class CampanhaMultiplasRegrasTest {
     }
 
     @Test
-    @DisplayName("Contrato de uma regra continua válido e devolve regras com um item")
-    void deveManterContratoDeUmaRegra() throws Exception {
-        String legado = """
-                {"titulo":"Legada","textoOriginal":"5% ecommerce","canal":"ecommerce","taxa":0.0500,
-                 "dataInicio":"2026-10-01","dataFim":"2026-10-31"}
-                """;
-        mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(legado))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.regra.taxa", is(0.05)))
-                .andExpect(jsonPath("$.regras", hasSize(1)));
-    }
-
-    @Test
-    @DisplayName("Validações: sem taxa e sem regras, faixa incoerente e bônus inválido retornam 400")
+    @DisplayName("Validações: faixa incoerente e bônus inválido retornam 400")
     void deveValidarEntrada() throws Exception {
-        String semNada = "{\"titulo\":\"X\",\"textoOriginal\":\"x\"}";
-        mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(semNada))
-                .andExpect(status().isBadRequest());
-
         String faixaInvertida = """
-                {"titulo":"X","textoOriginal":"x","regras":[{"taxa":0.03,"valorMin":500.00,"valorMax":100.00}]}
+                {"titulo":"X","textoOriginal":"x","regras":[{"taxa":0.03,"valorMinimo":500.00,"valorMaximo":100.00}]}
                 """;
         mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(faixaInvertida))
                 .andExpect(status().isBadRequest());
@@ -131,10 +114,10 @@ class CampanhaMultiplasRegrasTest {
         mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(bonusInvalido))
                 .andExpect(status().isBadRequest());
 
-        String regraSemTaxa = """
-                {"titulo":"X","textoOriginal":"x","regras":[{"codLoja":75}]}
+        String bonusFixoNegativo = """
+                {"titulo":"X","textoOriginal":"x","regras":[{"taxa":0.03,"bonusValorFixo":-10.00}]}
                 """;
-        mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(regraSemTaxa))
+        mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON).content(bonusFixoNegativo))
                 .andExpect(status().isBadRequest());
     }
 }

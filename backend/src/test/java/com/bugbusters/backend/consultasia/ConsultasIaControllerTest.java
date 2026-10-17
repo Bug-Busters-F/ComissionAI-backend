@@ -296,7 +296,7 @@ class ConsultasIaControllerTest {
     void deveConsiderarFaixaNaConcorrencia() throws Exception {
         Campanha a = novaCampanha("F");
         Regra faixaAlta = novaRegra(a, null, 9202, null, "0.0500", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), StatusRegra.ATIVA);
-        faixaAlta.setValorMin(new BigDecimal("1000.00"));
+        faixaAlta.setValorMinimo(new BigDecimal("1000.00"));
         regraRepository.save(faixaAlta);
 
         String faixaBaixa = """

@@ -35,6 +35,24 @@ public class RegistrationService {
                 .map(mapper::toResponse);
     }
 
+    public Page<RegistrationResponseDTO> findAll(Integer lojaCodigo, Integer cargoCodigo, String matricula, Pageable pageable) {
+        if (lojaCodigo == null && cargoCodigo == null && (matricula == null || matricula.isBlank())) {
+            return findAll(pageable);
+        }
+        String matriculaFiltro = (matricula != null && !matricula.isBlank()) ? matricula.trim() : null;
+        return repository.findByFiltros(lojaCodigo, cargoCodigo, matriculaFiltro, pageable)
+                .map(mapper::toResponse);
+    }
+
+    public java.util.Optional<RegistrationResponseDTO> findByRegistration(String registration) {
+        if (registration == null || registration.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return repository.findByRegistrationIgnoreCase(registration.trim())
+                .map(mapper::toResponse);
+    }
+
+
     /**
      * Exclui uma matrícula pelo ID.
      *
