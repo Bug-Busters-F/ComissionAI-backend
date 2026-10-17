@@ -21,7 +21,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/campanhas")
-@Tag(name = "1. Campanhas e Regras", description = "Gerenciamento do ciclo de vida de campanhas e propostas de regras")
+@Tag(name = "Campanhas e Regras", description = "Gerenciamento do ciclo de vida de campanhas e propostas de regras")
 public class CampanhaController {
 
     private final CampanhaService campanhaService;
@@ -30,9 +30,9 @@ public class CampanhaController {
         this.campanhaService = campanhaService;
     }
 
-    @Operation(summary = "Cadastrar campanha com regra vinculada", description = "Salva a campanha como rascunho (DRAFT). Caso a data final seja omitida, atribui 30 dias contados da data atual.")
+    @Operation(summary = "Cadastrar campanha com coleção de regras vinculadas", description = "Salva a campanha como rascunho (DRAFT) ou estado desejado com suas regras vinculadas. Permite salvar propostas incompletas como rascunho, bloqueando ativação automática.")
     @ApiResponse(responseCode = "201", description = "Campanha criada com sucesso")
-    @ApiResponse(responseCode = "400", description = "Dados inválidos ou período incoerente", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "Dados inválidos, período incoerente ou tentativa de ativar com regras incompletas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping
     public ResponseEntity<CampanhaResponse> criarCampanha(@Valid @RequestBody CampanhaRequest request) {
         CampanhaResponse response = campanhaService.criarCampanha(request);
@@ -43,16 +43,16 @@ public class CampanhaController {
         return ResponseEntity.created(uri).body(response);
     }
 
-    @Operation(summary = "Listar campanhas", description = "Lista todas as campanhas cadastradas não removidas, com filtro opcional por estado (DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA).")
+    @Operation(summary = "Listar campanhas com coleções de regras", description = "Lista todas as campanhas cadastradas não removidas com suas respectivas coleções de regras, com filtro opcional por estado.")
     @GetMapping
     public ResponseEntity<List<CampanhaResponse>> listarCampanhas(
             @RequestParam(required = false) EstadoCampanha estado) {
         return ResponseEntity.ok(campanhaService.listar(estado));
     }
 
-    @Operation(summary = "Alterar estado da campanha", description = "Transiciona o estado da campanha para qualquer um dos valores: DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA e sincroniza a regra vinculada.")
+    @Operation(summary = "Alterar estado da campanha", description = "Transiciona o estado da campanha para qualquer um dos valores: DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA e sincroniza todas as regras da coleção. Bloqueia ativação se houver regras incompletas.")
     @ApiResponse(responseCode = "200", description = "Estado alterado com sucesso")
-    @ApiResponse(responseCode = "400", description = "Estado inválido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "Estado inválido ou impedimento por regras incompletas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Campanha não encontrada ou excluída", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PatchMapping("/{id}/estado")
     public ResponseEntity<CampanhaResponse> alterarEstado(
@@ -61,15 +61,15 @@ public class CampanhaController {
         return ResponseEntity.ok(campanhaService.alterarEstado(id, request.estado()));
     }
 
-    @Operation(summary = "Consultar detalhe da campanha por ID")
-    @ApiResponse(responseCode = "200", description = "Campanha localizada")
+    @Operation(summary = "Consultar detalhe da campanha por ID com coleção de regras")
+    @ApiResponse(responseCode = "200", description = "Campanha localizada com coleção de regras")
     @ApiResponse(responseCode = "404", description = "Campanha não encontrada ou excluída", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @GetMapping("/{id}")
     public ResponseEntity<CampanhaResponse> buscarPorId(@PathVariable Long id) {
         return ResponseEntity.ok(campanhaService.buscarPorId(id));
     }
 
-    @Operation(summary = "Atualizar campanha e regra vinculada")
+    @Operation(summary = "Atualizar campanha e coleção de regras vinculadas", description = "Atualiza dados da campanha e substitui transacionalmente a coleção de regras.")
     @PutMapping("/{id}")
     public ResponseEntity<CampanhaResponse> atualizarCampanha(@PathVariable Long id, @Valid @RequestBody CampanhaRequest request) {
         return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request));

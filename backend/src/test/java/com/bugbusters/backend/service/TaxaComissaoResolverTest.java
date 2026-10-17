@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.bugbusters.backend.basecomiss.BaseComiss;
 import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
+import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.position.Position;
@@ -347,4 +348,351 @@ class TaxaComissaoResolverTest {
         assertEquals("REGRA#42 - Campanha geral", result.versaoOuReferenciaRegra());
     }
 
+    // =========================================================================
+    // Testes de Faixas de Valor (Inclusivo e Exclusivo) & Casos de Fronteira (BACK-4)
+    // =========================================================================
+
+    @Test
+    @DisplayName("10. Faixas de Valor: Deve aplicar regra com limite inferior inclusivo no valor de fronteira exato")
+    void deveAplicarRegraComLimiteInferiorInclusivo() {
+        Regra regra = new Regra(null, "Regra Min Inclusivo", "ECOMMERCE", new BigDecimal("0.0500"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(50L);
+        regra.setValorMinimo(new BigDecimal("1000.00"));
+        regra.setMinInclusivo(true);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        // Venda exatamente no valor mínimo
+        sale.setValue(new BigDecimal("1000.00"));
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(50L, result.idRegra());
+        assertEquals(new BigDecimal("0.0500"), result.taxa());
+    }
+
+    @Test
+    @DisplayName("11. Faixas de Valor: Deve descartar regra e fazer fallback para BaseComiss quando valor igual a limite inferior exclusivo")
+    void deveDescartarRegraQuandoLimiteInferiorExclusivo() {
+        Regra regra = new Regra(null, "Regra Min Exclusivo", "ECOMMERCE", new BigDecimal("0.0500"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(51L);
+        regra.setValorMinimo(new BigDecimal("1000.00"));
+        regra.setMinInclusivo(false); // Estritamente maior que 1000.00
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0200"));
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        // Venda exatamente no valor mínimo (não atende exclusivo)
+        sale.setValue(new BigDecimal("1000.00"));
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals("BASE_COMISS", result.origemTaxa());
+        assertEquals(new BigDecimal("0.0200"), result.taxa());
+
+        // Venda com valor ligeiramente superior (atende exclusivo)
+        sale.setValue(new BigDecimal("1000.01"));
+        ResolucaoTaxaResult resultAtende = resolver.resolverTaxa(sale);
+
+        assertTrue(resultAtende.sucesso());
+        assertEquals(51L, resultAtende.idRegra());
+        assertEquals(new BigDecimal("0.0500"), resultAtende.taxa());
+    }
+
+    @Test
+    @DisplayName("12. Faixas de Valor: Deve aplicar regra com limite superior inclusivo no valor de fronteira exato")
+    void deveAplicarRegraComLimiteSuperiorInclusivo() {
+        Regra regra = new Regra(null, "Regra Max Inclusivo", "ECOMMERCE", new BigDecimal("0.0600"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(52L);
+        regra.setValorMaximo(new BigDecimal("5000.00"));
+        regra.setMaxInclusivo(true);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        // Venda exatamente no teto máximo
+        sale.setValue(new BigDecimal("5000.00"));
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(52L, result.idRegra());
+        assertEquals(new BigDecimal("0.0600"), result.taxa());
+    }
+
+    @Test
+    @DisplayName("13. Faixas de Valor: Deve descartar regra quando valor igual a limite superior exclusivo")
+    void deveDescartarRegraQuandoLimiteSuperiorExclusivo() {
+        Regra regra = new Regra(null, "Regra Max Exclusivo", "ECOMMERCE", new BigDecimal("0.0600"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(53L);
+        regra.setValorMaximo(new BigDecimal("5000.00"));
+        regra.setMaxInclusivo(false); // Estritamente menor que 5000.00
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0200"));
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        // Venda exatamente no valor máximo (não atende exclusivo)
+        sale.setValue(new BigDecimal("5000.00"));
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals("BASE_COMISS", result.origemTaxa());
+
+        // Venda ligeiramente inferior (atende exclusivo)
+        sale.setValue(new BigDecimal("4999.99"));
+        ResolucaoTaxaResult resultAtende = resolver.resolverTaxa(sale);
+
+        assertTrue(resultAtende.sucesso());
+        assertEquals(53L, resultAtende.idRegra());
+        assertEquals(new BigDecimal("0.0600"), resultAtende.taxa());
+    }
+
+    @Test
+    @DisplayName("14. Faixas Contíguas: Deve aplicar filtros antes e evitar falso empate em faixas contíguas na fronteira")
+    void deveEvitarEmpateEmFaixasContiguasNaFronteira() {
+        // Faixa 1: até R$ 5.000 (inclusivo)
+        Regra faixa1 = new Regra(null, "Faixa 1 Ate 5k", "ECOMMERCE", new BigDecimal("0.0300"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        faixa1.setId(61L);
+        faixa1.setValorMaximo(new BigDecimal("5000.00"));
+        faixa1.setMaxInclusivo(true);
+
+        // Faixa 2: acima de R$ 5.000 (exclusivo)
+        Regra faixa2 = new Regra(null, "Faixa 2 Acima 5k", "ECOMMERCE", new BigDecimal("0.0700"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        faixa2.setId(62L);
+        faixa2.setValorMinimo(new BigDecimal("5000.00"));
+        faixa2.setMinInclusivo(false);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(faixa1, faixa2));
+
+        // Venda de exatamente R$ 5.000,00 deve selecionar Faixa 1 sem ambiguidade
+        sale.setValue(new BigDecimal("5000.00"));
+        ResolucaoTaxaResult result1 = resolver.resolverTaxa(sale);
+
+        assertTrue(result1.sucesso());
+        assertEquals(61L, result1.idRegra());
+        assertEquals(new BigDecimal("0.0300"), result1.taxa());
+
+        // Venda de R$ 5.000,01 deve selecionar Faixa 2 sem ambiguidade
+        sale.setValue(new BigDecimal("5000.01"));
+        ResolucaoTaxaResult result2 = resolver.resolverTaxa(sale);
+
+        assertTrue(result2.sucesso());
+        assertEquals(62L, result2.idRegra());
+        assertEquals(new BigDecimal("0.0700"), result2.taxa());
+    }
+
+    // =========================================================================
+    // Testes de Ajustes sobre a Base Contratual (BACK-4)
+    // =========================================================================
+
+    @Test
+    @DisplayName("15. Ajustes: Deve calcular ACRESCIMO_PONTOS sobre a taxa base contratual")
+    void deveCalcularAcrescimoPontosSobreTaxaBase() {
+        Regra regra = new Regra(null, "Regra Bonus", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(71L);
+        regra.setTipoOperacao(TipoOperacaoBase.ACRESCIMO_PONTOS);
+        regra.setValorAjuste(new BigDecimal("0.0150")); // + 1.5%
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.0450"), result.taxa()); // 3% + 1.5% = 4.5%
+        assertEquals(71L, result.idRegra());
+        assertEquals("REGRA_NEGOCIO", result.origemTaxa());
+        assertTrue(result.versaoOuReferenciaRegra().contains("ACRESCIMO_PONTOS"));
+    }
+
+    @Test
+    @DisplayName("16. Ajustes: Deve calcular DESCONTO_PONTOS sobre a taxa base contratual")
+    void deveCalcularDescontoPontosSobreTaxaBase() {
+        Regra regra = new Regra(null, "Regra Reducao", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(72L);
+        regra.setTipoOperacao(TipoOperacaoBase.DESCONTO_PONTOS);
+        regra.setValorAjuste(new BigDecimal("0.0050")); // - 0.5%
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.0250"), result.taxa()); // 3% - 0.5% = 2.5%
+        assertEquals(72L, result.idRegra());
+    }
+
+    @Test
+    @DisplayName("17. Ajustes: Deve calcular MULTIPLICADOR_BASE sobre a taxa base contratual")
+    void deveCalcularMultiplicadorBase() {
+        Regra regra = new Regra(null, "Regra Multiplicador", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(73L);
+        regra.setTipoOperacao(TipoOperacaoBase.MULTIPLICADOR_BASE);
+        regra.setValorAjuste(new BigDecimal("1.5000")); // 1.5x a base
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.0450"), result.taxa()); // 3% * 1.5 = 4.5%
+        assertEquals(73L, result.idRegra());
+    }
+
+    @Test
+    @DisplayName("18. Ajustes: Deve calcular DIVISOR_BASE sobre a taxa base contratual")
+    void deveCalcularDivisorBase() {
+        Regra regra = new Regra(null, "Regra Divisor", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(74L);
+        regra.setTipoOperacao(TipoOperacaoBase.DIVISOR_BASE);
+        regra.setValorAjuste(new BigDecimal("2.0000")); // Metade da base
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(new BigDecimal("0.0150"), result.taxa()); // 3% / 2 = 1.5%
+        assertEquals(74L, result.idRegra());
+    }
+
+    @Test
+    @DisplayName("19. Impedimento de Ajuste: Falta de taxa em tb_basecomiss para regra que exige ajuste deve gerar impedimento")
+    void deveGerarImpedimentoQuandoBaseNaoEncontradaParaAjuste() {
+        Regra regra = new Regra(null, "Regra Exige Base", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(75L);
+        regra.setTipoOperacao(TipoOperacaoBase.ACRESCIMO_PONTOS);
+        regra.setValorAjuste(new BigDecimal("0.0100"));
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(any(), any()))
+                .thenReturn(Optional.empty());
+        when(baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(any(), any()))
+                .thenReturn(Optional.empty());
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertFalse(result.sucesso());
+        assertTrue(result.motivoImpedimento().contains("requer taxa base contratual"));
+        assertTrue(result.motivoImpedimento().contains("75"));
+    }
+
+    @Test
+    @DisplayName("20. Impedimento de Ajuste: Divisão por zero em DIVISOR_BASE deve gerar impedimento")
+    void deveGerarImpedimentoEmDivisaoPorZero() {
+        Regra regra = new Regra(null, "Regra Div Zero", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(76L);
+        regra.setTipoOperacao(TipoOperacaoBase.DIVISOR_BASE);
+        regra.setValorAjuste(BigDecimal.ZERO);
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300"));
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertFalse(result.sucesso());
+        assertTrue(result.motivoImpedimento().contains("divisão por zero"));
+    }
+
+    @Test
+    @DisplayName("21. Impedimento de Ajuste: Ajuste com taxa resultante menor ou igual a zero deve gerar impedimento")
+    void deveGerarImpedimentoQuandoTaxaResultanteMenorOuIgualZero() {
+        Regra regra = new Regra(null, "Regra Desconto Excessivo", "ECOMMERCE", null,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regra.setId(77L);
+        regra.setTipoOperacao(TipoOperacaoBase.DESCONTO_PONTOS);
+        regra.setValorAjuste(new BigDecimal("0.0500")); // Base 3% - 5% = -2%
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regra));
+
+        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300"));
+        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
+        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
+                .thenReturn(Optional.of(baseComiss));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertFalse(result.sucesso());
+        assertTrue(result.motivoImpedimento().contains("taxa percentual inválida"));
+    }
+
+    @Test
+    @DisplayName("22. Regras Individuais: Matrícula com peso 16 deve sobrepor regra geral de loja com peso 8")
+    void devePriorizarRegraIndividualDeMatriculaSobreRegraDeLoja() {
+        Regra regraLoja = new Regra(null, "Regra Loja Geral", "ECOMMERCE", brand.getCode(),
+                store.getCode(), null, null, null, new BigDecimal("0.0400"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regraLoja.setId(81L); // Loja (8) + Canal (2) + Marca (1) = 11
+
+        Regra regraMatricula = new Regra(null, "Regra Vendedor Individual", null, null,
+                null, null, null, registration.getRegistration(), new BigDecimal("0.0800"),
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        regraMatricula.setId(82L); // Matrícula (16) = 16
+
+        when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(regraLoja, regraMatricula));
+
+        ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
+
+        assertTrue(result.sucesso());
+        assertEquals(82L, result.idRegra()); // Matrícula vence
+        assertEquals(new BigDecimal("0.0800"), result.taxa());
+        assertEquals("REGRA_NEGOCIO", result.origemTaxa());
+    }
 }

@@ -32,6 +32,19 @@ public class PositionService {
         return repository.findAll(pageable).map(mapper::toResponse);
     }
 
+    public java.util.List<PositionResponseDTO> findAllList() {
+        return repository.findAll(org.springframework.data.domain.Sort.by("code").ascending())
+                .stream()
+                .map(mapper::toResponse)
+                .toList();
+    }
+
+    public java.util.Optional<PositionResponseDTO> findByCode(Integer code) {
+        if (code == null) return java.util.Optional.empty();
+        return repository.findByCode(code).map(mapper::toResponse);
+    }
+
+
     /**
      * @throws ResourceNotFoundException 
      * @throws ResourceConflictException 
