@@ -59,7 +59,17 @@ public class ImportTasklet implements Tasklet {
                     required(row.getStoreCode(), "código da loja");
                     required(row.getPositionCode(), "código do cargo");
                     required(row.getAdmissDate(), "data de admissão");
-                    registrations.save(registrationMapper.toEntity(row));
+                    Registration mapped = registrationMapper.toEntity(row);
+                    Registration target = registrations.findByRegistration(mapped.getRegistration())
+                            .map(existing -> {
+                                existing.setStore(mapped.getStore());
+                                existing.setPosition(mapped.getPosition());
+                                existing.setAdmissDate(mapped.getAdmissDate());
+                                existing.setDemissDate(mapped.getDemissDate());
+                                return existing;
+                            })
+                            .orElse(mapped);
+                    registrations.save(target);
                     recordWrite(contribution);
                 });
                 case SALES -> salesReader.forEach(input, row -> {

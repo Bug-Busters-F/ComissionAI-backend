@@ -49,4 +49,9 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
     boolean existsByBrandId(UUID brandId);
 
     boolean existsByStoreId(UUID storeId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("DELETE FROM Sale s WHERE s.saleDate BETWEEN :inicio AND :fim")
+    int deleteBySaleDateBetween(@Param("inicio") LocalDate inicio, @Param("fim") LocalDate fim);
 }
+

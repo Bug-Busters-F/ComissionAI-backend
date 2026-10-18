@@ -95,4 +95,18 @@ public class SaleController {
         saleService.deletarVenda(id);
         return ResponseEntity.noContent().build();
     }
-}
+
+    @DeleteMapping("/competencia/{mes}/{ano}")
+    public ResponseEntity<java.util.Map<String, Object>> deletarVendasPorCompetencia(
+            @PathVariable int mes,
+            @PathVariable int ano) {
+        int totalExcluido = saleService.deletarVendasPorCompetencia(mes, ano);
+        return ResponseEntity.ok(java.util.Map.of("totalExcluido", totalExcluido));
+    }
+
+    @DeleteMapping("/todas")
+    public ResponseEntity<java.util.Map<String, Object>> deletarTodasVendas() {
+        long totalExcluido = saleService.deletarTodasVendas();
+        return ResponseEntity.ok(java.util.Map.of("totalExcluido", totalExcluido));
+    }
+}

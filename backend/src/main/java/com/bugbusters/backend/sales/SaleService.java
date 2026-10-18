@@ -55,6 +55,24 @@ public class SaleService {
         log.info("Venda ID {} excluída.", id);
     }
 
+    @Transactional
+    public int deletarVendasPorCompetencia(int mes, int ano) {
+        java.time.YearMonth ym = java.time.YearMonth.of(ano, mes);
+        java.time.LocalDate inicio = ym.atDay(1);
+        java.time.LocalDate fim = ym.atEndOfMonth();
+        int total = vendaRepository.deleteBySaleDateBetween(inicio, fim);
+        log.info("Excluídas {} vendas da competência {}/{}.", total, mes, ano);
+        return total;
+    }
+
+    @Transactional
+    public long deletarTodasVendas() {
+        long total = vendaRepository.count();
+        vendaRepository.deleteAllInBatch();
+        log.info("Todas as {} vendas foram excluídas.", total);
+        return total;
+    }
+
     /**
      * Registra uma venda individual aplicando verificação de duplicidade e
      * idempotência.
