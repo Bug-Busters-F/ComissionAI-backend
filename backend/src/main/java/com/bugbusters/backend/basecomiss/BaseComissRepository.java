@@ -86,5 +86,13 @@ public interface BaseComissRepository extends JpaRepository<BaseComiss, UUID> {
 
     @org.springframework.data.jpa.repository.Query("SELECT count(b) FROM BaseComiss b WHERE b.referenceMonth BETWEEN :inicio AND :fim")
     long countByReferenceMonthBetween(@org.springframework.data.repository.query.Param("inicio") LocalDate inicio, @org.springframework.data.repository.query.Param("fim") LocalDate fim);
+
+    java.util.List<BaseComiss> findByIdLoteOrigem(String idLoteOrigem);
+
+    long countByIdLoteOrigem(String idLoteOrigem);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("DELETE FROM BaseComiss b WHERE b.idLoteOrigem = :idLoteOrigem")
+    int deleteByIdLoteOrigem(@org.springframework.data.repository.query.Param("idLoteOrigem") String idLoteOrigem);
 }
 

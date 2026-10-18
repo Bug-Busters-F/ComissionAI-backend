@@ -446,7 +446,8 @@ class ControllerRoutesTest {
 
         var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
-                .param("importType", "SALES"))
+                .param("importType", "SALES")
+                .param("competencia", "2026-10"))
                 .andExpect(status().isAccepted())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.reportId").isNumber())

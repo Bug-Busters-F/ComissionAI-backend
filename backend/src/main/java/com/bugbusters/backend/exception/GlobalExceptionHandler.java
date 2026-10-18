@@ -79,7 +79,7 @@ public class GlobalExceptionHandler {
                                 "Conflict",
                                 ex.getMessage(),
                                 request.getRequestURI(),
-                                List.of());
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
 
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
         }

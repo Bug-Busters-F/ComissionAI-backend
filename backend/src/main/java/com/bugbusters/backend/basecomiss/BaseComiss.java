@@ -41,6 +41,9 @@ public class BaseComiss {
     @Column(nullable = false)
     private LocalDate referenceMonth;
 
+    @Column(name = "id_lote_origem", length = 100)
+    private String idLoteOrigem;
+
     protected BaseComiss() {
     }
 
@@ -105,5 +108,11 @@ public class BaseComiss {
         this.referenceMonth = referenceMonth;
     }
 
-    
+    public String getIdLoteOrigem() {
+        return idLoteOrigem;
+    }
+
+    public void setIdLoteOrigem(String idLoteOrigem) {
+        this.idLoteOrigem = idLoteOrigem;
+    }
 }

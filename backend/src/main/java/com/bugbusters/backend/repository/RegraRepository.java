@@ -25,6 +25,10 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
 
     List<Regra> findAllByCampanhaIdInAndRemovidoEmIsNull(List<Long> campanhaIds);
 
+    boolean existsByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
+
+    List<Regra> findTop5ByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
+
     @Query("""
         SELECT r FROM Regra r
         WHERE r.status = :status

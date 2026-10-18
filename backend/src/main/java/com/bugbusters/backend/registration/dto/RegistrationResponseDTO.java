@@ -27,7 +27,13 @@ public record RegistrationResponseDTO(
     LocalDate admissDate,
 
     @Schema(description = "Data de demissão", example = "2026-09-13")
-    LocalDate demissDate
+    LocalDate demissDate,
 
+    @Schema(description = "Identificador do lote de origem", example = "550e8400-e29b-41d4-a716-446655440000", nullable = true)
+    String idLoteOrigem
 
-) {}
+) {
+    public RegistrationResponseDTO(UUID id, String registration, Position position, Store store, LocalDate admissDate, LocalDate demissDate) {
+        this(id, registration, position, store, admissDate, demissDate, null);
+    }
+}

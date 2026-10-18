@@ -46,7 +46,17 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
 
     boolean existsByRegistrationId(UUID registrationId);
 
+    boolean existsByRegistrationIdIn(java.util.Collection<UUID> registrationIds);
+
     boolean existsByBrandId(UUID brandId);
 
     boolean existsByStoreId(UUID storeId);
+
+    List<Sale> findByIdLoteOrigem(String idLoteOrigem);
+
+    long countByIdLoteOrigem(String idLoteOrigem);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("DELETE FROM Sale s WHERE s.idLoteOrigem = :idLoteOrigem")
+    int deleteByIdLoteOrigem(@Param("idLoteOrigem") String idLoteOrigem);
 }

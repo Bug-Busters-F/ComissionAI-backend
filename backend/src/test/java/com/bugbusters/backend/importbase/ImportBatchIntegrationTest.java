@@ -35,12 +35,15 @@ class ImportBatchIntegrationTest {
         assertEquals(1L, complete(excel(new Object[][] {hr(registration)}), ImportType.HR).totalLinhas());
         assertEquals(1L, complete(excel(new Object[][] {
                 {"2026-10-01", 991, "Marca Batch", 991, "Loja Batch", registration, 150.0}
-        }), ImportType.SALES).totalLinhas());
+        }), ImportType.SALES, "2026-10").totalLinhas());
         assertEquals(1L, complete(excel(new Object[][] {
                 {991, "Marca Batch", 991, "Cargo Batch", 0.05}
         }), ImportType.COMISSIONS, "2026-10").totalLinhas());
         assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_EXECUTION WHERE STATUS = 'COMPLETED'", Long.class) >= 3);
         assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_sales WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
+        assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_registration WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
+        assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_basecomiss WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
+        assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_envio_arquivo WHERE status = 'CONCLUIDO'", Long.class) >= 3);
         for (String filePath : jdbc.queryForList("SELECT PARAMETER_VALUE FROM BATCH_JOB_EXECUTION_PARAMS WHERE PARAMETER_NAME = 'filePath'", String.class)) {
             assertFalse(Files.exists(Path.of(filePath)), "Temporary upload must be removed after execution");
         }
@@ -88,7 +91,7 @@ class ImportBatchIntegrationTest {
         long sales = count("tb_sales");
         ImportResponse report = complete(excel(new Object[][] {
                         {"2026-10-01", 994, "Marca", 994, "Loja", UUID.randomUUID().toString(), 10.0}
-                }), ImportType.SALES);
+                }), ImportType.SALES, "2026-10");
         assertEquals(ImportStatus.FALHOU, report.status());
         assertTrue(report.mensagem().contains("Matrícula não cadastrada"));
         assertEquals(sales, count("tb_sales"));

@@ -63,7 +63,8 @@ public class BaseComissService {
                 codCargo,
                 descriCargo,
                 b.getPercentage(),
-                b.getReferenceMonth()
+                b.getReferenceMonth(),
+                b.getIdLoteOrigem()
         );
     }
 }

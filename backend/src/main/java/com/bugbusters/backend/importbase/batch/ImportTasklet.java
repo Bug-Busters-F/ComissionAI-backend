@@ -59,23 +59,41 @@ public class ImportTasklet implements Tasklet {
                     required(row.getStoreCode(), "código da loja");
                     required(row.getPositionCode(), "código do cargo");
                     required(row.getAdmissDate(), "data de admissão");
-                    registrations.save(registrationMapper.toEntity(row));
+                    Registration registration = registrationMapper.toEntity(row);
+                    registration.setIdLoteOrigem(parameters.getString("requestId"));
+                    registrations.save(registration);
                     recordWrite(contribution);
                 });
-                case SALES -> salesReader.forEach(input, row -> {
-                    required(row.getRegistration(), "matrícula");
-                    required(row.getStoreCode(), "código da loja");
-                    required(row.getBrandCode(), "código da marca");
-                    required(row.getReferenceDate(), "data de referência");
-                    required(row.getSaleValue(), "valor da venda");
-                    Sale sale = saleMapper.toEntity(row);
-                    if (sale == null) {
-                        throw new BusinessException("Matrícula não cadastrada: " + row.getRegistration());
+                case SALES -> {
+                    String compParam = parameters.getString("competencia");
+                    if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                        throw new BusinessException("Competência não informada ou inválida para importação de vendas.");
                     }
-                    sale.setIdLoteOrigem(parameters.getString("requestId"));
-                    sales.save(sale);
-                    recordWrite(contribution);
-                });
+                    java.time.YearMonth compYm = java.time.YearMonth.parse(compParam);
+
+                    salesReader.forEach(input, row -> {
+                        required(row.getRegistration(), "matrícula");
+                        required(row.getStoreCode(), "código da loja");
+                        required(row.getBrandCode(), "código da marca");
+                        required(row.getReferenceDate(), "data de referência");
+                        required(row.getSaleValue(), "valor da venda");
+
+                        if (!java.time.YearMonth.from(row.getReferenceDate()).equals(compYm)) {
+                            throw new BusinessException(String.format(
+                                    "Linha com data de referência '%s' diverge da competência informada '%s' para o lote de vendas.",
+                                    row.getReferenceDate(), compParam
+                            ));
+                        }
+
+                        Sale sale = saleMapper.toEntity(row);
+                        if (sale == null) {
+                            throw new BusinessException("Matrícula não cadastrada: " + row.getRegistration());
+                        }
+                        sale.setIdLoteOrigem(parameters.getString("requestId"));
+                        sales.save(sale);
+                        recordWrite(contribution);
+                    });
+                }
                 case COMISSIONS -> {
                     String compParam = parameters.getString("competencia");
                     if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
@@ -105,7 +123,9 @@ public class ImportTasklet implements Tasklet {
                             ));
                         }
 
-                        commissions.save(commissMapper.toEntity(row, referenceMonth));
+                        BaseComiss baseComiss = commissMapper.toEntity(row, referenceMonth);
+                        baseComiss.setIdLoteOrigem(parameters.getString("requestId"));
+                        commissions.save(baseComiss);
                         recordWrite(contribution);
                     });
                 }

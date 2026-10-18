@@ -29,6 +29,14 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
     boolean existsByStoreId(UUID storeId);
 
     boolean existsByPositionId(UUID positionId);
+
+    java.util.List<Registration> findByIdLoteOrigem(String idLoteOrigem);
+
+    long countByIdLoteOrigem(String idLoteOrigem);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("DELETE FROM Registration r WHERE r.idLoteOrigem = :idLoteOrigem")
+    int deleteByIdLoteOrigem(@org.springframework.data.repository.query.Param("idLoteOrigem") String idLoteOrigem);
 }
 
 
