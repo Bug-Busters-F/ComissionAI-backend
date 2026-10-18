@@ -7,6 +7,12 @@ import java.util.List;
 
 @Schema(description = "Resultado completo da simulação de cenários, sensibilidade e projeções pro-rata")
 public record SimulacaoCenariosResponse(
+        @Schema(description = "Identificador persistido da simulação")
+        java.util.UUID id,
+
+        @Schema(description = "Protocolo único de auditoria da simulação")
+        java.util.UUID protocolo,
+
         @Schema(description = "Competência histórica de referência utilizada", example = "2026-09")
         String competencia,
 
@@ -53,5 +59,20 @@ public record SimulacaoCenariosResponse(
         List<VendaSimuladaDetalheDTO> vendas,
 
         @Schema(description = "Avisos ou alertas consolidados da simulação")
-        List<String> avisosGerais
-) {}
+        List<String> avisosGerais,
+
+        @Schema(description = "Memória consolidada de cálculo explicando como os totais e projeções foram alcançados sem chamadas à IA")
+        String memoriaCalculoConsolidada
+) {
+    public SimulacaoCenariosResponse(String competencia, int totalVendasRecortadas, BigDecimal valorTotalRecortado,
+                                    Long campanhaId, String tituloCampanha, LocalDate dataInicioCampanha,
+                                    LocalDate dataFimCampanha, long diasInclusivos, BigDecimal fatorProjecao,
+                                    CenarioConsolidadoDTO cenario100, CenarioConsolidadoDTO cenario80,
+                                    CenarioConsolidadoDTO cenario120, CenarioConsolidadoDTO cenario150,
+                                    int totalVendasPaginadas, List<VendaSimuladaDetalheDTO> vendas,
+                                    List<String> avisosGerais) {
+        this(null, null, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha,
+             dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80,
+             cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, null);
+    }
+}

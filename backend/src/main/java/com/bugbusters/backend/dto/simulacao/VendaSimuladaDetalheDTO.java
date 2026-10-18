@@ -63,5 +63,19 @@ public record VendaSimuladaDetalheDTO(
         boolean valida,
 
         @Schema(description = "Lista de impedimentos ou alertas identificados na venda")
-        List<String> impedimentos
-) {}
+        List<String> impedimentos,
+
+        @Schema(description = "Memória de cálculo explicativa e rastreabilidade da decisão sem chamadas à IA", example = "Venda R$ 5.000,00 no canal ECOMMERCE. Regra 'Regra E-commerce 5%' vencedora...")
+        String memoriaCalculo
+) {
+    public VendaSimuladaDetalheDTO(UUID id, String matricula, Integer codCargo, String descriCargo, Integer codLoja,
+                                  Integer codMarca, String descrMarca, String canal, LocalDate dataVenda,
+                                  BigDecimal valorVendaOriginal, BigDecimal taxaBaseContratual, BigDecimal valorComissaoBase,
+                                  VendaSimuladaCenarioItemDTO cenario100, VendaSimuladaCenarioItemDTO cenario80,
+                                  VendaSimuladaCenarioItemDTO cenario120, VendaSimuladaCenarioItemDTO cenario150,
+                                  BigDecimal deltaComissao100, boolean valida, List<String> impedimentos) {
+        this(id, matricula, codCargo, descriCargo, codLoja, codMarca, descrMarca, canal, dataVenda,
+             valorVendaOriginal, taxaBaseContratual, valorComissaoBase, cenario100, cenario80, cenario120, cenario150,
+             deltaComissao100, valida, impedimentos, null);
+    }
+}

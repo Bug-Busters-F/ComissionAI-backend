@@ -37,4 +37,12 @@ public record VendaSimuladaCenarioItemDTO(
 
         @Schema(description = "Indica se a regra ou faixa mudou em relação ao cenário 100%", example = "true")
         boolean mudouFaixaEmRelacaoA100
-) {}
+) {
+    public BigDecimal valorBonusPerc() {
+        return valorBonusPercentual;
+    }
+
+    public boolean atendeFaixa() {
+        return atendeFaixaValor;
+    }
+}
