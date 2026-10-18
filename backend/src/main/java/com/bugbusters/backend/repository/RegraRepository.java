@@ -58,4 +58,17 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
     """)
     List<Regra> findRegrasAtivasComCampanha(@Param("status") StatusRegra status);
 
-}
+    @Query("""
+        SELECT r FROM Regra r
+        WHERE r.status = :status
+          AND r.removidoEm IS NULL
+          AND r.dataInicio <= :dataFim
+          AND r.dataFim >= :dataInicio
+        ORDER BY r.id DESC
+    """)
+    List<Regra> findRegrasAtivasNoPeriodo(
+            @Param("dataInicio") LocalDate dataInicio,
+            @Param("dataFim") LocalDate dataFim,
+            @Param("status") StatusRegra status
+    );
+}

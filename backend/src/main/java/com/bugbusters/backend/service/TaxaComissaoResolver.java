@@ -53,7 +53,28 @@ public class TaxaComissaoResolver {
         this.regraRepository = regraRepository;
     }
 
+    /**
+     * Contexto de dados pré-carregados para resolução de comissões em lote de uma competência (BACK-14).
+     * Elimina consultas repetitivas N+1 ao banco de dados durante fechamentos mensais.
+     */
+    public record ContextoCompetencia(
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            List<Regra> regrasAtivas,
+            List<BaseComiss> basesComissao
+    ) {}
+
+    public ContextoCompetencia carregarContexto(LocalDate inicio, LocalDate fim) {
+        List<Regra> regras = regraRepository.findRegrasAtivasNoPeriodo(inicio, fim, StatusRegra.ATIVA);
+        List<BaseComiss> bases = baseComissRepository.findAllComRelacionamentos();
+        return new ContextoCompetencia(inicio, fim, regras, bases);
+    }
+
     public ResolucaoTaxaResult resolverTaxa(Sale sale) {
+        return resolverTaxa(sale, null);
+    }
+
+    public ResolucaoTaxaResult resolverTaxa(Sale sale, ContextoCompetencia contexto) {
         if (sale == null) {
             return ResolucaoTaxaResult.impedido("Dados da venda não informados");
         }
@@ -103,15 +124,22 @@ public class TaxaComissaoResolver {
         Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : null;
         String canal = sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO";
 
-        List<Regra> regras = regraRepository.findRegrasAplicaveis(
-                saleDate,
-                brand.getCode(),
-                codLoja,
-                position.getCode(),
-                registration.getRegistration(),
-                canal,
-                StatusRegra.ATIVA
-        );
+        List<Regra> regras;
+        if (contexto != null && contexto.regrasAtivas() != null) {
+            regras = contexto.regrasAtivas().stream()
+                    .filter(r -> regraAplica(r, saleDate, brand.getCode(), codLoja, position.getCode(), registration.getRegistration(), canal))
+                    .toList();
+        } else {
+            regras = regraRepository.findRegrasAplicaveis(
+                    saleDate,
+                    brand.getCode(),
+                    codLoja,
+                    position.getCode(),
+                    registration.getRegistration(),
+                    canal,
+                    StatusRegra.ATIVA
+            );
+        }
 
         // 1.1 Exclui registro técnico padrão usado como referência para taxa base
         regras = regras.stream()
@@ -125,7 +153,7 @@ public class TaxaComissaoResolver {
 
         if (!regras.isEmpty()) {
             if (regras.size() == 1) {
-                return resolverTaxaRegraVencedora(regras.get(0), sale);
+                return resolverTaxaRegraVencedora(regras.get(0), sale, contexto);
             }
 
             // Múltiplas regras aplicáveis: aplicar critério determinístico por nível de especificidade
@@ -159,11 +187,11 @@ public class TaxaComissaoResolver {
             }
 
             Regra regraVencedora = regrasMaisEspecificas.get(0);
-            return resolverTaxaRegraVencedora(regraVencedora, sale);
+            return resolverTaxaRegraVencedora(regraVencedora, sale, contexto);
         }
 
         // 2ª Prioridade (Fallback): Buscar taxa padrão em tb_basecomiss (Marca + Cargo na competência)
-        Optional<BigDecimal> baseRateOpt = buscarTaxaBase(brand, position, saleDate);
+        Optional<BigDecimal> baseRateOpt = buscarTaxaBase(brand, position, saleDate, contexto);
 
         if (baseRateOpt.isPresent()) {
             BigDecimal taxa = baseRateOpt.get();
@@ -212,6 +240,10 @@ public class TaxaComissaoResolver {
      * Resolve e valida a taxa final da regra vencedora, aplicando ajustes sobre a base quando aplicável.
      */
     private ResolucaoTaxaResult resolverTaxaRegraVencedora(Regra regra, Sale sale) {
+        return resolverTaxaRegraVencedora(regra, sale, null);
+    }
+
+    private ResolucaoTaxaResult resolverTaxaRegraVencedora(Regra regra, Sale sale, ContextoCompetencia contexto) {
         TipoOperacaoBase operacao = regra.getTipoOperacao() != null
                 ? regra.getTipoOperacao()
                 : TipoOperacaoBase.DEFINIR_TAXA;
@@ -240,7 +272,7 @@ public class TaxaComissaoResolver {
         Position position = sale.getRegistration().getPosition();
         LocalDate saleDate = sale.getSaleDate();
 
-        Optional<BigDecimal> baseRateOpt = buscarTaxaBase(brand, position, saleDate);
+        Optional<BigDecimal> baseRateOpt = buscarTaxaBase(brand, position, saleDate, contexto);
         if (baseRateOpt.isEmpty()) {
             return ResolucaoTaxaResult.impedido(String.format(
                     "Impedimento de cálculo: a regra ID %d ('%s') requer taxa base contratual para o ajuste (%s), mas nenhuma taxa padrão foi encontrada em tb_basecomiss para Marca '%s' e Cargo '%s' na competência.",
@@ -327,11 +359,20 @@ public class TaxaComissaoResolver {
      * Consulta a taxa padrão em tb_basecomiss para o par Marca + Cargo na competência ou mais recente.
      */
     private Optional<BigDecimal> buscarTaxaBase(Brand brand, Position position, LocalDate saleDate) {
+        return buscarTaxaBase(brand, position, saleDate, null);
+    }
+
+    private Optional<BigDecimal> buscarTaxaBase(Brand brand, Position position, LocalDate saleDate, ContextoCompetencia contexto) {
         if (brand == null || position == null || saleDate == null) {
             return Optional.empty();
         }
 
         LocalDate mesRef = saleDate.withDayOfMonth(1);
+        if (contexto != null && contexto.basesComissao() != null) {
+            return buscarBaseComissEmMemoria(contexto.basesComissao(), brand, position, mesRef)
+                    .map(BaseComiss::getPercentage);
+        }
+
         Optional<BaseComiss> baseComissOpt = Optional.empty();
 
         if (brand.getId() != null && position.getId() != null) {
@@ -352,6 +393,69 @@ public class TaxaComissaoResolver {
         }
 
         return baseComissOpt.map(BaseComiss::getPercentage);
+    }
+
+    private boolean regraAplica(Regra r, LocalDate saleDate, Integer codMarca, Integer codLoja, Integer codCargo, String matricula, String canal) {
+        if (r.getStatus() != StatusRegra.ATIVA || r.getRemovidoEm() != null) {
+            return false;
+        }
+        if (r.getDataInicio().isAfter(saleDate) || r.getDataFim().isBefore(saleDate)) {
+            return false;
+        }
+        if (r.getCodMarca() != null && !r.getCodMarca().equals(codMarca)) {
+            return false;
+        }
+        if (r.getCodLoja() != null && !r.getCodLoja().equals(codLoja)) {
+            return false;
+        }
+        if (r.getCodCargo() != null && !r.getCodCargo().equals(codCargo)) {
+            return false;
+        }
+        if (r.getMatricula() != null && !r.getMatricula().equals(matricula)) {
+            return false;
+        }
+        if (r.getCanal() != null && (canal == null || !r.getCanal().equalsIgnoreCase(canal))) {
+            return false;
+        }
+        return true;
+    }
+
+    private Optional<BaseComiss> buscarBaseComissEmMemoria(List<BaseComiss> bases, Brand brand, Position position, LocalDate mesRef) {
+        if (bases == null || bases.isEmpty()) {
+            return Optional.empty();
+        }
+        if (brand.getId() != null && position.getId() != null) {
+            Optional<BaseComiss> opt = bases.stream()
+                    .filter(b -> b.getBrand() != null && brand.getId().equals(b.getBrand().getId())
+                            && b.getPosition() != null && position.getId().equals(b.getPosition().getId())
+                            && mesRef.equals(b.getReferenceMonth()))
+                    .findFirst();
+            if (opt.isPresent()) {
+                return opt;
+            }
+            opt = bases.stream()
+                    .filter(b -> b.getBrand() != null && brand.getId().equals(b.getBrand().getId())
+                            && b.getPosition() != null && position.getId().equals(b.getPosition().getId()))
+                    .findFirst();
+            if (opt.isPresent()) {
+                return opt;
+            }
+        }
+        if (brand.getCode() != null && position.getCode() != null) {
+            Optional<BaseComiss> opt = bases.stream()
+                    .filter(b -> b.getBrand() != null && brand.getCode().equals(b.getBrand().getCode())
+                            && b.getPosition() != null && position.getCode().equals(b.getPosition().getCode())
+                            && mesRef.equals(b.getReferenceMonth()))
+                    .findFirst();
+            if (opt.isPresent()) {
+                return opt;
+            }
+            return bases.stream()
+                    .filter(b -> b.getBrand() != null && brand.getCode().equals(b.getBrand().getCode())
+                            && b.getPosition() != null && position.getCode().equals(b.getPosition().getCode()))
+                    .findFirst();
+        }
+        return Optional.empty();
     }
 
     /**

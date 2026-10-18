@@ -103,7 +103,7 @@ class CalculoServiceTest {
     void deveCalcularComissaoPrimeiraVezEGerarLog() {
         when(resultadoCalculoRepository.findByIdVenda(ID_VENDA))
                 .thenReturn(Optional.empty());
-        when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
+        lenient().when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
                 .thenReturn(Optional.empty());
 
         when(resultadoCalculoRepository.save(any(ResultadoCalculo.class)))
@@ -221,7 +221,7 @@ class CalculoServiceTest {
                         "INDIVIDUAL"
                 )));
 
-        when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
+        lenient().when(resultadoCalculoRepository.findByMatriculaAndDataVendaAndRegraId(MATRICULA, DATA_VENDA, 1L))
                 .thenReturn(Optional.empty());
 
         when(resultadoCalculoRepository.save(any(ResultadoCalculo.class)))
@@ -609,7 +609,7 @@ class CalculoServiceTest {
         when(saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(
                 LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)
         )).thenReturn(List.of(sale));
-        when(saleRepository.findByIdForUpdate(idVenda)).thenReturn(Optional.of(sale));
+        lenient().when(saleRepository.findByIdForUpdate(idVenda)).thenReturn(Optional.of(sale));
         when(resultadoCalculoRepository.findByIdVenda(idVenda)).thenReturn(Optional.of(existente));
 
         CalculoCompetenciaResponseDTO response = calculoService.calcularPorCompetencia("2026-09");

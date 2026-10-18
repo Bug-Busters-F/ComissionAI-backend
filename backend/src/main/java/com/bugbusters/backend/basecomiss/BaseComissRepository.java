@@ -62,5 +62,8 @@ public interface BaseComissRepository extends JpaRepository<BaseComiss, UUID> {
 
     @org.springframework.data.jpa.repository.Query("SELECT count(b) FROM BaseComiss b WHERE b.referenceMonth BETWEEN :inicio AND :fim")
     long countByReferenceMonthBetween(@org.springframework.data.repository.query.Param("inicio") LocalDate inicio, @org.springframework.data.repository.query.Param("fim") LocalDate fim);
+
+    @org.springframework.data.jpa.repository.Query("SELECT b FROM BaseComiss b JOIN FETCH b.brand JOIN FETCH b.position ORDER BY b.referenceMonth DESC")
+    java.util.List<BaseComiss> findAllComRelacionamentos();
 }
 

@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface BrandRepository extends JpaRepository<Brand, UUID>{
     Optional<Brand> findByCode(Integer code);
+    Optional<Brand> findByDescription(String description);
 }
