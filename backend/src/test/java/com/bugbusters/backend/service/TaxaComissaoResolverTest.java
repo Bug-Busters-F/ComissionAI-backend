@@ -24,7 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.bugbusters.backend.basecomiss.BaseComiss;
-import com.bugbusters.backend.basecomiss.BaseComissRepository;
+import com.bugbusters.backend.service.CoberturaBaseService;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
@@ -39,7 +39,7 @@ import com.bugbusters.backend.store.Store;
 class TaxaComissaoResolverTest {
 
     @Mock
-    private BaseComissRepository baseComissRepository;
+    private CoberturaBaseService coberturaBaseService;
 
     @Mock
     private RegraRepository regraRepository;
@@ -130,12 +130,9 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.1000"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
-                eq(brand.getId()), eq(position.getId()), eq(LocalDate.of(2026, 9, 1))
-        )).thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(
+                eq(brand.getCode()), eq(position.getCode()), any()
+        )).thenReturn(Optional.of(new BigDecimal("0.1000")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -160,11 +157,9 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regraPadraoTecnica));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0250"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
-                eq(brand.getId()), eq(position.getId()), eq(LocalDate.of(2026, 9, 1))
-        )).thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(
+                eq(brand.getCode()), eq(position.getCode()), any()
+        )).thenReturn(Optional.of(new BigDecimal("0.0250")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -179,11 +174,7 @@ class TaxaComissaoResolverTest {
     void deveRetornarImpedimentoQuandoTaxaNaoEncontrada() {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.empty());
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(any(), any()))
-                .thenReturn(Optional.empty());
-        when(baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(any(), any()))
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
                 .thenReturn(Optional.empty());
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
@@ -385,10 +376,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0200"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0200")));
 
         // Venda exatamente no valor mínimo (não atende exclusivo)
         sale.setValue(new BigDecimal("1000.00"));
@@ -440,10 +429,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0200"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0200")));
 
         // Venda exatamente no valor máximo (não atende exclusivo)
         sale.setValue(new BigDecimal("5000.00"));
@@ -514,10 +501,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0300")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -540,10 +525,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0300")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -564,10 +547,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0300")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -588,10 +569,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300")); // Base 3%
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0300")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -612,11 +591,7 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.empty());
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(any(), any()))
-                .thenReturn(Optional.empty());
-        when(baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(any(), any()))
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
                 .thenReturn(Optional.empty());
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
@@ -638,10 +613,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0300")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 
@@ -661,10 +634,8 @@ class TaxaComissaoResolverTest {
         when(regraRepository.findRegrasAplicaveis(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(regra));
 
-        BaseComiss baseComiss = new BaseComiss(brand, position, new BigDecimal("0.0300"));
-        baseComiss.setReferenceMonth(LocalDate.of(2026, 9, 1));
-        when(baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(any(), any(), any()))
-                .thenReturn(Optional.of(baseComiss));
+        when(coberturaBaseService.obterTaxaBase(any(), any(), any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0300")));
 
         ResolucaoTaxaResult result = resolver.resolverTaxa(sale);
 

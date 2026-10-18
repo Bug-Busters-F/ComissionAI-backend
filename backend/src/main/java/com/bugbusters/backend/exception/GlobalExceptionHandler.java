@@ -84,6 +84,33 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
         }
 
+        @ExceptionHandler(AusenciaCoberturaException.class)
+        public ResponseEntity<ApiErrorResponse> handleAusenciaCobertura(
+                        AusenciaCoberturaException ex, HttpServletRequest request) {
+
+                List<CampoInvalidoDTO> validacoes = ex.getReferenciasFaltantes().stream()
+                                .map(ref -> new CampoInvalidoDTO(
+                                                "marca:" + (ref.codMarca() != null ? ref.codMarca() : "null")
+                                                                + "/cargo:" + (ref.codCargo() != null ? ref.codCargo() : "null"),
+                                                String.format("Marca '%s' (%s) e Cargo '%s' (%s) sem taxa base para a competência %s",
+                                                                ref.descrMarca() != null ? ref.descrMarca() : "-",
+                                                                ref.codMarca() != null ? ref.codMarca() : "-",
+                                                                ref.descriCargo() != null ? ref.descriCargo() : "-",
+                                                                ref.codCargo() != null ? ref.codCargo() : "-",
+                                                                ref.competencia())))
+                                .toList();
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                "Bad Request",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                validacoes);
+
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+
         @ExceptionHandler(BusinessException.class)
         public ResponseEntity<ApiErrorResponse> handleBusinessException(
                         BusinessException ex, HttpServletRequest request) {
@@ -172,5 +199,18 @@ public class GlobalExceptionHandler {
                                 null);
 
                 return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(error);
+        }
+
+        @ExceptionHandler(AiInvalidResponseException.class)
+        public ResponseEntity<ApiErrorResponse> handleAiInvalidResponse(AiInvalidResponseException ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_GATEWAY.value(),
+                                "Resposta Inválida do Serviço de IA",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                null);
+
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error);
         }
 }

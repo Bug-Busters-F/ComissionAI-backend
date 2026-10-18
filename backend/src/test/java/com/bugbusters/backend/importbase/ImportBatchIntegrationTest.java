@@ -38,7 +38,7 @@ class ImportBatchIntegrationTest {
         }), ImportType.SALES).totalLinhas());
         assertEquals(1L, complete(excel(new Object[][] {
                 {991, "Marca Batch", 991, "Cargo Batch", 0.05}
-        }), ImportType.COMISSIONS).totalLinhas());
+        }), ImportType.COMISSIONS, "2026-10").totalLinhas());
         assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_EXECUTION WHERE STATUS = 'COMPLETED'", Long.class) >= 3);
         assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_sales WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
         for (String filePath : jdbc.queryForList("SELECT PARAMETER_VALUE FROM BATCH_JOB_EXECUTION_PARAMS WHERE PARAMETER_NAME = 'filePath'", String.class)) {
@@ -166,7 +166,11 @@ class ImportBatchIntegrationTest {
     }
 
     private ImportResponse complete(MockMultipartFile file, ImportType type) throws Exception {
-        return awaitReport(service.processImport(file, type).reportId());
+        return complete(file, type, null);
+    }
+
+    private ImportResponse complete(MockMultipartFile file, ImportType type, String competencia) throws Exception {
+        return awaitReport(service.processImport(file, type, competencia).reportId());
     }
 
     private ImportResponse awaitReport(long id) throws Exception {

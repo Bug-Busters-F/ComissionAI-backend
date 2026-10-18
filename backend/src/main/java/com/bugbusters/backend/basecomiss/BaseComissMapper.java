@@ -22,16 +22,23 @@ public class BaseComissMapper {
         this.positionResolver = positionResolver;
     }
 
-    public BaseComiss toEntity(CommissFileRow row) {
-
+    public BaseComiss toEntity(CommissFileRow row, java.time.LocalDate referenceMonth) {
+        if (referenceMonth == null) {
+            throw new com.bugbusters.backend.exception.BusinessException("Mês de referência (competência) é obrigatório.");
+        }
         Brand brand = brandResolver.resolveOrCreate(row.getBrandCode(), row.getBrandDescription());
-
         Position position = positionResolver.resolveOrCreate(row.getPositionCode(), row.getPositionDescription());
 
         return new BaseComiss(
                 brand,
                 position,
-                row.getPercentage()
+                row.getPercentage(),
+                referenceMonth
         );
+    }
+
+    @Deprecated
+    public BaseComiss toEntity(CommissFileRow row) {
+        return toEntity(row, java.time.LocalDate.now().withDayOfMonth(1));
     }
 }

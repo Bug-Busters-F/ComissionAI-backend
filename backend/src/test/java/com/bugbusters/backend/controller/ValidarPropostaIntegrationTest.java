@@ -129,11 +129,10 @@ class ValidarPropostaIntegrationTest {
             return registrationRepository.save(r);
         });
 
-        baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(10, 100).orElseGet(() -> {
-            BaseComiss bc = new BaseComiss(marca, cargo, new BigDecimal("0.0250"));
-            bc.setReferenceMonth(LocalDate.of(2025, 1, 1));
-            return baseComissRepository.save(bc);
-        });
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 100, LocalDate.of(2026, 10, 1)).isEmpty()) {
+            BaseComiss bc = new BaseComiss(marca, cargo, new BigDecimal("0.0250"), LocalDate.of(2026, 10, 1));
+            baseComissRepository.save(bc);
+        }
     }
 
 

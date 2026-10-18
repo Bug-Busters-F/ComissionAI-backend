@@ -76,13 +76,39 @@ public class ImportTasklet implements Tasklet {
                     sales.save(sale);
                     recordWrite(contribution);
                 });
-                case COMISSIONS -> commissReader.forEach(input, row -> {
-                    required(row.getBrandCode(), "código da marca");
-                    required(row.getPositionCode(), "código do cargo");
-                    required(row.getPercentage(), "percentual");
-                    commissions.save(commissMapper.toEntity(row));
-                    recordWrite(contribution);
-                });
+                case COMISSIONS -> {
+                    String compParam = parameters.getString("competencia");
+                    if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                        throw new BusinessException("Competência não informada ou inválida para importação de comissões.");
+                    }
+                    java.time.LocalDate referenceMonth = java.time.YearMonth.parse(compParam).atDay(1);
+                    java.util.Set<String> paresArquivo = new java.util.HashSet<>();
+
+                    commissReader.forEach(input, row -> {
+                        required(row.getBrandCode(), "código da marca");
+                        required(row.getPositionCode(), "código do cargo");
+                        required(row.getPercentage(), "percentual");
+
+                        String par = row.getBrandCode() + ":" + row.getPositionCode();
+                        if (!paresArquivo.add(par)) {
+                            throw new BusinessException(String.format(
+                                    "Linha duplicada na planilha para marca %d e cargo %d na competência %s.",
+                                    row.getBrandCode(), row.getPositionCode(), compParam
+                            ));
+                        }
+
+                        if (commissions.existsByBrandCodeAndPositionCodeAndReferenceMonth(
+                                row.getBrandCode(), row.getPositionCode(), referenceMonth)) {
+                            throw new BusinessException(String.format(
+                                    "Já existe taxa base cadastrada para a marca %d e cargo %d na competência %s.",
+                                    row.getBrandCode(), row.getPositionCode(), compParam
+                            ));
+                        }
+
+                        commissions.save(commissMapper.toEntity(row, referenceMonth));
+                        recordWrite(contribution);
+                    });
+                }
             }
         }
         entityManager.flush();

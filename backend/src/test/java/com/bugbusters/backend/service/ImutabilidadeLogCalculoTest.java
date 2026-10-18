@@ -82,6 +82,9 @@ class ImutabilidadeLogCalculoTest {
     @Autowired
     private StoreRepository storeRepository;
 
+    @Autowired
+    private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
+
     private Brand brand1;
     private Store store1;
     private Position position1;
@@ -123,6 +126,12 @@ class ImutabilidadeLogCalculoTest {
             r.setAdmissDate(LocalDate.of(2025, 1, 1));
             return registrationRepository.save(r);
         });
+
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, LocalDate.of(2026, 9, 1)).isEmpty()) {
+            baseComissRepository.save(new com.bugbusters.backend.basecomiss.BaseComiss(
+                    brand1, position1, new BigDecimal("0.0200"), LocalDate.of(2026, 9, 1)
+            ));
+        }
     }
 
     @Test

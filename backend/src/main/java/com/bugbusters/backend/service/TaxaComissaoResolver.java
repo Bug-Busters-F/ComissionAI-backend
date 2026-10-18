@@ -10,8 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import com.bugbusters.backend.basecomiss.BaseComiss;
-import com.bugbusters.backend.basecomiss.BaseComissRepository;
+import java.time.YearMonth;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
@@ -45,11 +44,11 @@ public class TaxaComissaoResolver {
     private static final Logger log = LoggerFactory.getLogger(TaxaComissaoResolver.class);
     private static final Long REGRA_BASE_ID = 1L;
 
-    private final BaseComissRepository baseComissRepository;
+    private final CoberturaBaseService coberturaBaseService;
     private final RegraRepository regraRepository;
 
-    public TaxaComissaoResolver(BaseComissRepository baseComissRepository, RegraRepository regraRepository) {
-        this.baseComissRepository = baseComissRepository;
+    public TaxaComissaoResolver(CoberturaBaseService coberturaBaseService, RegraRepository regraRepository) {
+        this.coberturaBaseService = coberturaBaseService;
         this.regraRepository = regraRepository;
     }
 
@@ -324,34 +323,18 @@ public class TaxaComissaoResolver {
     }
 
     /**
-     * Consulta a taxa padrão em tb_basecomiss para o par Marca + Cargo na competência ou mais recente.
+     * Consulta a taxa padrão em tb_basecomiss delegando exclusivamente para CoberturaBaseService.
+     * Regra adotada: reference_month estritamente igual à competência da venda.
      */
     private Optional<BigDecimal> buscarTaxaBase(Brand brand, Position position, LocalDate saleDate) {
         if (brand == null || position == null || saleDate == null) {
             return Optional.empty();
         }
-
-        LocalDate mesRef = saleDate.withDayOfMonth(1);
-        Optional<BaseComiss> baseComissOpt = Optional.empty();
-
-        if (brand.getId() != null && position.getId() != null) {
-            baseComissOpt = baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
-                    brand.getId(), position.getId(), mesRef
-            );
-            if (baseComissOpt.isEmpty()) {
-                baseComissOpt = baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(
-                        brand.getId(), position.getId()
-                );
-            }
+        if (brand.getCode() == null || position.getCode() == null) {
+            return Optional.empty();
         }
-
-        if (baseComissOpt.isEmpty() && brand.getCode() != null && position.getCode() != null) {
-            baseComissOpt = baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(
-                    brand.getCode(), position.getCode()
-            );
-        }
-
-        return baseComissOpt.map(BaseComiss::getPercentage);
+        YearMonth ym = YearMonth.from(saleDate);
+        return coberturaBaseService.obterTaxaBase(brand.getCode(), position.getCode(), ym);
     }
 
     /**

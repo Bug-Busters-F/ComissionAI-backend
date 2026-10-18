@@ -37,8 +37,17 @@ public class ImportService {
     }
 
     public ImportResponse processImport(MultipartFile file, ImportType importType) {
+        return processImport(file, importType, null);
+    }
+
+    public ImportResponse processImport(MultipartFile file, ImportType importType, String competencia) {
         if (file == null || file.isEmpty() || importType == null) {
             throw new BusinessException("Informe um arquivo não vazio e o tipo de importação.");
+        }
+        if (importType == ImportType.COMISSIONS) {
+            if (competencia == null || !competencia.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                throw new BusinessException("Parâmetro 'competencia' é obrigatório no formato YYYY-MM para importação de comissões.");
+            }
         }
         Path upload = null;
         boolean submitted = false;
@@ -48,12 +57,15 @@ public class ImportService {
                 Files.copy(input, upload, StandardCopyOption.REPLACE_EXISTING);
             }
             String filename = file.getOriginalFilename() == null ? "arquivo" : file.getOriginalFilename();
-            var parameters = new JobParametersBuilder()
+            var parametersBuilder = new JobParametersBuilder()
                     .addString("requestId", UUID.randomUUID().toString())
                     .addString("importType", importType.name())
                     .addString("filename", filename, false)
-                    .addString("filePath", upload.toString(), false)
-                    .toJobParameters();
+                    .addString("filePath", upload.toString(), false);
+            if (competencia != null) {
+                parametersBuilder.addString("competencia", competencia);
+            }
+            var parameters = parametersBuilder.toJobParameters();
             var execution = jobOperator.start(job, parameters);
             submitted = true;
             // Executor rejection does not invoke afterJob; its execution is marked FAILED.

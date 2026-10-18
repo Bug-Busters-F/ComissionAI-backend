@@ -10,10 +10,12 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraRequest;
 import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraResponse;
+import com.bugbusters.backend.exception.AiInvalidResponseException;
 import com.bugbusters.backend.exception.AiServiceUnavailableException;
 import com.bugbusters.backend.exception.AiTimeoutException;
 
@@ -81,6 +83,8 @@ public class AiServiceClient {
             throw new AiServiceUnavailableException("Não foi possível conectar ao serviço de IA em Python. Verifique se o módulo está ativo.");
         } catch (RestClientResponseException ex) {
             throw new AiServiceUnavailableException("Erro retornado pelo orquestrador de IA: " + ex.getStatusText());
+        } catch (RestClientException ex) {
+            throw new AiInvalidResponseException("O serviço de IA retornou uma resposta em formato inválido.", ex);
         }
     }
 }

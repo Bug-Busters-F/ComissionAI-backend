@@ -61,24 +61,35 @@ public class CalculoService {
     private final RegraRepository regraRepository;
     private final SaleRepository saleRepository;
     private final TaxaComissaoResolver taxaComissaoResolver;
+    private final CoberturaBaseService coberturaBaseService;
 
     @org.springframework.beans.factory.annotation.Autowired
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
                           LogCalculoRepository logCalculoRepository,
                           RegraRepository regraRepository,
                           SaleRepository saleRepository,
-                          TaxaComissaoResolver taxaComissaoResolver) {
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          CoberturaBaseService coberturaBaseService) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.regraRepository = regraRepository;
         this.saleRepository = saleRepository;
         this.taxaComissaoResolver = taxaComissaoResolver;
+        this.coberturaBaseService = coberturaBaseService;
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
                           LogCalculoRepository logCalculoRepository,
                           RegraRepository regraRepository) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null, null);
     }
 
     /**
@@ -132,7 +143,12 @@ public class CalculoService {
             );
         }
 
-        // 2. Valida vínculos essenciais e seleciona taxa (S1-B08)
+        // 2. Validação rigorosa de cobertura de taxa base ANTES de qualquer cálculo ou escrita
+        if (coberturaBaseService != null) {
+            coberturaBaseService.validarCobertura(sale);
+        }
+
+        // 3. Valida vínculos essenciais e seleciona taxa (S1-B08)
         ResolucaoTaxaResult resolucao = taxaComissaoResolver != null
                 ? taxaComissaoResolver.resolverTaxa(sale)
                 : ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
@@ -306,6 +322,11 @@ public class CalculoService {
         LocalDate fim = ym.atEndOfMonth();
 
         List<Sale> vendas = saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(inicio, fim);
+
+        // Validação centralizada de cobertura por marca, cargo e competência ANTES dos cálculos e escritas
+        if (coberturaBaseService != null && !vendas.isEmpty()) {
+            coberturaBaseService.validarCobertura(vendas, ym);
+        }
 
         List<CalculoItemResponseDTO> sucessos = new ArrayList<>();
         List<CalculoImpedimentoDTO> impedimentos = new ArrayList<>();
@@ -557,6 +578,13 @@ public class CalculoService {
         if (existenteOpt.isPresent()) {
             ResultadoCalculo existente = existenteOpt.get();
             return tratarResultadoExistente(request, existente);
+        }
+
+        // Validação de cobertura ANTES de qualquer escrita em tb_resultado_calculo ou log imutável
+        if (coberturaBaseService != null) {
+            coberturaBaseService.validarCoberturaAvulsa(
+                    request.codMarca(), request.descrMarca(), request.matricula(), request.dataVenda()
+            );
         }
 
         // 2. Não existe: efetua novo cálculo e persiste resultado e log imutável

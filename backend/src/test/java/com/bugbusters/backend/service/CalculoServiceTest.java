@@ -73,6 +73,9 @@ class CalculoServiceTest {
     @Mock
     private TaxaComissaoResolver taxaComissaoResolver;
 
+    @Mock
+    private CoberturaBaseService coberturaBaseService;
+
     @InjectMocks
     private CalculoService calculoService;
 

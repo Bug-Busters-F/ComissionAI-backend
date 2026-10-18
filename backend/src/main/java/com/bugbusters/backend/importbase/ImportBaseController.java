@@ -27,9 +27,17 @@ public class ImportBaseController {
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ImportResponse> upload(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("importType") ImportType importType
+            @RequestParam("importType") ImportType importType,
+            @RequestParam(value = "competencia", required = false) String competencia
         ) {
-            ImportResponse response = importService.processImport(file, importType);
+            if (importType == ImportType.COMISSIONS) {
+                if (competencia == null || !competencia.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                    throw new com.bugbusters.backend.exception.BusinessException(
+                            "Parâmetro 'competencia' é obrigatório no formato YYYY-MM para importação de comissões."
+                    );
+                }
+            }
+            ImportResponse response = importService.processImport(file, importType, competencia);
             return ResponseEntity.accepted()
                     .location(URI.create("/api/v1/imports/" + response.reportId()))
                     .body(response);

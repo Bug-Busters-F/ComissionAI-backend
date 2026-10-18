@@ -1,6 +1,8 @@
 package com.bugbusters.backend.controller;
 
 import com.bugbusters.backend.service.client.AiServiceClient;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,15 @@ class InterpretadorPropostasIntegrationTest {
     @Autowired
     private AiServiceClient aiServiceClient;
 
+    @Autowired
+    private com.bugbusters.backend.brand.BrandRepository brandRepository;
+
+    @Autowired
+    private com.bugbusters.backend.position.PositionRepository positionRepository;
+
+    @Autowired
+    private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
+
     private MockMvc mockMvc;
     private MockRestServiceServer mockServer;
 
@@ -47,6 +58,26 @@ class InterpretadorPropostasIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
         mockServer = MockRestServiceServer.bindTo(aiRestClientBuilder).build();
         aiServiceClient.setAiRestClient(aiRestClientBuilder.build());
+
+        var brand = brandRepository.findByCode(10).orElseGet(() -> {
+            var b = new com.bugbusters.backend.brand.Brand();
+            b.setCode(10);
+            b.setDescription("PRETO");
+            return brandRepository.save(b);
+        });
+
+        var pos = positionRepository.findByCode(150).orElseGet(() -> {
+            var p = new com.bugbusters.backend.position.Position();
+            p.setCode(150);
+            p.setDescription("GERENTE DE LOJA");
+            return positionRepository.save(p);
+        });
+
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, LocalDate.of(2026, 10, 1)).isEmpty()) {
+            baseComissRepository.save(new com.bugbusters.backend.basecomiss.BaseComiss(
+                    brand, pos, new BigDecimal("0.0250"), LocalDate.of(2026, 10, 1)
+            ));
+        }
     }
 
     @Test
@@ -70,7 +101,7 @@ class InterpretadorPropostasIntegrationTest {
                 },
                 {
                   "idLocal": "p2",
-                  "condicoes": {"codLoja": 75, "faixaValor": {"campo": "VENDA", "min": "5000.00", "max": null, "minInclusivo": false, "maxInclusivo": false}},
+                  "condicoes": {"codMarca": 10, "codCargo": 150, "codLoja": 75, "faixaValor": {"campo": "VENDA", "min": "5000.00", "max": null, "minInclusivo": false, "maxInclusivo": false}},
                   "taxa": null,
                   "dataInicio": "2026-10-01", "dataFim": "2026-10-31",
                   "origem": {"trecho": "Para a loja 75, pagar taxa base + 1.5% em vendas acima de R$ 5.000."},
@@ -103,12 +134,12 @@ class InterpretadorPropostasIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.quantidadeBlocos", is(2)))
                 .andExpect(jsonPath("$.propostas", hasSize(2)))
-                .andExpect(jsonPath("$.propostas[0].blocoId", is("bloco-1")))
+                .andExpect(jsonPath("$.propostas[0].blocoId", is("p1")))
                 .andExpect(jsonPath("$.propostas[0].filtros.canal", is("ECOMMERCE")))
                 .andExpect(jsonPath("$.propostas[0].taxaFinal", is(0.0500)))
                 .andExpect(jsonPath("$.propostas[0].origensPorCampo.marca", is("BASE_DADOS")))
                 .andExpect(jsonPath("$.propostas[0].origensPorCampo.dataInicio", is("CONTEXTO")))
-                .andExpect(jsonPath("$.propostas[1].blocoId", is("bloco-2")))
+                .andExpect(jsonPath("$.propostas[1].blocoId", is("p2")))
                 .andExpect(jsonPath("$.propostas[1].filtros.codLoja", is(75)))
                 .andExpect(jsonPath("$.propostas[1].condicaoValor.valorMinimo", is(5000.0)))
                 .andExpect(jsonPath("$.propostas[1].condicaoValor.minInclusivo", is(false)))
