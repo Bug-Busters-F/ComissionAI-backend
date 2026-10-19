@@ -47,6 +47,28 @@ public class Simulacao {
     @Column(name = "origem_dados", nullable = false, length = 100)
     private String origemDados = "HISTORICO_VENDAS_COMPETENCIA";
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_aceite", nullable = false, length = 30)
+    private StatusAceiteSimulacao statusAceite = StatusAceiteSimulacao.PENDENTE;
+
+    @Column(name = "aceito_em")
+    private OffsetDateTime aceitoEm;
+
+    @Column(name = "aceito_por", length = 150)
+    private String aceitoPor;
+
+    @Column(name = "motivo_aceite", columnDefinition = "TEXT")
+    private String motivoAceite;
+
+    @Column(name = "hash_proposta", length = 64)
+    private String hashProposta;
+
+    @Column(name = "invalidado_em")
+    private OffsetDateTime invalidadoEm;
+
+    @Column(name = "motivo_invalidacao", columnDefinition = "TEXT")
+    private String motivoInvalidacao;
+
     @Column(name = "premissas_snapshot", nullable = false, columnDefinition = "TEXT")
     private String premissasSnapshot;
 
@@ -364,6 +386,27 @@ public class Simulacao {
 
     public int getMudancaFaixa150() { return mudancaFaixa150; }
     public void setMudancaFaixa150(int mudancaFaixa150) { this.mudancaFaixa150 = mudancaFaixa150; }
+
+    public StatusAceiteSimulacao getStatusAceite() { return statusAceite; }
+    public void setStatusAceite(StatusAceiteSimulacao statusAceite) { this.statusAceite = statusAceite; }
+
+    public OffsetDateTime getAceitoEm() { return aceitoEm; }
+    public void setAceitoEm(OffsetDateTime aceitoEm) { this.aceitoEm = aceitoEm; }
+
+    public String getAceitoPor() { return aceitoPor; }
+    public void setAceitoPor(String aceitoPor) { this.aceitoPor = aceitoPor; }
+
+    public String getMotivoAceite() { return motivoAceite; }
+    public void setMotivoAceite(String motivoAceite) { this.motivoAceite = motivoAceite; }
+
+    public String getHashProposta() { return hashProposta; }
+    public void setHashProposta(String hashProposta) { this.hashProposta = hashProposta; }
+
+    public OffsetDateTime getInvalidadoEm() { return invalidadoEm; }
+    public void setInvalidadoEm(OffsetDateTime invalidadoEm) { this.invalidadoEm = invalidadoEm; }
+
+    public String getMotivoInvalidacao() { return motivoInvalidacao; }
+    public void setMotivoInvalidacao(String motivoInvalidacao) { this.motivoInvalidacao = motivoInvalidacao; }
 
     public List<SimulacaoVenda> getVendas() { return vendas; }
     public void setVendas(List<SimulacaoVenda> vendas) { this.vendas = vendas; }

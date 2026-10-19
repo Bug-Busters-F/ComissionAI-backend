@@ -30,6 +30,7 @@ import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Campanha;
 import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.SimulacaoVenda;
+import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.repository.CampanhaRepository;
@@ -75,6 +76,7 @@ public class SimulacaoCenariosService {
     private final ReferenciaPublicoService referenciaPublicoService;
     private final SimulacaoRepository simulacaoRepository;
     private final SimulacaoVendaRepository simulacaoVendaRepository;
+    private final CampanhaSimulacaoValidator campanhaSimulacaoValidator;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -84,13 +86,17 @@ public class SimulacaoCenariosService {
             CampanhaRepository campanhaRepository,
             ReferenciaPublicoService referenciaPublicoService,
             SimulacaoRepository simulacaoRepository,
-            SimulacaoVendaRepository simulacaoVendaRepository) {
+            SimulacaoVendaRepository simulacaoVendaRepository,
+            CampanhaSimulacaoValidator campanhaSimulacaoValidator) {
         this.saleRepository = saleRepository;
         this.baseComissRepository = baseComissRepository;
         this.campanhaRepository = campanhaRepository;
         this.referenciaPublicoService = referenciaPublicoService;
         this.simulacaoRepository = simulacaoRepository;
         this.simulacaoVendaRepository = simulacaoVendaRepository;
+        this.campanhaSimulacaoValidator = campanhaSimulacaoValidator != null 
+                ? campanhaSimulacaoValidator 
+                : new CampanhaSimulacaoValidator(simulacaoRepository, null);
         this.objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
     }
 
@@ -98,14 +104,25 @@ public class SimulacaoCenariosService {
             SaleRepository saleRepository,
             BaseComissRepository baseComissRepository,
             CampanhaRepository campanhaRepository,
+            ReferenciaPublicoService referenciaPublicoService,
+            SimulacaoRepository simulacaoRepository,
+            SimulacaoVendaRepository simulacaoVendaRepository) {
+        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, simulacaoRepository, simulacaoVendaRepository, null);
+    }
+
+    public SimulacaoCenariosService(
+            SaleRepository saleRepository,
+            BaseComissRepository baseComissRepository,
+            CampanhaRepository campanhaRepository,
             ReferenciaPublicoService referenciaPublicoService) {
-        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, null, null);
+        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, null, null, null);
     }
 
     public record ResultadoSimulacaoInterna(
             SimulacaoCenariosResponse response,
             Campanha campanha,
-            List<VendaSimuladaDetalheDTO> todasVendas
+            List<VendaSimuladaDetalheDTO> todasVendas,
+            List<RegraItemRequest> regrasAvaliadas
     ) {}
 
     /**
@@ -143,10 +160,32 @@ public class SimulacaoCenariosService {
         simulacao.setFatorProjecao(resp.fatorProjecao());
         simulacao.setOrigemDados("HISTORICO_VENDAS_COMPETENCIA");
 
+        SimulacaoCenariosRequest snapshotRequest = new SimulacaoCenariosRequest(
+                resp.competencia(),
+                request.campanhaId(),
+                resp.dataInicioCampanha(),
+                resp.dataFimCampanha(),
+                resultado.regrasAvaliadas(),
+                request.limite(),
+                request.pagina(),
+                request.apenasComAlteracao(),
+                request.apenasComMudancaFaixa()
+        );
+
         try {
-            simulacao.setPremissasSnapshot(objectMapper != null ? objectMapper.writeValueAsString(request) : "{}");
+            simulacao.setPremissasSnapshot(objectMapper != null ? objectMapper.writeValueAsString(snapshotRequest) : "{}");
         } catch (Exception e) {
             simulacao.setPremissasSnapshot("{}");
+        }
+
+        if (campanhaSimulacaoValidator != null) {
+            String hash = campanhaSimulacaoValidator.calcularHashPropostaSimulacao(
+                    resp.dataInicioCampanha(),
+                    resp.dataFimCampanha(),
+                    resultado.regrasAvaliadas(),
+                    resp.competencia()
+            );
+            simulacao.setHashProposta(hash);
         }
 
         simulacao.setMemoriaCalculoConsolidada(resp.memoriaCalculoConsolidada());
@@ -305,6 +344,106 @@ public class SimulacaoCenariosService {
                 resp.avisosGerais(),
                 resp.memoriaCalculoConsolidada()
         );
+    }
+
+    /**
+     * Registra o aceite formal de uma simulação persistida sem impedimentos (BACK-8).
+     */
+    @Transactional
+    public AceiteSimulacaoResponse aceitarSimulacao(UUID simulacaoId, AceiteSimulacaoRequest request) {
+        if (simulacaoRepository == null) {
+            throw new BusinessException("Repositório de simulação indisponível.");
+        }
+        Simulacao simulacao = simulacaoRepository.findById(simulacaoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Simulação não encontrada com ID: " + simulacaoId));
+
+        if (simulacao.getQtdVendasComImpedimento() > 0) {
+            throw new BusinessException(String.format(
+                    "Não é permitido aceitar uma simulação que contém %d venda(s) com impedimentos cadastrais ou ausência de taxas base.",
+                    simulacao.getQtdVendasComImpedimento()));
+        }
+
+        Campanha campanha = simulacao.getCampanha();
+        if (campanha == null) {
+            throw new BusinessException("Apenas simulações vinculadas a uma campanha podem ser aceitas formalmente.");
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+
+        // Invalidar aceites anteriores da mesma campanha
+        List<Simulacao> aceitesAnteriores = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
+                campanha.getId(), StatusAceiteSimulacao.ACEITA);
+        for (Simulacao anterior : aceitesAnteriores) {
+            if (!anterior.getId().equals(simulacao.getId())) {
+                anterior.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+                anterior.setInvalidadoEm(agora);
+                anterior.setMotivoInvalidacao("Substituída por novo aceite da simulação (Protocolo: " + simulacao.getProtocolo() + ")");
+            }
+        }
+        if (!aceitesAnteriores.isEmpty()) {
+            simulacaoRepository.saveAll(aceitesAnteriores);
+        }
+
+        simulacao.setStatusAceite(StatusAceiteSimulacao.ACEITA);
+        simulacao.setAceitoEm(agora);
+        simulacao.setAceitoPor(request.aceitoPor());
+        simulacao.setMotivoAceite(request.motivo());
+        simulacao.setInvalidadoEm(null);
+        simulacao.setMotivoInvalidacao(null);
+
+        Simulacao salva = simulacaoRepository.save(simulacao);
+
+        campanha.setSimulacaoAceita(salva);
+        campanhaRepository.save(campanha);
+
+        return new AceiteSimulacaoResponse(
+                salva.getId(),
+                salva.getProtocolo(),
+                campanha.getId(),
+                campanha.getTitulo(),
+                salva.getStatusAceite(),
+                salva.getAceitoEm(),
+                salva.getAceitoPor(),
+                salva.getMotivoAceite(),
+                salva.getHashProposta(),
+                "Aceite formal da simulação registrado com sucesso. A proposta está homologada para ativação."
+        );
+    }
+
+    /**
+     * Invalida o aceite de simulações vigentes de uma campanha quando houver mutação em regras ou vigência (BACK-8).
+     */
+    @Transactional
+    public void invalidarAceiteCampanha(Campanha campanha, String motivo) {
+        if (campanha == null || campanha.getId() == null) {
+            return;
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+        if (campanha.getSimulacaoAceita() != null) {
+            Simulacao sim = campanha.getSimulacaoAceita();
+            sim.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+            sim.setInvalidadoEm(agora);
+            sim.setMotivoInvalidacao(motivo);
+            if (simulacaoRepository != null) {
+                simulacaoRepository.save(sim);
+            }
+            campanha.setSimulacaoAceita(null);
+            campanhaRepository.save(campanha);
+        }
+
+        if (simulacaoRepository != null) {
+            List<Simulacao> ativas = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
+                    campanha.getId(), StatusAceiteSimulacao.ACEITA);
+            for (Simulacao s : ativas) {
+                s.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+                s.setInvalidadoEm(agora);
+                s.setMotivoInvalidacao(motivo);
+            }
+            if (!ativas.isEmpty()) {
+                simulacaoRepository.saveAll(ativas);
+            }
+        }
     }
 
     /**
@@ -505,7 +644,7 @@ public class SimulacaoCenariosService {
         if (vendasDoMes.isEmpty()) {
             avisosGerais.add(String.format("A competência '%s' não possui nenhuma transação de venda registrada.", competenciaStr));
             SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, avisosGerais);
-            return new ResultadoSimulacaoInterna(vazia, campanha, List.of());
+            return new ResultadoSimulacaoInterna(vazia, campanha, List.of(), regrasAvaliadas);
         }
 
         // 4. Recorte de público: identifica vendas que pertencem ao público da proposta (OU entre regras)
@@ -526,7 +665,7 @@ public class SimulacaoCenariosService {
         if (vendasRecortadas.isEmpty()) {
             avisosGerais.add(String.format("Nenhuma venda da competência '%s' pertence ao público-alvo das regras avaliadas.", competenciaStr));
             SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, avisosGerais);
-            return new ResultadoSimulacaoInterna(vazia, campanha, List.of());
+            return new ResultadoSimulacaoInterna(vazia, campanha, List.of(), regrasAvaliadas);
         }
 
         // 5. Processamento por venda dos cenários Base, 100%, 80%, 120% e 150%
@@ -606,7 +745,7 @@ public class SimulacaoCenariosService {
                 memoriaConsolidada
         );
 
-        return new ResultadoSimulacaoInterna(response, campanha, todasVendasSimuladas);
+        return new ResultadoSimulacaoInterna(response, campanha, todasVendasSimuladas, regrasAvaliadas);
     }
 
     private VendaSimuladaDetalheDTO processarVendaSimulada(

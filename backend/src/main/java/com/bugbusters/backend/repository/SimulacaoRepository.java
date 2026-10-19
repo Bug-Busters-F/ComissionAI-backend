@@ -22,4 +22,8 @@ public interface SimulacaoRepository extends JpaRepository<Simulacao, UUID>, Jpa
     Page<Simulacao> findByCampanhaIdOrderByExecutadoEmDesc(Long campanhaId, Pageable pageable);
 
     Page<Simulacao> findByCompetenciaAndCampanhaIdOrderByExecutadoEmDesc(String competencia, Long campanhaId, Pageable pageable);
+
+    Optional<Simulacao> findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(Long campanhaId, com.bugbusters.backend.model.StatusAceiteSimulacao statusAceite);
+
+    java.util.List<Simulacao> findAllByCampanhaIdAndStatusAceite(Long campanhaId, com.bugbusters.backend.model.StatusAceiteSimulacao statusAceite);
 }

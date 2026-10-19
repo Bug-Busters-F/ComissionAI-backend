@@ -157,4 +157,24 @@ public class SimulacaoController {
     ) {
         return ResponseEntity.ok(service.buscarVendaSimuladaDetalhe(id, idVenda));
     }
+
+    @Operation(
+            summary = "Registrar aceite formal de uma simulação (BACK-8)",
+            description = """
+                    Registra o aceite de uma simulação que foi concluída sem impedimentos.
+                    Vincula o aceite à campanha correspondente e congela a assinatura canônica (fingerprint) da proposta.
+                    Bloqueia o aceite caso existam impedimentos cadastrais ou inconsistências de taxa base.
+                    """
+    )
+    @ApiResponse(responseCode = "200", description = "Aceite registrado com sucesso e proposta homologada")
+    @ApiResponse(responseCode = "400", description = "Simulação possui impedimentos cadastrais ou não vinculada à campanha", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Simulação não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/{id}/aceite")
+    public ResponseEntity<AceiteSimulacaoResponse> aceitarSimulacao(
+            @Parameter(description = "Identificador único da simulação (UUID)")
+            @PathVariable UUID id,
+            @Valid @RequestBody AceiteSimulacaoRequest request
+    ) {
+        return ResponseEntity.ok(service.aceitarSimulacao(id, request));
+    }
 }

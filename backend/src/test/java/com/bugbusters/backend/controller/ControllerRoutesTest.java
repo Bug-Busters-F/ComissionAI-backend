@@ -809,7 +809,20 @@ class ControllerRoutesTest {
 
         long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
 
-        // 1. Alterar para ATIVA
+        // 1. Simular e aceitar simulação para conformidade BACK-8
+        String simResponse = mockMvc.perform(post("/api/v1/simulacoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"competencia\":\"2026-10\",\"campanhaId\":%d}", campanhaId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String simId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(simResponse).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/simulacoes/" + simId + "/aceite")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aceitoPor\":\"diretoria@empresa.com\",\"motivo\":\"Aprovado no teste\"}"))
+                .andExpect(status().isOk());
+
+        // 2. Alterar para ATIVA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"estado\": \"ATIVA\"}"))
