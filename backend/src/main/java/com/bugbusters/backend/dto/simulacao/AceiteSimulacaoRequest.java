@@ -10,5 +10,13 @@ public record AceiteSimulacaoRequest(
         String aceitoPor,
 
         @Schema(description = "Justificativa de negócio ou observações sobre o aceite da proposta simulada", example = "Simulação aprovada pela diretoria comercial para a campanha de Black Friday.")
-        String motivo
-) {}
+        String motivo,
+
+        @Schema(description = "Identificador opcional da campanha a ser vinculada a esta simulação", example = "1")
+        Long campanhaId
+) {
+    public AceiteSimulacaoRequest(String aceitoPor, String motivo) {
+        this(aceitoPor, motivo, null);
+    }
+}
+

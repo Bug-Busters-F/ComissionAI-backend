@@ -58,6 +58,30 @@ class ControllerRoutesTest {
     @Autowired
     private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
 
+    @Autowired
+    private com.bugbusters.backend.repository.SimulacaoVendaRepository simulacaoVendaRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.SimulacaoRepository simulacaoRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.RegraRepository regraRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.CampanhaRepository campanhaRepository;
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        for (com.bugbusters.backend.model.Campanha c : campanhaRepository.findAll()) {
+            c.setSimulacaoAceita(null);
+            campanhaRepository.saveAndFlush(c);
+        }
+        simulacaoVendaRepository.deleteAllInBatch();
+        simulacaoRepository.deleteAllInBatch();
+        regraRepository.deleteAllInBatch();
+        campanhaRepository.deleteAllInBatch();
+    }
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();

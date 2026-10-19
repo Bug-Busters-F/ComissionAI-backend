@@ -26,4 +26,6 @@ public interface SimulacaoRepository extends JpaRepository<Simulacao, UUID>, Jpa
     Optional<Simulacao> findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(Long campanhaId, com.bugbusters.backend.model.StatusAceiteSimulacao statusAceite);
 
     java.util.List<Simulacao> findAllByCampanhaIdAndStatusAceite(Long campanhaId, com.bugbusters.backend.model.StatusAceiteSimulacao statusAceite);
+
+    java.util.List<Simulacao> findTop10ByQtdVendasComImpedimentoOrderByExecutadoEmDesc(int qtdVendasComImpedimento);
 }

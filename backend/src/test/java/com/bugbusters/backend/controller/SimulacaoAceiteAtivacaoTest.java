@@ -74,6 +74,19 @@ class SimulacaoAceiteAtivacaoTest {
     private SimulacaoRepository simulacaoRepository;
 
     @Autowired
+    private com.bugbusters.backend.repository.SimulacaoVendaRepository simulacaoVendaRepository;
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        for (Campanha c : campanhaRepository.findAll()) {
+            c.setSimulacaoAceita(null);
+            campanhaRepository.saveAndFlush(c);
+        }
+        simulacaoVendaRepository.deleteAllInBatch();
+        simulacaoRepository.deleteAllInBatch();
+    }
+
+    @Autowired
     private BrandRepository brandRepository;
 
     @Autowired

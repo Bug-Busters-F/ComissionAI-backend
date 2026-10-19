@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse.RegraVinculadaDTO;
@@ -89,6 +90,21 @@ public class CampanhaService {
 
         List<Regra> regrasSalvas = regraRepository.saveAll(regrasParaSalvar);
 
+        if (request.simulacaoAceitaId() != null && simulacaoRepository != null) {
+            simulacaoRepository.findById(request.simulacaoAceitaId()).ifPresent(sim -> {
+                sim.setCampanha(campanhaSalva);
+                if (sim.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+                    sim.setStatusAceite(StatusAceiteSimulacao.ACEITA);
+                    sim.setAceitoEm(OffsetDateTime.now());
+                    sim.setAceitoPor("gestor");
+                    sim.setMotivoAceite("Aceite formal vinculado na criação da campanha");
+                }
+                simulacaoRepository.save(sim);
+                campanhaSalva.setSimulacaoAceita(sim);
+                campanhaRepository.save(campanhaSalva);
+            });
+        }
+
         return mapearParaResponse(campanhaSalva, regrasSalvas);
     }
 
@@ -132,9 +148,37 @@ public class CampanhaService {
     }
 
     @Transactional
+    public CampanhaResponse alterarEstado(Long id, AlterarEstadoCampanhaRequest request) {
+        if (request == null) {
+            return alterarEstado(id, EstadoCampanha.DRAFT, null, null, null);
+        }
+        return alterarEstado(id, request.estado(), request.simulacaoAceitaId(), request.aceitoPor(), request.motivoAceite());
+    }
+
+    @Transactional
     public CampanhaResponse alterarEstado(Long id, EstadoCampanha novoEstado) {
+        return alterarEstado(id, novoEstado, null, null, null);
+    }
+
+    @Transactional
+    public CampanhaResponse alterarEstado(Long id, EstadoCampanha novoEstado, UUID simulacaoAceitaId, String aceitoPor, String motivoAceite) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
+
+        if (simulacaoAceitaId != null && simulacaoRepository != null) {
+            simulacaoRepository.findById(simulacaoAceitaId).ifPresent(sim -> {
+                sim.setCampanha(campanha);
+                if (sim.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+                    sim.setStatusAceite(StatusAceiteSimulacao.ACEITA);
+                    sim.setAceitoEm(OffsetDateTime.now());
+                    sim.setAceitoPor(aceitoPor != null && !aceitoPor.isBlank() ? aceitoPor : "gestor");
+                    sim.setMotivoAceite(motivoAceite != null ? motivoAceite : "Aceite formal vinculado na alteração de estado");
+                }
+                simulacaoRepository.save(sim);
+                campanha.setSimulacaoAceita(sim);
+                campanhaRepository.save(campanha);
+            });
+        }
 
         List<Regra> regras = regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(id);
 

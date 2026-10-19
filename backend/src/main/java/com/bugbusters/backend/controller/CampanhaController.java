@@ -58,7 +58,7 @@ public class CampanhaController {
     public ResponseEntity<CampanhaResponse> alterarEstado(
             @PathVariable Long id,
             @Valid @RequestBody AlterarEstadoCampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.alterarEstado(id, request.estado()));
+        return ResponseEntity.ok(campanhaService.alterarEstado(id, request));
     }
 
     @Operation(

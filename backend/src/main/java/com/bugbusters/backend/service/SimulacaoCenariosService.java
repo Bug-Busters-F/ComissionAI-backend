@@ -69,6 +69,7 @@ public class SimulacaoCenariosService {
     private static final BigDecimal FATOR_120 = new BigDecimal("1.20");
     private static final BigDecimal FATOR_150 = new BigDecimal("1.50");
     private static final BigDecimal DIAS_BASE_MES = new BigDecimal("30");
+    private static final Locale LOCALE_PT_BR = Locale.forLanguageTag("pt-BR");
 
     private final SaleRepository saleRepository;
     private final BaseComissRepository baseComissRepository;
@@ -364,43 +365,49 @@ public class SimulacaoCenariosService {
         }
 
         Campanha campanha = simulacao.getCampanha();
-        if (campanha == null) {
-            throw new BusinessException("Apenas simulações vinculadas a uma campanha podem ser aceitas formalmente.");
+        if (campanha == null && request != null && request.campanhaId() != null && campanhaRepository != null) {
+            campanha = campanhaRepository.findById(request.campanhaId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada com ID: " + request.campanhaId()));
+            simulacao.setCampanha(campanha);
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
 
-        // Invalidar aceites anteriores da mesma campanha
-        List<Simulacao> aceitesAnteriores = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
-                campanha.getId(), StatusAceiteSimulacao.ACEITA);
-        for (Simulacao anterior : aceitesAnteriores) {
-            if (!anterior.getId().equals(simulacao.getId())) {
-                anterior.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
-                anterior.setInvalidadoEm(agora);
-                anterior.setMotivoInvalidacao("Substituída por novo aceite da simulação (Protocolo: " + simulacao.getProtocolo() + ")");
+        if (campanha != null) {
+            // Invalidar aceites anteriores da mesma campanha
+            List<Simulacao> aceitesAnteriores = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
+                    campanha.getId(), StatusAceiteSimulacao.ACEITA);
+            for (Simulacao anterior : aceitesAnteriores) {
+                if (!anterior.getId().equals(simulacao.getId())) {
+                    anterior.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+                    anterior.setInvalidadoEm(agora);
+                    anterior.setMotivoInvalidacao("Substituída por novo aceite da simulação (Protocolo: " + simulacao.getProtocolo() + ")");
+                }
             }
-        }
-        if (!aceitesAnteriores.isEmpty()) {
-            simulacaoRepository.saveAll(aceitesAnteriores);
+            if (!aceitesAnteriores.isEmpty()) {
+                simulacaoRepository.saveAll(aceitesAnteriores);
+            }
         }
 
         simulacao.setStatusAceite(StatusAceiteSimulacao.ACEITA);
         simulacao.setAceitoEm(agora);
-        simulacao.setAceitoPor(request.aceitoPor());
-        simulacao.setMotivoAceite(request.motivo());
+        simulacao.setAceitoPor(request != null && request.aceitoPor() != null && !request.aceitoPor().isBlank() ? request.aceitoPor() : "gestor");
+        simulacao.setMotivoAceite(request != null ? request.motivo() : null);
         simulacao.setInvalidadoEm(null);
         simulacao.setMotivoInvalidacao(null);
 
         Simulacao salva = simulacaoRepository.save(simulacao);
 
-        campanha.setSimulacaoAceita(salva);
-        campanhaRepository.save(campanha);
+        if (campanha != null) {
+            campanha.setSimulacaoAceita(salva);
+            campanhaRepository.save(campanha);
+        }
 
         return new AceiteSimulacaoResponse(
                 salva.getId(),
                 salva.getProtocolo(),
-                campanha.getId(),
-                campanha.getTitulo(),
+                campanha != null ? campanha.getId() : null,
+                campanha != null ? campanha.getTitulo() : "Proposta em Elaboração",
                 salva.getStatusAceite(),
                 salva.getAceitoEm(),
                 salva.getAceitoPor(),
@@ -1048,47 +1055,47 @@ public class SimulacaoCenariosService {
             List<String> impedimentos) {
 
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Venda ID %s em %s. ", sale.getId(), sale.getSaleDate()));
-        sb.append(String.format("Canal: %s. Valor Bruto Original: R$ %,.2f. ",
+        sb.append(String.format(LOCALE_PT_BR, "Venda ID %s em %s. ", sale.getId(), sale.getSaleDate()));
+        sb.append(String.format(LOCALE_PT_BR, "Canal: %s. Valor Bruto Original: R$ %,.2f. ",
                 sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
                 sale.getValue() != null ? sale.getValue() : BigDecimal.ZERO));
 
-        sb.append(String.format("Taxa Base Contratual (tb_basecomiss): %,.2f%% (Comissão Base: R$ %,.2f). ",
+        sb.append(String.format(LOCALE_PT_BR, "Taxa Base Contratual (tb_basecomiss): %,.2f%% (Comissão Base: R$ %,.2f). ",
                 taxaBaseContratual.multiply(BigDecimal.valueOf(100)),
                 comissaoBase100));
 
         if ("REGRA_PROPOSTA".equals(item100.origemTaxa())) {
-            sb.append(String.format("Cenário 100%% (Proposta): Aplicada a regra promocional '%s' (ID %s). Taxa revisada: %,.2f%%. ",
+            sb.append(String.format(LOCALE_PT_BR, "Cenário 100%% (Proposta): Aplicada a regra promocional '%s' (ID %s). Taxa revisada: %,.2f%%. ",
                     item100.regraNome(),
                     item100.regraId() != null ? item100.regraId() : "N/D",
                     item100.taxaAplicada().multiply(BigDecimal.valueOf(100))));
             if (item100.valorBonusPerc().compareTo(BigDecimal.ZERO) > 0) {
-                sb.append(String.format("Bônus percentual: R$ %,.2f. ", item100.valorBonusPerc()));
+                sb.append(String.format(LOCALE_PT_BR, "Bônus percentual: R$ %,.2f. ", item100.valorBonusPerc()));
             }
             if (item100.valorBonusFixo().compareTo(BigDecimal.ZERO) > 0) {
-                sb.append(String.format("Bônus fixo: R$ %,.2f. ", item100.valorBonusFixo()));
+                sb.append(String.format(LOCALE_PT_BR, "Bônus fixo: R$ %,.2f. ", item100.valorBonusFixo()));
             }
-            sb.append(String.format("Comissão Proposta: R$ %,.2f (Impacto: %sR$ %,.2f). ",
+            sb.append(String.format(LOCALE_PT_BR, "Comissão Proposta: R$ %,.2f (Impacto: %sR$ %,.2f). ",
                     item100.valorComissao(),
                     deltaComissao100.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "",
                     deltaComissao100));
         } else {
-            sb.append(String.format("Cenário 100%% (Proposta): Nenhuma regra da proposta cobriu a faixa de valor; aplicado fallback na taxa base contratual (%,.2f%%). Comissão: R$ %,.2f. ",
+            sb.append(String.format(LOCALE_PT_BR, "Cenário 100%% (Proposta): Nenhuma regra da proposta cobriu a faixa de valor; aplicado fallback na taxa base contratual (%,.2f%%). Comissão: R$ %,.2f. ",
                     taxaBaseContratual.multiply(BigDecimal.valueOf(100)),
                     item100.valorComissao()));
         }
 
-        sb.append(String.format("Sensibilidade: [80%%: R$ %,.2f (Taxa %,.2f%%, Comiss R$ %,.2f%s) | ",
+        sb.append(String.format(LOCALE_PT_BR, "Sensibilidade: [80%%: R$ %,.2f (Taxa %,.2f%%, Comiss R$ %,.2f%s) | ",
                 item80.valorVenda(),
                 item80.taxaAplicada().multiply(BigDecimal.valueOf(100)),
                 item80.valorComissao(),
                 item80.mudouFaixaEmRelacaoA100() ? ", MUDOU DE FAIXA" : ""));
-        sb.append(String.format("120%%: R$ %,.2f (Taxa %,.2f%%, Comiss R$ %,.2f%s) | ",
+        sb.append(String.format(LOCALE_PT_BR, "120%%: R$ %,.2f (Taxa %,.2f%%, Comiss R$ %,.2f%s) | ",
                 item120.valorVenda(),
                 item120.taxaAplicada().multiply(BigDecimal.valueOf(100)),
                 item120.valorComissao(),
                 item120.mudouFaixaEmRelacaoA100() ? ", MUDOU DE FAIXA" : ""));
-        sb.append(String.format("150%%: R$ %,.2f (Taxa %,.2f%%, Comiss R$ %,.2f%s)]. ",
+        sb.append(String.format(LOCALE_PT_BR, "150%%: R$ %,.2f (Taxa %,.2f%%, Comiss R$ %,.2f%s)]. ",
                 item150.valorVenda(),
                 item150.taxaAplicada().multiply(BigDecimal.valueOf(100)),
                 item150.valorComissao(),
@@ -1118,43 +1125,43 @@ public class SimulacaoCenariosService {
             CenarioConsolidadoDTO cenario150) {
 
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Simulação consolidada para a competência %s. ", competencia));
+        sb.append(String.format(LOCALE_PT_BR, "Simulação consolidada para a competência %s. ", competencia));
         if (campanha != null) {
-            sb.append(String.format("Campanha vinculada: '%s' (ID %d). ", campanha.getTitulo(), campanha.getId()));
+            sb.append(String.format(LOCALE_PT_BR, "Campanha vinculada: '%s' (ID %d). ", campanha.getTitulo(), campanha.getId()));
         } else {
             sb.append("Regras avulsas sem campanha previamente vinculada. ");
         }
-        sb.append(String.format("Premissas de vigência: %s a %s (%d dias inclusivos). ",
+        sb.append(String.format(LOCALE_PT_BR, "Premissas de vigência: %s a %s (%d dias inclusivos). ",
                 dataInicio, dataFim, diasInclusivos));
-        sb.append(String.format("Fator de projeção temporal mensal: %d ÷ 30 = %,.6f. ",
+        sb.append(String.format(LOCALE_PT_BR, "Fator de projeção temporal mensal: %d ÷ 30 = %,.6f. ",
                 diasInclusivos, fatorProjecao));
-        sb.append(String.format("Universo recortado: %d vendas totalizando R$ %,.2f. ",
+        sb.append(String.format(LOCALE_PT_BR, "Universo recortado: %d vendas totalizando R$ %,.2f. ",
                 totalVendas, valorTotalRecortado));
 
-        sb.append(String.format("Cenário 100%% (Proposta vs Base): Comissão Base Contratual = R$ %,.2f (Taxa média: %,.2f%%); ",
+        sb.append(String.format(LOCALE_PT_BR, "Cenário 100%% (Proposta vs Base): Comissão Base Contratual = R$ %,.2f (Taxa média: %,.2f%%); ",
                 cenario100.totalComissaoBase(),
                 cenario100.taxaMediaEfetivaBase().multiply(BigDecimal.valueOf(100))));
-        sb.append(String.format("Comissão Proposta Revisada = R$ %,.2f (Taxa média: %,.2f%%); ",
+        sb.append(String.format(LOCALE_PT_BR, "Comissão Proposta Revisada = R$ %,.2f (Taxa média: %,.2f%%); ",
                 cenario100.totalComissaoProposta(),
                 cenario100.taxaMediaEfetivaProposta().multiply(BigDecimal.valueOf(100))));
-        sb.append(String.format("Delta financeiro mensal = %sR$ %,.2f (%s%,.2f%%); ",
+        sb.append(String.format(LOCALE_PT_BR, "Delta financeiro mensal = %sR$ %,.2f (%s%,.2f%%); ",
                 cenario100.deltaComissao().compareTo(BigDecimal.ZERO) >= 0 ? "+" : "",
                 cenario100.deltaComissao(),
                 cenario100.deltaPercentual().compareTo(BigDecimal.ZERO) >= 0 ? "+" : "",
                 cenario100.deltaPercentual()));
-        sb.append(String.format("Comissão projetada no período da campanha = R$ %,.2f (Impacto projetado: %sR$ %,.2f). ",
+        sb.append(String.format(LOCALE_PT_BR, "Comissão projetada no período da campanha = R$ %,.2f (Impacto projetado: %sR$ %,.2f). ",
                 cenario100.comissaoProjetada(),
                 cenario100.deltaProjetado().compareTo(BigDecimal.ZERO) >= 0 ? "+" : "",
                 cenario100.deltaProjetado()));
-        sb.append(String.format("Distribuição das vendas: %d com regra promocional aplicada, %d com fallback na base contratual. ",
+        sb.append(String.format(LOCALE_PT_BR, "Distribuição das vendas: %d com regra promocional aplicada, %d com fallback na base contratual. ",
                 cenario100.qtdVendasComRegraAplicada(),
                 cenario100.qtdVendasComFallbackBase()));
 
-        sb.append(String.format("Sensibilidade Financeira: Cenário 80%% = R$ %,.2f comissão (%d mudanças de faixa); ",
+        sb.append(String.format(LOCALE_PT_BR, "Sensibilidade Financeira: Cenário 80%% = R$ %,.2f comissão (%d mudanças de faixa); ",
                 cenario80.totalComissaoProposta(), cenario80.qtdVendasComMudancaFaixa()));
-        sb.append(String.format("Cenário 120%% = R$ %,.2f comissão (%d mudanças de faixa); ",
+        sb.append(String.format(LOCALE_PT_BR, "Cenário 120%% = R$ %,.2f comissão (%d mudanças de faixa); ",
                 cenario120.totalComissaoProposta(), cenario120.qtdVendasComMudancaFaixa()));
-        sb.append(String.format("Cenário 150%% = R$ %,.2f comissão (%d mudanças de faixa). ",
+        sb.append(String.format(LOCALE_PT_BR, "Cenário 150%% = R$ %,.2f comissão (%d mudanças de faixa). ",
                 cenario150.totalComissaoProposta(), cenario150.qtdVendasComMudancaFaixa()));
         sb.append("Cálculo 100% determinístico e auditável, sem dependência de chamadas à IA.");
 

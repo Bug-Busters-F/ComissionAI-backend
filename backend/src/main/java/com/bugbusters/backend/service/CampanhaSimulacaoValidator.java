@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.*;
 
 @Component
@@ -243,8 +244,34 @@ public class CampanhaSimulacaoValidator {
             return campanha.getSimulacaoAceita();
         }
         if (simulacaoRepository != null && campanha.getId() != null) {
-            return simulacaoRepository.findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(
+            Simulacao sim = simulacaoRepository.findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(
                     campanha.getId(), StatusAceiteSimulacao.ACEITA).orElse(null);
+            if (sim != null) {
+                return sim;
+            }
+        }
+
+        // Vínculo inteligente por fingerprint (hashProposta):
+        // Se a campanha ainda não tiver simulação diretamente vinculada, busca simulações recentes sem impedimentos
+        // que correspondam exatamente às regras e vigência desta proposta.
+        if (simulacaoRepository != null && campanha.getId() != null) {
+            List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
+            List<Simulacao> candidatas = simulacaoRepository.findTop10ByQtdVendasComImpedimentoOrderByExecutadoEmDesc(0);
+            for (Simulacao cand : candidatas) {
+                String hashCampanha = calcularHashPropostaCampanha(campanha.getDataInicio(), campanha.getDataFim(), regrasAtuais, cand.getCompetencia());
+                if (cand.getHashProposta() != null && cand.getHashProposta().equalsIgnoreCase(hashCampanha)) {
+                    cand.setCampanha(campanha);
+                    if (cand.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+                        cand.setStatusAceite(StatusAceiteSimulacao.ACEITA);
+                        cand.setAceitoEm(OffsetDateTime.now());
+                        cand.setAceitoPor("sistema@comissionai.com");
+                        cand.setMotivoAceite("Aceite formal vinculado automaticamente por correspondência de proposta à campanha ID " + campanha.getId());
+                    }
+                    Simulacao salva = simulacaoRepository.save(cand);
+                    campanha.setSimulacaoAceita(salva);
+                    return salva;
+                }
+            }
         }
         return null;
     }
