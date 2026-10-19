@@ -4,9 +4,11 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
@@ -99,11 +101,34 @@ public class ImportService {
             competencia = null;
         }
 
+        String hashConteudo = calcularHashSha256(file);
+
+        // Validação de bloqueio de reenvio do mesmo arquivo enquanto houver lote ativo
+        List<EnvioArquivo> lotesAtivos = envioArquivoRepository.findLotesAtivosPorHash(
+                hashConteudo, importType.name(), competencia);
+        for (EnvioArquivo candidato : lotesAtivos) {
+            if (ImportStatus.PENDENTE.name().equals(candidato.getStatus())
+                    || ImportStatus.PROCESSANDO.name().equals(candidato.getStatus())) {
+                reconciliarLote(candidato);
+            }
+            if (ImportStatus.PENDENTE.name().equals(candidato.getStatus())
+                    || ImportStatus.PROCESSANDO.name().equals(candidato.getStatus())
+                    || ImportStatus.CONCLUIDO.name().equals(candidato.getStatus())) {
+                String idRef = candidato.getReportId() != null
+                        ? "reportId=" + candidato.getReportId()
+                        : "idLote=" + candidato.getIdLote();
+                throw new ResourceConflictException(String.format(
+                        "Já existe um lote ativo (%s, status: %s) para este mesmo arquivo e competência.",
+                        idRef, candidato.getStatus()
+                ));
+            }
+        }
+
         String idLote = UUID.randomUUID().toString();
         String filename = file.getOriginalFilename() == null ? "arquivo" : file.getOriginalFilename();
 
         // 1. Gravar lote PENDENTE em transação própria (REQUIRES_NEW) e confirmada antes de disparar o job
-        envioArquivoTxService.criarLotePendente(idLote, filename, importType, competencia);
+        envioArquivoTxService.criarLotePendente(idLote, filename, importType, competencia, hashConteudo);
 
         Path upload = null;
         boolean submitted = false;
@@ -155,7 +180,7 @@ public class ImportService {
             ImportStatus status = ImportStatus.valueOf(lote.getStatus());
             Long count = null;
             if (status == ImportStatus.CONCLUIDO) {
-                count = (long) lote.getTotalLinhas();
+                count = (long) lote.getLinhasValidas();
             } else if (status == ImportStatus.FALHOU || status == ImportStatus.EXCLUIDO) {
                 count = 0L;
             }
@@ -186,7 +211,7 @@ public class ImportService {
         }
         String message = status == ImportStatus.FALHOU
                 ? execution.getExecutionContext().getString("failureMessage", "Não foi possível concluir a importação.")
-                : null;
+                : execution.getExecutionContext().getString("warningMessage", null);
         return new ImportResponse(reportId, execution.getJobParameters().getString("filename"),
                 ImportType.valueOf(execution.getJobParameters().getString("importType")), status, count, message);
     }
@@ -312,10 +337,15 @@ public class ImportService {
                         BatchStatus bs = execution.getStatus();
                         if (bs == BatchStatus.COMPLETED) {
                             long writeCount = execution.getStepExecutions().stream().mapToLong(StepExecution::getWriteCount).sum();
+                            long readCount = execution.getStepExecutions().stream().mapToLong(StepExecution::getReadCount).sum();
                             lote.setStatus(ImportStatus.CONCLUIDO.name());
-                            lote.setTotalLinhas((int) writeCount);
+                            lote.setTotalLinhas((int) (readCount > 0 ? readCount : writeCount));
                             lote.setLinhasValidas((int) writeCount);
                             lote.setRejeicaoIntegral(false);
+                            String warningMsg = execution.getExecutionContext().getString("warningMessage", null);
+                            if (warningMsg != null && !warningMsg.isBlank()) {
+                                lote.setMensagem(warningMsg);
+                            }
                             if (execution.getEndTime() != null) {
                                 lote.setFinalizadoEm(execution.getEndTime().atOffset(ZoneOffset.UTC));
                             }
@@ -355,5 +385,21 @@ public class ImportService {
                 e.getExcluidoEm(),
                 e.getExcluidoPor()
         );
+    }
+
+    private String calcularHashSha256(MultipartFile file) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream is = file.getInputStream()) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = is.read(buffer)) != -1) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (Exception ex) {
+            throw new IllegalStateException("Falha ao calcular hash SHA-256 do arquivo.", ex);
+        }
     }
 }

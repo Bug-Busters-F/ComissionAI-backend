@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -39,5 +40,19 @@ public interface EnvioArquivoRepository extends JpaRepository<EnvioArquivo, Long
             @Param("status") String status,
             @Param("competencia") String competencia,
             Pageable pageable
+    );
+
+    @Query("""
+        SELECT e FROM EnvioArquivo e
+        WHERE e.hashConteudo = :hashConteudo
+          AND e.tipoBase = :tipoBase
+          AND ((:competencia IS NULL AND e.competencia IS NULL) OR e.competencia = :competencia)
+          AND e.status IN ('PENDENTE', 'PROCESSANDO', 'CONCLUIDO')
+        ORDER BY e.criadoEm DESC
+    """)
+    List<EnvioArquivo> findLotesAtivosPorHash(
+            @Param("hashConteudo") String hashConteudo,
+            @Param("tipoBase") String tipoBase,
+            @Param("competencia") String competencia
     );
 }

@@ -32,6 +32,7 @@ public class ImportBaseController {
     @Operation(summary = "Iniciar importação assíncrona", description = "Recebe a planilha Excel e retorna reportId. Consulte GET /api/v1/imports/{reportId} para acompanhar o processamento. Falhas de validação são informadas no relatório e desfazem toda a importação.")
     @ApiResponse(responseCode = "202", description = "Importação recebida; consulte a URL no header Location")
     @ApiResponse(responseCode = "400", description = "Upload vazio ou parâmetros inválidos")
+    @ApiResponse(responseCode = "409", description = "Já existe lote ativo para o mesmo arquivo e competência")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ImportResponse> upload(
             @RequestParam("file") MultipartFile file,

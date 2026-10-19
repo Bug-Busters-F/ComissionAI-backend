@@ -12,6 +12,8 @@ import org.springframework.data.repository.query.Param;
 public interface RegistrationRepository extends JpaRepository<Registration, UUID> {
     public Optional<Registration> findByRegistration(String registration);
 
+    boolean existsByRegistration(String registration);
+
     public Optional<Registration> findByRegistrationIgnoreCase(String registration);
 
     @org.springframework.data.jpa.repository.Query("""

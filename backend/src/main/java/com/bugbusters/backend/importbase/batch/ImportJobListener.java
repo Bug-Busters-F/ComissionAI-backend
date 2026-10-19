@@ -43,8 +43,11 @@ public class ImportJobListener implements JobExecutionListener {
             String idLote = execution.getJobParameters().getString("requestId");
             if (execution.getStatus() == BatchStatus.COMPLETED) {
                 long writeCount = execution.getStepExecutions().stream().mapToLong(step -> step.getWriteCount()).sum();
+                long readCount = execution.getStepExecutions().stream().mapToLong(step -> step.getReadCount()).sum();
+                String warningMessage = execution.getExecutionContext().getString("warningMessage", null);
+                long totalLinhas = readCount > 0 ? readCount : writeCount;
                 try {
-                    txService.atualizarStatusConcluido(execution.getId(), idLote, writeCount, OffsetDateTime.now());
+                    txService.atualizarStatusConcluido(execution.getId(), idLote, totalLinhas, writeCount, warningMessage, OffsetDateTime.now());
                 } catch (Exception ex) {
                     log.warn("Não foi possível atualizar o status do lote para CONCLUIDO: {}", ex.getMessage(), ex);
                 }
@@ -71,6 +74,7 @@ public class ImportJobListener implements JobExecutionListener {
                     return cause.getMessage();
                 }
             }
+            log.error("Erro inesperado durante a execução do job {}: {}", execution.getId(), failure.getMessage(), failure);
         }
         return "Não foi possível concluir a importação. Nenhum registro foi confirmado.";
     }

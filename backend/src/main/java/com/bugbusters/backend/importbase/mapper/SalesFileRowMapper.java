@@ -16,6 +16,8 @@ public class SalesFileRowMapper {
                 CellUtils.getIntCell(row, 3),
                 CellUtils.getStringCell(row, 4),
                 CellUtils.getStringCell(row, 5),
-                CellUtils.getBigDecimalCell(row, 6));
-    };
+                CellUtils.getBigDecimalCell(row, 6),
+                row.getRowNum() + 1
+        );
+    }
 }
