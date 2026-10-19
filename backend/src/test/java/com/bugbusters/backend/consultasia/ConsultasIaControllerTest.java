@@ -190,10 +190,9 @@ class ConsultasIaControllerTest {
     // ------------------------------------------------------------ bases
 
     @Test
-    @DisplayName("Base: usa o mês pedido, cai para o mais recente e distingue ausência de base")
+    @DisplayName("Base: usa o mês pedido exatamente e distingue ausência de base sem usar mês anterior")
     void deveConsultarBase() throws Exception {
-        BaseComiss base = new BaseComiss(brand, gerenteLoja, new BigDecimal("0.0275"));
-        base.setReferenceMonth(LocalDate.of(2026, 8, 1));
+        BaseComiss base = new BaseComiss(brand, gerenteLoja, new BigDecimal("0.0275"), LocalDate.of(2026, 8, 1));
         baseComissRepository.save(base);
 
         mockMvc.perform(get(BASE + "/bases").param("codMarca", "9101").param("codCargo", "9301").param("competencia", "2026-08"))
@@ -204,9 +203,9 @@ class ConsultasIaControllerTest {
                 .andExpect(jsonPath("$.competenciaUsada", is("2026-08")));
 
         mockMvc.perform(get(BASE + "/bases").param("codMarca", "9101").param("codCargo", "9301").param("competencia", "2026-09"))
-                .andExpect(jsonPath("$.encontrado", is(true)))
-                .andExpect(jsonPath("$.competencia", is("2026-09")))
-                .andExpect(jsonPath("$.competenciaUsada", is("2026-08")));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.encontrado", is(false)))
+                .andExpect(jsonPath("$.taxa").doesNotExist());
 
         mockMvc.perform(get(BASE + "/bases").param("codMarca", "9101").param("codCargo", "9302").param("competencia", "2026-09"))
                 .andExpect(status().isOk())
@@ -342,6 +341,9 @@ class ConsultasIaControllerTest {
         novaVenda("300.00", LocalDate.of(2026, 9, 3));
         novaVenda("999.00", LocalDate.of(2026, 10, 1));
         saleRepository.flush();
+
+        BaseComiss baseSetembro = new BaseComiss(brand, gerenteLoja, new BigDecimal("0.0275"), LocalDate.of(2026, 9, 1));
+        baseComissRepository.save(baseSetembro);
 
         mockMvc.perform(get(BASE + "/dados-simulacao").param("competencia", "2026-09").param("matricula", "CONS-001")
                         .param("page", "0").param("size", "2"))

@@ -39,7 +39,7 @@ class ReferenciaPublicoServiceTest {
     private SaleRepository saleRepository;
 
     @Mock
-    private BaseComissRepository baseComissRepository;
+    private CoberturaBaseService coberturaBaseService;
 
     @Mock
     private CampanhaRepository campanhaRepository;
@@ -58,7 +58,7 @@ class ReferenciaPublicoServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ReferenciaPublicoService(saleRepository, baseComissRepository, campanhaRepository, regraRepository);
+        service = new ReferenciaPublicoService(saleRepository, coberturaBaseService, campanhaRepository, regraRepository);
 
         brandPreto = new Brand();
         brandPreto.setCode(10);
@@ -140,11 +140,11 @@ class ReferenciaPublicoServiceTest {
 
         List<Object[]> listaBase = new ArrayList<>();
         listaBase.add(new Object[]{2026, 9});
-        when(baseComissRepository.findDistinctAnosEMesesBaseComiss()).thenReturn(listaBase);
+        when(coberturaBaseService.findDistinctAnosEMesesBaseComiss()).thenReturn(listaBase);
 
         Sale s1 = criarVenda(UUID.randomUUID(), regColaborador1, store75, brandPreto, new BigDecimal("1000.00"), LocalDate.of(2026, 9, 10), "ECOMMERCE");
         when(saleRepository.findVendasPorPeriodoComRelacionamentos(any(), any())).thenReturn(List.of(s1));
-        when(baseComissRepository.countByReferenceMonthBetween(any(), any())).thenReturn(1L);
+        when(coberturaBaseService.contarBasesNaCompetencia(any())).thenReturn(1L);
 
         List<CompetenciaReferenciaDTO> resultado = service.listarCompetenciasReferencia();
 
@@ -260,7 +260,7 @@ class ReferenciaPublicoServiceTest {
         Sale s1 = criarVenda(idVenda, demitido, store75, brandPreto, new BigDecimal("0.00"), LocalDate.of(2026, 9, 15), "PADRAO");
 
         when(saleRepository.findVendasPorPeriodoComRelacionamentos(any(), any())).thenReturn(List.of(s1));
-        when(baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(anyInt(), anyInt()))
+        when(coberturaBaseService.obterTaxaBase(anyInt(), anyInt(), any()))
                 .thenReturn(Optional.empty()); // Sem basecomiss cadastrada
 
         RegraItemRequest regraGeral = criarRegra("G", "Regra Geral", null, null, null, null, null, null, null, new BigDecimal("0.05"));

@@ -90,11 +90,36 @@ class ControllerRoutesTest {
             r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
             registrationRepository.save(r);
         }
-        if (baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(10, 150).isEmpty()) {
+        if (registrationRepository.findByRegistration("MATRIC-1234").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-1234");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (registrationRepository.findByRegistration("MATRIC-IDEMPOTENTE").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-IDEMPOTENTE");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (registrationRepository.findByRegistration("MATRIC-CONFLITO").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-CONFLITO");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, java.time.LocalDate.of(2026, 10, 1)).isEmpty()) {
             com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
                     brandRepository.findByCode(10).get(),
                     positionRepository.findByCode(150).get(),
-                    new java.math.BigDecimal("0.1000")
+                    new java.math.BigDecimal("0.1000"),
+                    java.time.LocalDate.of(2026, 10, 1)
             );
             baseComissRepository.save(bc);
         }
@@ -110,6 +135,7 @@ class ControllerRoutesTest {
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "matricula": "MATRIC-1234",
+                "codMarca": 10,
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
                 "dataVenda": "2026-10-05"
@@ -156,6 +182,7 @@ class ControllerRoutesTest {
             {
                 "id": "22222222-2222-2222-2222-222222222222",
                 "matricula": "MATRIC-IDEMPOTENTE",
+                "codMarca": 10,
                 "valorVenda": 2000.00,
                 "canal": "LOJA_FISICA",
                 "dataVenda": "2026-10-10"
@@ -190,6 +217,7 @@ class ControllerRoutesTest {
             {
                 "id": "33333333-3333-3333-3333-333333333333",
                 "matricula": "MATRIC-CONFLITO",
+                "codMarca": 10,
                 "valorVenda": 500.00,
                 "canal": "APP",
                 "dataVenda": "2026-10-12"
@@ -200,6 +228,7 @@ class ControllerRoutesTest {
             {
                 "id": "33333333-3333-3333-3333-333333333333",
                 "matricula": "MATRIC-CONFLITO",
+                "codMarca": 10,
                 "valorVenda": 750.00,
                 "canal": "APP",
                 "dataVenda": "2026-10-12"
@@ -417,7 +446,8 @@ class ControllerRoutesTest {
 
         var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
-                .param("importType", "SALES"))
+                .param("importType", "SALES")
+                .param("competencia", "2026-10"))
                 .andExpect(status().isAccepted())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.reportId").isNumber())

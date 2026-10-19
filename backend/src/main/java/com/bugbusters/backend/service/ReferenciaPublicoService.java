@@ -12,8 +12,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.bugbusters.backend.basecomiss.BaseComiss;
-import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
@@ -35,17 +33,17 @@ public class ReferenciaPublicoService {
     private static final Logger log = LoggerFactory.getLogger(ReferenciaPublicoService.class);
 
     private final SaleRepository saleRepository;
-    private final BaseComissRepository baseComissRepository;
+    private final CoberturaBaseService coberturaBaseService;
     private final CampanhaRepository campanhaRepository;
     private final com.bugbusters.backend.repository.RegraRepository regraRepository;
 
     public ReferenciaPublicoService(
             SaleRepository saleRepository,
-            BaseComissRepository baseComissRepository,
+            CoberturaBaseService coberturaBaseService,
             CampanhaRepository campanhaRepository,
             com.bugbusters.backend.repository.RegraRepository regraRepository) {
         this.saleRepository = saleRepository;
-        this.baseComissRepository = baseComissRepository;
+        this.coberturaBaseService = coberturaBaseService;
         this.campanhaRepository = campanhaRepository;
         this.regraRepository = regraRepository;
     }
@@ -69,7 +67,7 @@ public class ReferenciaPublicoService {
         }
 
         // 2. Coleta competências com tabelas de comissão base contratual
-        List<Object[]> anosMesesBase = baseComissRepository.findDistinctAnosEMesesBaseComiss();
+        List<Object[]> anosMesesBase = coberturaBaseService.findDistinctAnosEMesesBaseComiss();
         for (Object[] row : anosMesesBase) {
             if (row != null && row.length >= 2 && row[0] != null && row[1] != null) {
                 int ano = ((Number) row[0]).intValue();
@@ -414,10 +412,10 @@ public class ReferenciaPublicoService {
 
         // 4. Validação de Taxa Base Contratual (tb_basecomiss)
         Optional<BigDecimal> baseRateOpt = Optional.empty();
-        if (brand != null && pos != null) {
-            baseRateOpt = baseComissRepository
-                    .findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(brand.getCode(), pos.getCode())
-                    .map(BaseComiss::getPercentage);
+        if (brand != null && pos != null && sale.getSaleDate() != null) {
+            baseRateOpt = coberturaBaseService.obterTaxaBase(
+                    brand.getCode(), pos.getCode(), YearMonth.from(sale.getSaleDate())
+            );
             if (baseRateOpt.isEmpty()) {
                 impedimentos.add(String.format("Taxa base contratual ausente em tb_basecomiss para Marca '%s' e Cargo '%s'",
                         brand.getDescription() != null ? brand.getDescription() : brand.getCode(),
@@ -663,14 +661,8 @@ public class ReferenciaPublicoService {
             }
         }
 
-        long countBase = baseComissRepository.countByReferenceMonthBetween(inicio, fim);
+        long countBase = coberturaBaseService.contarBasesNaCompetencia(YearMonth.from(inicio));
         boolean possuiBaseComiss = countBase > 0;
-
-        // Se não tiver taxa base no mês exato, verifica se existe taxa base cadastrada no sistema (fallback disponível)
-        if (!possuiBaseComiss) {
-            long totalGeralBase = baseComissRepository.count();
-            possuiBaseComiss = totalGeralBase > 0;
-        }
 
         String status;
         List<String> mensagens = new ArrayList<>();

@@ -20,6 +20,7 @@ import com.bugbusters.backend.dto.interpretador.proposta.ReinterpretarBlocoRespo
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaResponse;
+import com.bugbusters.backend.exception.AiInvalidResponseException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Cargo;
 import com.bugbusters.backend.model.CatalogoDominioDomRock;
@@ -30,10 +31,17 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class InterpretadorService {
@@ -233,36 +241,109 @@ public class InterpretadorService {
      */
     public InterpretacaoMultiplaResponse processarInterpretacaoMultipla(InterpretacaoMultiplaRequest request) {
         Map<String, Object> contexto = request.contexto() != null ? request.contexto() : Map.of();
-        Map<String, Object> resposta = aiClient.chamarServicoPythonV2(montarPayloadAgente(request.texto(), contexto));
-        boolean vigenciaDoContexto = contexto.get("vigenciaCampanha") != null;
+        PeriodoVigenciaDTO vigenciaCampanha = extrairVigenciaCampanha(contexto);
 
-        List<Map<String, Object>> blocos = listaDeMapas(resposta.get("propostas"));
-        List<PropostaRegraDTO> propostas = new ArrayList<>();
-        BigDecimal somaConfianca = BigDecimal.ZERO;
-        for (int i = 0; i < blocos.size(); i++) {
-            propostas.add(converterBlocoDoAgente(blocos.get(i), "bloco-" + (i + 1), vigenciaDoContexto));
-            BigDecimal confianca = decimal(blocos.get(i).get("confianca"));
-            somaConfianca = somaConfianca.add(confianca != null ? confianca
-                    : Boolean.TRUE.equals(propostas.get(i).completa()) ? new BigDecimal("0.95") : new BigDecimal("0.70"));
+        Map<String, Object> resposta = aiClient.chamarServicoPythonV2(montarPayloadAgente(request.texto(), contexto));
+        if (resposta == null) {
+            throw new AiInvalidResponseException("O serviço de IA retornou uma resposta vazia.");
         }
-        BigDecimal confiancaGeral = propostas.isEmpty() ? BigDecimal.ZERO
-                : somaConfianca.divide(new BigDecimal(propostas.size()), 2, java.math.RoundingMode.HALF_UP);
+        if (resposta.containsKey("propostas") && !(resposta.get("propostas") instanceof List)) {
+            throw new AiInvalidResponseException("O campo 'propostas' retornado pelo serviço de IA deve ser uma lista.");
+        }
 
         List<PendenciaPropostaDTO> pendenciasGerais = new ArrayList<>();
         for (Map<String, Object> p : listaDeMapas(resposta.get("pendenciasGerais"))) {
-            pendenciasGerais.add(PendenciaPropostaDTO.aviso(texto(p.get("campo"), "geral"), texto(p.get("codigo"), "AVISO_AGENTE"), texto(p.get("mensagem"), "")));
+            pendenciasGerais.add(pendenciaDoAgente(
+                    texto(p.get("campo"), "geral"),
+                    texto(p.get("codigo"), "AVISO_AGENTE"),
+                    texto(p.get("mensagem"), "")
+            ));
         }
         for (Map<String, Object> trecho : listaDeMapas(resposta.get("trechosNaoMapeados"))) {
             pendenciasGerais.add(PendenciaPropostaDTO.aviso("texto", "TRECHO_NAO_MAPEADO",
                     "Trecho do pedido que não virou regra: '" + texto(trecho.get("trecho"), "") + "'."));
         }
 
+        List<?> propostasBrutas = resposta.get("propostas") instanceof List<?> l ? l : List.of();
+        List<Map<String, Object>> blocosValidos = new ArrayList<>();
+        for (int i = 0; i < propostasBrutas.size(); i++) {
+            Object item = propostasBrutas.get(i);
+            if (item instanceof Map<?, ?> itemMap) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> blocoMap = (Map<String, Object>) itemMap;
+                blocosValidos.add(blocoMap);
+            } else {
+                pendenciasGerais.add(PendenciaPropostaDTO.impedimento(
+                        "propostas[" + i + "]",
+                        "BLOCO_INVALIDO",
+                        "Falha ao converter o bloco de índice " + i + " retornado pelo serviço de IA: formato de bloco inválido."
+                ));
+            }
+        }
+
+        Map<String, Long> contagemIds = blocosValidos.stream()
+                .map(InterpretadorService::extrairIdAgente)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+        Set<String> idsUsados = new HashSet<>();
+        List<PropostaRegraDTO> propostas = new ArrayList<>();
+        BigDecimal somaConfianca = BigDecimal.ZERO;
+
+        for (int i = 0; i < blocosValidos.size(); i++) {
+            Map<String, Object> bloco = blocosValidos.get(i);
+            String idAgente = extrairIdAgente(bloco);
+            String blocoId;
+            if (idAgente != null && contagemIds.getOrDefault(idAgente, 0L) == 1L && !idsUsados.contains(idAgente)) {
+                blocoId = idAgente;
+            } else {
+                blocoId = "bloco-" + (i + 1);
+            }
+            int contador = i + 1;
+            while (idsUsados.contains(blocoId)) {
+                contador++;
+                blocoId = "bloco-" + contador;
+            }
+            idsUsados.add(blocoId);
+
+            try {
+                PropostaRegraDTO proposta = converterBlocoDoAgente(bloco, blocoId, vigenciaCampanha, contexto);
+                propostas.add(proposta);
+                BigDecimal confianca = decimal(bloco.get("confianca"));
+                somaConfianca = somaConfianca.add(confianca != null ? confianca
+                        : Boolean.TRUE.equals(proposta.completa()) ? new BigDecimal("0.95") : new BigDecimal("0.70"));
+            } catch (Exception e) {
+                pendenciasGerais.add(PendenciaPropostaDTO.impedimento(
+                        "propostas[" + i + "]",
+                        "BLOCO_INVALIDO",
+                        "Falha ao converter o bloco de índice " + i + " retornado pelo serviço de IA: " + e.getMessage()
+                ));
+            }
+        }
+
+        if (propostas.isEmpty()) {
+            pendenciasGerais.add(PendenciaPropostaDTO.impedimento(
+                    "texto",
+                    "NENHUMA_PROPOSTA",
+                    "Nenhuma regra foi identificada no texto informado."
+            ));
+        }
+
+        BigDecimal confiancaGeral = propostas.isEmpty() ? BigDecimal.ZERO
+                : somaConfianca.divide(new BigDecimal(propostas.size()), 2, java.math.RoundingMode.HALF_UP);
+
+        boolean temPendenciaGeralImpeditiva = pendenciasGerais.stream().anyMatch(PendenciaPropostaDTO::isImpeditiva);
+        boolean possuiPendencias = !pendenciasGerais.isEmpty() || propostas.stream().anyMatch(p -> !p.pendencias().isEmpty());
+        boolean todasCompletas = !propostas.isEmpty()
+                && !temPendenciaGeralImpeditiva
+                && propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa()));
+
         return new InterpretacaoMultiplaResponse(
                 gerarTituloSugerido(propostas, request.texto()),
                 propostas,
                 propostas.size(),
-                !pendenciasGerais.isEmpty() || propostas.stream().anyMatch(p -> !p.pendencias().isEmpty()),
-                propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa())),
+                possuiPendencias,
+                todasCompletas,
                 confiancaGeral,
                 pendenciasGerais
         );
@@ -307,15 +388,40 @@ public class InterpretadorService {
     public AtualizarArtefatosResponse atualizarArtefatos(AtualizarArtefatosRequest request) {
         PropostaRegraDTO p = request.proposta();
 
-        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(p.operacaoBase());
-        BigDecimal taxaFinal = taxaCalculada != null ? taxaCalculada : p.taxaFinal();
+        OperacaoBaseDTO operacao = p.operacaoBase();
+        YearMonth ymRef = (p.vigencia() != null && p.vigencia().dataInicio() != null)
+                ? YearMonth.from(p.vigencia().dataInicio())
+                : null;
+
+        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) {
+            Integer codMarca = p.filtros() != null ? p.filtros().codMarca() : null;
+            String descrMarca = p.filtros() != null ? p.filtros().descrMarca() : null;
+            Integer codCargo = p.filtros() != null ? p.filtros().codCargo() : null;
+            String descriCargo = p.filtros() != null ? p.filtros().descriCargo() : null;
+            BigDecimal base = ymRef != null
+                    ? dominioService.obterTaxaBaseContratual(codMarca, codCargo, descriCargo, ymRef).orElse(null)
+                    : null;
+            String descrRef = ymRef != null
+                    ? dominioService.gerarDescricaoReferencia(codMarca, descrMarca, codCargo, descriCargo, ymRef)
+                    : "Taxa Contratual Padrão";
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", base, descrRef);
+            operacao = new OperacaoBaseDTO(operacao.tipoOperacao(), operacao.valorAjuste(), ref);
+        }
+
+        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(operacao);
+        BigDecimal taxaFinal;
+        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) {
+            taxaFinal = taxaCalculada;
+        } else {
+            taxaFinal = taxaCalculada != null ? taxaCalculada : p.taxaFinal();
+        }
 
         PropostaRegraDTO candidata = new PropostaRegraDTO(
                 p.blocoId(),
                 p.trechoOrigem(),
                 p.filtros(),
                 p.condicaoValor(),
-                p.operacaoBase(),
+                operacao,
                 taxaFinal,
                 p.referenciasConsultadas(),
                 p.origensPorCampo(),
@@ -366,7 +472,7 @@ public class InterpretadorService {
     }
 
     /** Converte um bloco devolvido pelo agente para o contrato de proposta do backend. */
-    private PropostaRegraDTO converterBlocoDoAgente(Map<String, Object> bloco, String blocoId, boolean vigenciaDoContexto) {
+    private PropostaRegraDTO converterBlocoDoAgente(Map<String, Object> bloco, String blocoId, PeriodoVigenciaDTO vigenciaCampanha, Map<String, Object> contexto) {
         Map<String, Object> condicoes = mapa(bloco.get("condicoes"));
         String trechoOrigem = texto(mapa(bloco.get("origem")).get("trecho"), null);
 
@@ -382,24 +488,41 @@ public class InterpretadorService {
 
         Map<String, Object> faixaAgente = mapa(condicoes.get("faixaValor"));
         FaixaValorDTO faixa = faixaAgente.isEmpty() ? FaixaValorDTO.semLimites() : new FaixaValorDTO(
-                decimal(faixaAgente.get("min")), (Boolean) faixaAgente.get("minInclusivo"),
-                decimal(faixaAgente.get("max")), (Boolean) faixaAgente.get("maxInclusivo"));
+                decimal(faixaAgente.get("min")), booleano(faixaAgente.get("minInclusivo")),
+                decimal(faixaAgente.get("max")), booleano(faixaAgente.get("maxInclusivo")));
+
+        Map<String, Object> bonus = mapa(bloco.get("bonus"));
+        LocalDate dataInicioAgente = data(bloco.get("dataInicio"));
+        LocalDate dataFimAgente = data(bloco.get("dataFim"));
+
+        LocalDate dataInicio;
+        LocalDate dataFim;
+        boolean temVigenciaCampanha = vigenciaCampanha != null;
+
+        if (temVigenciaCampanha) {
+            dataInicio = vigenciaCampanha.dataInicio();
+            dataFim = vigenciaCampanha.dataFim();
+        } else {
+            dataInicio = dataInicioAgente;
+            dataFim = dataFimAgente;
+        }
+        PeriodoVigenciaDTO vigencia = PeriodoVigenciaDTO.de(dataInicio, dataFim);
+        YearMonth ymRef = extrairCompetenciaReferencia(contexto, vigencia);
 
         // O agente não calcula ajustes sobre a taxa base (pontos, multiplicador...); a extração determinística
         // daqui resolve o ajuste a partir do trecho da regra, como antes.
         BigDecimal taxaAgente = decimal(bloco.get("taxa"));
         OperacaoBaseDTO operacao = extrairOperacaoBase(trechoOrigem, taxaAgente, filtros.codMarca(), filtros.descrMarca(),
-                filtros.codCargo(), filtros.descriCargo());
+                filtros.codCargo(), filtros.descriCargo(), ymRef);
         BigDecimal taxaFinal = artefatoService.calcularTaxaEfetiva(operacao);
         if (taxaFinal == null) {
-            taxaFinal = taxaAgente;
+            if (operacao.tipoOperacao() == TipoOperacaoBase.DEFINIR_TAXA) {
+                taxaFinal = taxaAgente;
+            } else {
+                taxaFinal = null;
+            }
         }
         boolean ajusteResolvido = operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA && taxaFinal != null;
-
-        Map<String, Object> bonus = mapa(bloco.get("bonus"));
-        LocalDate dataInicio = data(bloco.get("dataInicio"));
-        LocalDate dataFim = data(bloco.get("dataFim"));
-        PeriodoVigenciaDTO vigencia = PeriodoVigenciaDTO.de(dataInicio, dataFim);
 
         List<ReferenciaConsultadaDTO> referencias = new ArrayList<>();
         java.util.Set<String> dimensoesConsultadas = new java.util.HashSet<>();
@@ -427,23 +550,53 @@ public class InterpretadorService {
         if (filtros.matricula() != null) origens.put("matricula", dimensoesConsultadas.contains("matricula") ? OrigemCampo.BASE_DADOS : OrigemCampo.TEXTO);
         if (taxaAgente != null) origens.put("taxa", OrigemCampo.TEXTO);
         if (faixa.possuiFaixa()) origens.put("condicaoValor", OrigemCampo.TEXTO);
-        OrigemCampo origemVigencia = vigenciaDoContexto ? OrigemCampo.CONTEXTO : OrigemCampo.TEXTO;
-        origens.put("dataInicio", dataInicio != null ? origemVigencia : OrigemCampo.PADRAO_SISTEMA);
-        origens.put("dataFim", dataFim != null ? origemVigencia : OrigemCampo.PADRAO_SISTEMA);
+        if (temVigenciaCampanha) {
+            origens.put("dataInicio", dataInicio != null ? OrigemCampo.CONTEXTO : OrigemCampo.PADRAO_SISTEMA);
+            origens.put("dataFim", dataFim != null ? OrigemCampo.CONTEXTO : OrigemCampo.PADRAO_SISTEMA);
+        } else {
+            origens.put("dataInicio", dataInicio != null ? OrigemCampo.TEXTO : OrigemCampo.PADRAO_SISTEMA);
+            origens.put("dataFim", dataFim != null ? OrigemCampo.TEXTO : OrigemCampo.PADRAO_SISTEMA);
+        }
 
         PropostaRegraDTO propostaBase = new PropostaRegraDTO(blocoId, trechoOrigem, filtros, faixa, operacao, taxaFinal,
                 referencias, origens, null, null, null, null, vigencia,
                 decimal(bonus.get("percentual")), decimal(bonus.get("valorFixo")));
 
         List<PendenciaPropostaDTO> pendencias = new ArrayList<>(artefatoService.validarProposta(propostaBase));
+
+        boolean datasDiferentes = temVigenciaCampanha && (
+                (dataInicioAgente != null && !Objects.equals(dataInicioAgente, vigenciaCampanha.dataInicio()))
+                || (dataFimAgente != null && !Objects.equals(dataFimAgente, vigenciaCampanha.dataFim()))
+        );
+
+        boolean agenteEnviouVigenciaIncompativel = listaDeMapas(bloco.get("pendencias")).stream()
+                .anyMatch(p -> "VIGENCIA_INCOMPATIVEL".equalsIgnoreCase(texto(p.get("codigo"), "")));
+
+        if (datasDiferentes && !agenteEnviouVigenciaIncompativel) {
+            String periodoTexto;
+            if (dataInicioAgente != null && dataFimAgente != null) {
+                periodoTexto = dataInicioAgente + " a " + dataFimAgente;
+            } else if (dataInicioAgente != null) {
+                periodoTexto = "início em " + dataInicioAgente;
+            } else {
+                periodoTexto = "fim em " + dataFimAgente;
+            }
+            pendencias.add(PendenciaPropostaDTO.aviso(
+                    "vigencia",
+                    "VIGENCIA_INCOMPATIVEL",
+                    "Período informado no texto (" + periodoTexto + ") difere da vigência da campanha; mantida a vigência da campanha."
+            ));
+        }
+
         for (Map<String, Object> p : listaDeMapas(bloco.get("pendencias"))) {
             String campo = texto(p.get("campo"), "geral");
             if (ajusteResolvido && "taxa".equals(campo)) {
                 continue; // a taxa do ajuste sobre a base foi calculada aqui
             }
+            String codigo = texto(p.get("codigo"), "AVISO_AGENTE");
             String mensagem = texto(p.get("mensagem"), "");
-            if (pendencias.stream().noneMatch(pen -> pen.mensagem().equalsIgnoreCase(mensagem))) {
-                pendencias.add(pendenciaDoAgente(campo, texto(p.get("codigo"), "AVISO_AGENTE"), mensagem));
+            if (pendencias.stream().noneMatch(pen -> saoPendenciasIguais(pen, campo, codigo, mensagem))) {
+                pendencias.add(pendenciaDoAgente(campo, codigo, mensagem));
             }
         }
 
@@ -451,6 +604,61 @@ public class InterpretadorService {
                 pendencias, pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva),
                 artefatoService.gerarExplicacao(propostaBase), artefatoService.gerarPythonEquivalente(propostaBase),
                 vigencia, propostaBase.bonusPercentual(), propostaBase.bonusValorFixo());
+    }
+
+    private static boolean saoPendenciasIguais(PendenciaPropostaDTO a, String campo, String codigo, String mensagem) {
+        if (a == null) return false;
+        if (!Objects.equals(a.campo(), campo)) return false;
+        if (!Objects.equals(a.codigo(), codigo)) return false;
+        if (a.mensagem() == null || mensagem == null) {
+            return Objects.equals(a.mensagem(), mensagem);
+        }
+        return a.mensagem().equalsIgnoreCase(mensagem);
+    }
+
+    private static String extrairIdAgente(Map<String, Object> bloco) {
+        if (bloco == null) return null;
+        for (String chave : List.of("idLocal", "blocoId", "id")) {
+            Object val = bloco.get(chave);
+            if (val != null) {
+                String s = val.toString().trim();
+                if (!s.isEmpty()) {
+                    return s;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static PeriodoVigenciaDTO extrairVigenciaCampanha(Map<String, Object> contexto) {
+        if (contexto == null) {
+            return null;
+        }
+        Object vigenciaObj = contexto.get("vigenciaCampanha");
+        if (!(vigenciaObj instanceof Map<?, ?> vigenciaMap)) {
+            return null;
+        }
+        LocalDate inicio = data(vigenciaMap.get("inicio"));
+        LocalDate fim = data(vigenciaMap.get("fim"));
+        if (inicio == null && fim == null) {
+            return null;
+        }
+        return PeriodoVigenciaDTO.de(inicio, fim);
+    }
+
+    private static Boolean booleano(Object valor) {
+        if (valor == null) return null;
+        if (valor instanceof Boolean b) return b;
+        if (valor instanceof String s) {
+            String trimmed = s.trim();
+            if ("true".equalsIgnoreCase(trimmed)) {
+                return Boolean.TRUE;
+            }
+            if ("false".equalsIgnoreCase(trimmed)) {
+                return Boolean.FALSE;
+            }
+        }
+        return null;
     }
 
     /**
@@ -490,16 +698,41 @@ public class InterpretadorService {
     private static BigDecimal decimal(Object valor) {
         if (valor == null) return null;
         if (valor instanceof BigDecimal b) return b;
+        if (valor instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
         String texto = valor.toString().trim();
-        return texto.isEmpty() ? null : new BigDecimal(texto);
+        if (texto.isEmpty()) return null;
+        try {
+            return new BigDecimal(texto);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static Integer inteiro(Object valor) {
-        return valor instanceof Number n ? Integer.valueOf(n.intValue()) : null;
+        if (valor == null) return null;
+        if (valor instanceof Number n) return Integer.valueOf(n.intValue());
+        if (valor instanceof String s) {
+            String trimmed = s.trim();
+            if (trimmed.isEmpty()) return null;
+            try {
+                return Integer.valueOf(trimmed);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static LocalDate data(Object valor) {
-        return valor == null ? null : LocalDate.parse(valor.toString());
+        if (valor == null) return null;
+        if (valor instanceof LocalDate ld) return ld;
+        String texto = valor.toString().trim();
+        if (texto.isEmpty()) return null;
+        try {
+            return LocalDate.parse(texto);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private static String texto(Object valor, String padrao) {
@@ -531,25 +764,43 @@ public class InterpretadorService {
         FaixaValorDTO faixaNova = extrairFaixaValor(instrucao);
         FaixaValorDTO faixa = faixaNova.possuiFaixa() ? faixaNova : anterior.condicaoValor();
 
+        PeriodoVigenciaDTO vigencia = new PeriodoVigenciaDTO(
+                novo.dataInicio() != null ? novo.dataInicio() : anterior.vigencia().dataInicio(),
+                novo.dataFim() != null ? novo.dataFim() : anterior.vigencia().dataFim()
+        );
+        YearMonth ymRef = extrairCompetenciaReferencia(contexto, vigencia);
+
         OperacaoBaseDTO opNova = extrairOperacaoBase(
                 instrucao,
                 novo.taxa(),
                 filtros.codMarca(),
                 filtros.descrMarca(),
                 filtros.codCargo(),
-                filtros.descriCargo()
+                filtros.descriCargo(),
+                ymRef
         );
         OperacaoBaseDTO operacao = (opNova.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA || novo.taxa() != null)
                 ? opNova
                 : anterior.operacaoBase();
 
-        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(operacao);
-        BigDecimal taxaFinal = taxaCalculada != null ? taxaCalculada : (novo.taxa() != null ? novo.taxa() : anterior.taxaFinal());
+        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) {
+            BigDecimal base = ymRef != null
+                    ? dominioService.obterTaxaBaseContratual(filtros.codMarca(), filtros.codCargo(), filtros.descriCargo(), ymRef).orElse(null)
+                    : null;
+            String descrRef = ymRef != null
+                    ? dominioService.gerarDescricaoReferencia(filtros.codMarca(), filtros.descrMarca(), filtros.codCargo(), filtros.descriCargo(), ymRef)
+                    : "Taxa Contratual Padrão";
+            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", base, descrRef);
+            operacao = new OperacaoBaseDTO(operacao.tipoOperacao(), operacao.valorAjuste(), ref);
+        }
 
-        PeriodoVigenciaDTO vigencia = new PeriodoVigenciaDTO(
-                novo.dataInicio() != null ? novo.dataInicio() : anterior.vigencia().dataInicio(),
-                novo.dataFim() != null ? novo.dataFim() : anterior.vigencia().dataFim()
-        );
+        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(operacao);
+        BigDecimal taxaFinal;
+        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) {
+            taxaFinal = taxaCalculada;
+        } else {
+            taxaFinal = taxaCalculada != null ? taxaCalculada : (novo.taxa() != null ? novo.taxa() : anterior.taxaFinal());
+        }
 
         PropostaRegraDTO propostaBase = new PropostaRegraDTO(
                 anterior.blocoId(),
@@ -626,8 +877,28 @@ public class InterpretadorService {
         return new FaixaValorDTO(min, minInc, max, maxInc);
     }
 
+    private static YearMonth extrairCompetenciaReferencia(Map<String, Object> contexto, PeriodoVigenciaDTO vigencia) {
+        if (contexto != null && contexto.containsKey("competencia")) {
+            Object compObj = contexto.get("competencia");
+            if (compObj != null) {
+                String compStr = compObj.toString().trim();
+                try {
+                    return YearMonth.parse(compStr);
+                } catch (Exception ignored) {
+                    try {
+                        return YearMonth.from(LocalDate.parse(compStr));
+                    } catch (Exception ignored2) {}
+                }
+            }
+        }
+        if (vigencia != null && vigencia.dataInicio() != null) {
+            return YearMonth.from(vigencia.dataInicio());
+        }
+        return null;
+    }
+
     public OperacaoBaseDTO extrairOperacaoBase(String texto, BigDecimal taxaExtraida) {
-        return extrairOperacaoBase(texto, taxaExtraida, null, null, null, null);
+        return extrairOperacaoBase(texto, taxaExtraida, null, null, null, null, null);
     }
 
     public OperacaoBaseDTO extrairOperacaoBase(
@@ -638,22 +909,37 @@ public class InterpretadorService {
             Integer codCargo,
             String descriCargo
     ) {
+        return extrairOperacaoBase(texto, taxaExtraida, codMarca, descrMarca, codCargo, descriCargo, null);
+    }
+
+    public OperacaoBaseDTO extrairOperacaoBase(
+            String texto,
+            BigDecimal taxaExtraida,
+            Integer codMarca,
+            String descrMarca,
+            Integer codCargo,
+            String descriCargo,
+            YearMonth competencia
+    ) {
         if (texto == null) return OperacaoBaseDTO.definirTaxa(taxaExtraida);
         String t = texto.toLowerCase();
 
-        BigDecimal taxaBaseReferencia = dominioService.obterTaxaBaseComFallback(codMarca, codCargo, descriCargo);
-        String descrReferencia = dominioService.gerarDescricaoReferencia(codMarca, descrMarca, codCargo, descriCargo);
-
+        BigDecimal taxaBaseReferencia = null;
+        String descrReferencia = "Taxa Contratual Padrão";
+        if (competencia != null) {
+            taxaBaseReferencia = dominioService.obterTaxaBaseContratual(codMarca, codCargo, descriCargo, competencia).orElse(null);
+            descrReferencia = dominioService.gerarDescricaoReferencia(codMarca, descrMarca, codCargo, descriCargo, competencia);
+        }
 
         // 1. Acréscimo sobre a base
-        if (t.contains("acréscimo") || t.contains("acrescimo") || t.contains("taxa base +") || t.contains("base +") || t.contains("+") && t.contains("base")) {
+        if (t.contains("acréscimo") || t.contains("acrescimo") || t.contains("taxa base +") || t.contains("base +") || (t.contains("+") && t.contains("base"))) {
             BigDecimal ajuste = extrairPercentualOuNumero(t);
             ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
             return new OperacaoBaseDTO(TipoOperacaoBase.ACRESCIMO_PONTOS, ajuste != null ? ajuste : new BigDecimal("0.0150"), ref);
         }
 
         // 2. Desconto sobre a base
-        if (t.contains("desconto") || t.contains("taxa base -") || t.contains("base -") || t.contains("-") && t.contains("base")) {
+        if (t.contains("desconto") || t.contains("taxa base -") || t.contains("base -") || (t.contains("-") && t.contains("base"))) {
             BigDecimal ajuste = extrairPercentualOuNumero(t);
             ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", taxaBaseReferencia, descrReferencia);
             return new OperacaoBaseDTO(TipoOperacaoBase.DESCONTO_PONTOS, ajuste != null ? ajuste : new BigDecimal("0.0050"), ref);
@@ -792,6 +1078,7 @@ public class InterpretadorService {
         }
 
         // 6. Taxa e Base Contratual
+        YearMonth compProposta = request.dataInicio() != null ? YearMonth.from(request.dataInicio()) : null;
         if (request.taxa() != null) {
             if (request.taxa().compareTo(BigDecimal.ZERO) <= 0) {
                 erros.add("A taxa de comissão deve ser um valor estritamente positivo (> 0).");
@@ -799,13 +1086,18 @@ public class InterpretadorService {
                 avisos.add("A taxa informada (" + request.taxa() + ") é maior que 100%. Verifique se o valor não deveria estar no formato decimal (ex: 0.05 para 5%).");
             }
 
-            var taxaBaseOpt = dominioService.obterTaxaBaseContratual(request.codMarca(), request.codCargo(), request.descriCargo());
+            var taxaBaseOpt = dominioService.obterTaxaBaseContratual(request.codMarca(), request.codCargo(), request.descriCargo(), compProposta);
             if (taxaBaseOpt.isPresent()) {
                 referencias.add(new ReferenciaConsultadaDTO(
                         "TAXA_BASE_CONTRATUAL",
                         "cod_marca=" + request.codMarca() + ", cod_cargo=" + request.codCargo(),
-                        dominioService.gerarDescricaoReferencia(request.codMarca(), request.descrMarca(), request.codCargo(), request.descriCargo())
+                        dominioService.gerarDescricaoReferencia(request.codMarca(), request.descrMarca(), request.codCargo(), request.descriCargo(), compProposta)
                 ));
+            }
+        } else {
+            var taxaBaseOpt = dominioService.obterTaxaBaseContratual(request.codMarca(), request.codCargo(), request.descriCargo(), compProposta);
+            if (taxaBaseOpt.isEmpty()) {
+                erros.add("Operação sobre a base requer taxa contratual de referência (tb_basecomiss), que não foi localizada para o público-alvo na competência.");
             }
         }
 
@@ -826,6 +1118,7 @@ public class InterpretadorService {
                     request.codLoja(),
                     request.canal(),
                     request.matricula(),
+                    request.taxa(),
                     request.dataInicio(),
                     request.dataFim()
             );

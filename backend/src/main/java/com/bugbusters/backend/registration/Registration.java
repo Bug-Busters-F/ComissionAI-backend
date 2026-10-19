@@ -41,6 +41,9 @@ public class Registration {
     @Column (nullable = true)
     private LocalDate demissDate;
 
+    @Column(name = "id_lote_origem", length = 100)
+    private String idLoteOrigem;
+
     public Store getStore() {
         return store;
     }
@@ -87,5 +90,13 @@ public class Registration {
 
     public void setId(UUID id) {
         this.id = id;
+    }
+
+    public String getIdLoteOrigem() {
+        return idLoteOrigem;
+    }
+
+    public void setIdLoteOrigem(String idLoteOrigem) {
+        this.idLoteOrigem = idLoteOrigem;
     }
 }

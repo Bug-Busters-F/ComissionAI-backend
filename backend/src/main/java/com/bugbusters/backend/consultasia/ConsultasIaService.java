@@ -19,8 +19,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.bugbusters.backend.basecomiss.BaseComiss;
-import com.bugbusters.backend.basecomiss.BaseComissRepository;
+import com.bugbusters.backend.dto.basecomiss.ReferenciaFaltanteDTO;
+import com.bugbusters.backend.service.CoberturaBaseService;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.BaseComissaoResponse;
@@ -64,19 +64,19 @@ public class ConsultasIaService {
     private final StoreRepository storeRepository;
     private final PositionRepository positionRepository;
     private final RegistrationRepository registrationRepository;
-    private final BaseComissRepository baseComissRepository;
+    private final CoberturaBaseService coberturaBaseService;
     private final RegraRepository regraRepository;
     private final SaleRepository saleRepository;
 
     public ConsultasIaService(BrandRepository brandRepository, StoreRepository storeRepository,
                               PositionRepository positionRepository, RegistrationRepository registrationRepository,
-                              BaseComissRepository baseComissRepository, RegraRepository regraRepository,
+                              CoberturaBaseService coberturaBaseService, RegraRepository regraRepository,
                               SaleRepository saleRepository) {
         this.brandRepository = brandRepository;
         this.storeRepository = storeRepository;
         this.positionRepository = positionRepository;
         this.registrationRepository = registrationRepository;
-        this.baseComissRepository = baseComissRepository;
+        this.coberturaBaseService = coberturaBaseService;
         this.regraRepository = regraRepository;
         this.saleRepository = saleRepository;
     }
@@ -154,25 +154,14 @@ public class ConsultasIaService {
         YearMonth ym = parseCompetencia(competencia);
         BaseComissaoResponse naoEncontrada = new BaseComissaoResponse(false, codMarca, codCargo, ym.toString(), null, null);
 
-        Optional<Brand> brand = brandRepository.findByCode(codMarca);
-        Optional<Position> position = positionRepository.findByCode(codCargo);
-        if (brand.isEmpty() || position.isEmpty()) {
-            return naoEncontrada;
-        }
-
-        Optional<BaseComiss> base = baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
-                brand.get().getId(), position.get().getId(), ym.atDay(1));
-        if (base.isEmpty()) {
-            base = baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(
-                    brand.get().getId(), position.get().getId());
-        }
-        if (base.isEmpty() || base.get().getPercentage() == null) {
+        Optional<BigDecimal> taxaOpt = coberturaBaseService.obterTaxaBase(codMarca, codCargo, ym);
+        if (taxaOpt.isEmpty()) {
             return naoEncontrada;
         }
         return new BaseComissaoResponse(
                 true, codMarca, codCargo, ym.toString(),
-                base.get().getPercentage().setScale(4, java.math.RoundingMode.HALF_UP),
-                YearMonth.from(base.get().getReferenceMonth()).toString()
+                taxaOpt.get().setScale(4, java.math.RoundingMode.HALF_UP),
+                ym.toString()
         );
     }
 
@@ -287,6 +276,15 @@ public class ConsultasIaService {
                         blankToNull(matricula)),
                 PageRequest.of(page, tamanho, Sort.by("saleDate").ascending().and(Sort.by("id").ascending())));
 
+        if (pagina.isEmpty()) {
+            return new PaginaDTO<>(false, List.of(), pagina.getNumber(), tamanho, pagina.getTotalPages(), pagina.getTotalElements(), pagina.isLast());
+        }
+
+        List<ReferenciaFaltanteDTO> faltantes = coberturaBaseService.verificarCobertura(pagina.getContent(), ym);
+        if (!faltantes.isEmpty()) {
+            return PaginaDTO.coberturaInsuficiente(pagina.getNumber(), tamanho);
+        }
+
         Function<Sale, VendaSimulacaoDTO> mapper = s -> new VendaSimulacaoDTO(
                 s.getId() != null ? s.getId().toString() : null,
                 s.getRegistration() != null ? s.getRegistration().getRegistration() : null,
@@ -299,6 +297,7 @@ public class ConsultasIaService {
                 s.getSaleChannel()
         );
         return new PaginaDTO<>(
+                true,
                 pagina.getContent().stream().map(mapper).toList(),
                 pagina.getNumber(),
                 pagina.getSize(),

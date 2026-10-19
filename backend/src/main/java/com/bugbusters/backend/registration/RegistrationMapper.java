@@ -41,7 +41,8 @@ public class RegistrationMapper {
                 entity.getPosition(),
                 entity.getStore(),
                 entity.getAdmissDate(),
-                entity.getDemissDate());
+                entity.getDemissDate(),
+                entity.getIdLoteOrigem());
     }
 
 }

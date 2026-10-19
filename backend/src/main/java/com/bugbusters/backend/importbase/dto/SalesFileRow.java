@@ -11,10 +11,15 @@ public class SalesFileRow {
     private String storeDescription;
     private String registration;
     private BigDecimal saleValue;
-
+    private int linha;
 
     public SalesFileRow(LocalDate referenceDate, Integer brandCode, String brandDescription, Integer storeCode,
         String storeDescription, String registration, BigDecimal saleValue) {
+        this(referenceDate, brandCode, brandDescription, storeCode, storeDescription, registration, saleValue, 0);
+    }
+
+    public SalesFileRow(LocalDate referenceDate, Integer brandCode, String brandDescription, Integer storeCode,
+        String storeDescription, String registration, BigDecimal saleValue, int linha) {
         this.referenceDate = referenceDate;
         this.brandCode = brandCode;
         this.brandDescription = brandDescription;
@@ -22,6 +27,15 @@ public class SalesFileRow {
         this.storeDescription = storeDescription;
         this.registration = registration;
         this.saleValue = saleValue;
+        this.linha = linha;
+    }
+
+    public int getLinha() {
+        return linha;
+    }
+
+    public void setLinha(int linha) {
+        this.linha = linha;
     }
 
 
