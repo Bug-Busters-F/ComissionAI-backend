@@ -12,6 +12,8 @@ import org.springframework.data.repository.query.Param;
 public interface RegistrationRepository extends JpaRepository<Registration, UUID> {
     public Optional<Registration> findByRegistration(String registration);
 
+    boolean existsByRegistration(String registration);
+
     public Optional<Registration> findByRegistrationIgnoreCase(String registration);
 
     @org.springframework.data.jpa.repository.Query("""
@@ -29,6 +31,14 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
     boolean existsByStoreId(UUID storeId);
 
     boolean existsByPositionId(UUID positionId);
+
+    java.util.List<Registration> findByIdLoteOrigem(String idLoteOrigem);
+
+    long countByIdLoteOrigem(String idLoteOrigem);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("DELETE FROM Registration r WHERE r.idLoteOrigem = :idLoteOrigem")
+    int deleteByIdLoteOrigem(@org.springframework.data.repository.query.Param("idLoteOrigem") String idLoteOrigem);
 }
 
 

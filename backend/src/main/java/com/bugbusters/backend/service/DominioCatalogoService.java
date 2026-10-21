@@ -7,11 +7,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import java.time.YearMonth;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.bugbusters.backend.basecomiss.BaseComiss;
-import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.model.CatalogoDominioDomRock;
@@ -35,19 +35,19 @@ public class DominioCatalogoService {
     private final BrandRepository brandRepository;
     private final PositionRepository positionRepository;
     private final StoreRepository storeRepository;
-    private final BaseComissRepository baseComissRepository;
+    private final CoberturaBaseService coberturaBaseService;
     private final RegistrationRepository registrationRepository;
 
     public DominioCatalogoService(
             BrandRepository brandRepository,
             PositionRepository positionRepository,
             StoreRepository storeRepository,
-            BaseComissRepository baseComissRepository,
+            CoberturaBaseService coberturaBaseService,
             RegistrationRepository registrationRepository) {
         this.brandRepository = brandRepository;
         this.positionRepository = positionRepository;
         this.storeRepository = storeRepository;
-        this.baseComissRepository = baseComissRepository;
+        this.coberturaBaseService = coberturaBaseService;
         this.registrationRepository = registrationRepository;
     }
 
@@ -107,25 +107,31 @@ public class DominioCatalogoService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<BigDecimal> obterTaxaBaseContratual(Integer codMarca, Integer codCargo, String descriCargo) {
-        if (codMarca != null && codCargo != null && baseComissRepository != null) {
-            Optional<BaseComiss> bcOpt = baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(codMarca, codCargo);
-            if (bcOpt.isPresent() && bcOpt.get().getPercentage() != null) {
-                return Optional.of(bcOpt.get().getPercentage());
-            }
+    public Optional<BigDecimal> obterTaxaBaseContratual(Integer codMarca, Integer codCargo, String descriCargo, YearMonth competencia) {
+        if (codMarca != null && codCargo != null && coberturaBaseService != null && competencia != null) {
+            return coberturaBaseService.obterTaxaBase(codMarca, codCargo, competencia);
         }
-        return CatalogoDominioDomRock.obterTaxaBaseContratual(codMarca, codCargo, descriCargo);
+        return Optional.empty();
     }
 
     @Transactional(readOnly = true)
-    public BigDecimal obterTaxaBaseComFallback(Integer codMarca, Integer codCargo, String descriCargo) {
-        return obterTaxaBaseContratual(codMarca, codCargo, descriCargo)
-                .orElse(CatalogoDominioDomRock.TAXA_BASE_FALLBACK_GERAL);
+    public Optional<BigDecimal> obterTaxaBaseContratual(Integer codMarca, Integer codCargo, String descriCargo) {
+        return obterTaxaBaseContratual(codMarca, codCargo, descriCargo, YearMonth.now());
     }
 
     @Transactional(readOnly = true)
-    public String gerarDescricaoReferencia(Integer codMarca, String descrMarca, Integer codCargo, String descriCargo) {
-        Optional<BigDecimal> taxaOpt = obterTaxaBaseContratual(codMarca, codCargo, descriCargo);
+    public Optional<BigDecimal> obterTaxaBaseComFallback(Integer codMarca, Integer codCargo, String descriCargo) {
+        return Optional.empty();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<BigDecimal> obterTaxaBaseComFallback(Integer codMarca, Integer codCargo, String descriCargo, YearMonth competencia) {
+        return Optional.empty();
+    }
+
+    @Transactional(readOnly = true)
+    public String gerarDescricaoReferencia(Integer codMarca, String descrMarca, Integer codCargo, String descriCargo, YearMonth competencia) {
+        Optional<BigDecimal> taxaOpt = obterTaxaBaseContratual(codMarca, codCargo, descriCargo, competencia);
         if (taxaOpt.isPresent()) {
             String marcaNome = descrMarca != null ? descrMarca : obterMarcas().getOrDefault(codMarca, "Marca " + codMarca);
             String cargoNome = descriCargo != null ? descriCargo : (codCargo != null ? obterCargos().getOrDefault(codCargo, "Cargo " + codCargo) : "Geral");
@@ -133,6 +139,11 @@ public class DominioCatalogoService {
             return String.format("Taxa Contratual Padrão (Marca %s - %s: %s%%)", marcaNome, cargoNome, taxaPct.toPlainString());
         }
         return "Taxa Contratual Padrão";
+    }
+
+    @Transactional(readOnly = true)
+    public String gerarDescricaoReferencia(Integer codMarca, String descrMarca, Integer codCargo, String descriCargo) {
+        return gerarDescricaoReferencia(codMarca, descrMarca, codCargo, descriCargo, YearMonth.now());
     }
 
     @Transactional(readOnly = true)

@@ -76,6 +76,8 @@ public class CalculoService {
     private final RegraRepository regraRepository;
     private final SaleRepository saleRepository;
     private final TaxaComissaoResolver taxaComissaoResolver;
+    private final CoberturaBaseService coberturaBaseService;
+    private final com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia;
     private final RegistrationRepository registrationRepository;
     private final BrandRepository brandRepository;
     private final StoreRepository storeRepository;
@@ -89,14 +91,18 @@ public class CalculoService {
                           RegraRepository regraRepository,
                           SaleRepository saleRepository,
                           TaxaComissaoResolver taxaComissaoResolver,
-                          RegistrationRepository registrationRepository,
-                          BrandRepository brandRepository,
-                          StoreRepository storeRepository) {
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) CoberturaBaseService coberturaBaseService,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) RegistrationRepository registrationRepository,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) BrandRepository brandRepository,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) StoreRepository storeRepository) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.regraRepository = regraRepository;
         this.saleRepository = saleRepository;
         this.taxaComissaoResolver = taxaComissaoResolver;
+        this.coberturaBaseService = coberturaBaseService;
+        this.travaCompetencia = travaCompetencia;
         this.registrationRepository = registrationRepository;
         this.brandRepository = brandRepository;
         this.storeRepository = storeRepository;
@@ -106,14 +112,44 @@ public class CalculoService {
                           LogCalculoRepository logCalculoRepository,
                           RegraRepository regraRepository,
                           SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          CoberturaBaseService coberturaBaseService,
+                          com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, travaCompetencia, null, null, null);
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          CoberturaBaseService coberturaBaseService) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, null, null, null, null);
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          RegistrationRepository registrationRepository,
+                          BrandRepository brandRepository,
+                          StoreRepository storeRepository) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, registrationRepository, brandRepository, storeRepository);
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
                           TaxaComissaoResolver taxaComissaoResolver) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, null, null, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
                           LogCalculoRepository logCalculoRepository,
                           RegraRepository regraRepository) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null, null, null, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null, null, null, null, null, null);
     }
 
     /**
@@ -167,7 +203,12 @@ public class CalculoService {
             );
         }
 
-        // 2. Valida vínculos essenciais e seleciona taxa (S1-B08)
+        // 2. Validação rigorosa de cobertura de taxa base ANTES de qualquer cálculo ou escrita
+        if (coberturaBaseService != null) {
+            coberturaBaseService.validarCobertura(sale);
+        }
+
+        // 3. Valida vínculos essenciais e seleciona taxa (S1-B08)
         ResolucaoTaxaResult resolucao = taxaComissaoResolver != null
                 ? taxaComissaoResolver.resolverTaxa(sale)
                 : ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
@@ -192,6 +233,10 @@ public class CalculoService {
         ComissaoCalculada calculada = calcularComissaoTotal(sale.getValue(), taxaAplicada, resolucao);
         BigDecimal comissao = calculada.total();
         UUID protocolo = UUID.randomUUID();
+
+        if (travaCompetencia != null && sale.getSaleDate() != null) {
+            travaCompetencia.adquirirTrava(java.time.YearMonth.from(sale.getSaleDate()).toString());
+        }
 
         Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
                 ? sale.getRegistration().getPosition().getCode() : null;
@@ -341,6 +386,15 @@ public class CalculoService {
         LocalDate fim = ym.atEndOfMonth();
 
         List<Sale> vendas = saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(inicio, fim);
+
+        // Validação centralizada de cobertura por marca, cargo e competência ANTES dos cálculos e escritas
+        if (coberturaBaseService != null && !vendas.isEmpty()) {
+            coberturaBaseService.validarCobertura(vendas, ym);
+        }
+
+        if (travaCompetencia != null) {
+            travaCompetencia.adquirirTrava(ym.toString());
+        }
 
         List<CalculoItemResponseDTO> sucessos = new ArrayList<>();
         List<CalculoImpedimentoDTO> impedimentos = new ArrayList<>();
@@ -658,6 +712,7 @@ public class CalculoService {
             return tratarResultadoExistente(request, existente);
         }
 
+<<<<<<< HEAD
         // 2. Localiza venda persistida ou constrói venda com vínculos necessários (BACK-14)
         Sale sale = null;
         if (request.idVenda() != null && saleRepository != null) {
@@ -749,6 +804,22 @@ public class CalculoService {
                 ? sale.getRegistration().getPosition().getCode() : null;
         Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : request.codMarca();
         Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : request.codLoja();
+=======
+        // Validação de cobertura ANTES de qualquer escrita em tb_resultado_calculo ou log imutável
+        if (coberturaBaseService != null) {
+            coberturaBaseService.validarCoberturaAvulsa(
+                    request.codMarca(), request.descrMarca(), request.matricula(), request.dataVenda()
+            );
+        }
+
+        // 2. Não existe: efetua novo cálculo e persiste resultado e log imutável
+        BigDecimal comissao = request.valorVenda().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
+        UUID protocolo = UUID.randomUUID();
+
+        if (travaCompetencia != null && request.dataVenda() != null) {
+            travaCompetencia.adquirirTrava(java.time.YearMonth.from(request.dataVenda()).toString());
+        }
+>>>>>>> origin/dev
 
         ResultadoCalculo novoResultado = new ResultadoCalculo(
                 protocolo,

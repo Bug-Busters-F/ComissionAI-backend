@@ -40,14 +40,15 @@ public record InterpretacaoMultiplaResponse(
         if (quantidadeBlocos == null) {
             quantidadeBlocos = propostas.size();
         }
-        if (possuiPendencias == null) {
-            possuiPendencias = propostas.stream().anyMatch(p -> p.pendencias() != null && !p.pendencias().isEmpty());
-        }
-        if (todasCompletas == null) {
-            todasCompletas = propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa()));
-        }
         if (pendenciasGerais == null) {
             pendenciasGerais = List.of();
+        }
+        if (possuiPendencias == null) {
+            possuiPendencias = !pendenciasGerais.isEmpty() || propostas.stream().anyMatch(p -> p.pendencias() != null && !p.pendencias().isEmpty());
+        }
+        if (todasCompletas == null) {
+            boolean temImpeditivaGeral = pendenciasGerais.stream().anyMatch(PendenciaPropostaDTO::isImpeditiva);
+            todasCompletas = !propostas.isEmpty() && !temImpeditivaGeral && propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa()));
         }
     }
 }

@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.time.YearMonth;
 import com.bugbusters.backend.basecomiss.BaseComiss;
 import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
@@ -45,12 +46,21 @@ public class TaxaComissaoResolver {
     private static final Logger log = LoggerFactory.getLogger(TaxaComissaoResolver.class);
     private static final Long REGRA_BASE_ID = 1L;
 
-    private final BaseComissRepository baseComissRepository;
+    private final CoberturaBaseService coberturaBaseService;
     private final RegraRepository regraRepository;
+    private final BaseComissRepository baseComissRepository;
 
-    public TaxaComissaoResolver(BaseComissRepository baseComissRepository, RegraRepository regraRepository) {
-        this.baseComissRepository = baseComissRepository;
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaxaComissaoResolver(CoberturaBaseService coberturaBaseService,
+                                RegraRepository regraRepository,
+                                @org.springframework.beans.factory.annotation.Autowired(required = false) BaseComissRepository baseComissRepository) {
+        this.coberturaBaseService = coberturaBaseService;
         this.regraRepository = regraRepository;
+        this.baseComissRepository = baseComissRepository;
+    }
+
+    public TaxaComissaoResolver(CoberturaBaseService coberturaBaseService, RegraRepository regraRepository) {
+        this(coberturaBaseService, regraRepository, null);
     }
 
     /**
@@ -356,7 +366,8 @@ public class TaxaComissaoResolver {
     }
 
     /**
-     * Consulta a taxa padrão em tb_basecomiss para o par Marca + Cargo na competência ou mais recente.
+     * Consulta a taxa padrão em tb_basecomiss delegando exclusivamente para CoberturaBaseService.
+     * Regra adotada: reference_month estritamente igual à competência da venda.
      */
     private Optional<BigDecimal> buscarTaxaBase(Brand brand, Position position, LocalDate saleDate) {
         return buscarTaxaBase(brand, position, saleDate, null);
@@ -369,30 +380,20 @@ public class TaxaComissaoResolver {
 
         LocalDate mesRef = saleDate.withDayOfMonth(1);
         if (contexto != null && contexto.basesComissao() != null) {
-            return buscarBaseComissEmMemoria(contexto.basesComissao(), brand, position, mesRef)
-                    .map(BaseComiss::getPercentage);
-        }
-
-        Optional<BaseComiss> baseComissOpt = Optional.empty();
-
-        if (brand.getId() != null && position.getId() != null) {
-            baseComissOpt = baseComissRepository.findFirstByBrandIdAndPositionIdAndReferenceMonth(
-                    brand.getId(), position.getId(), mesRef
-            );
-            if (baseComissOpt.isEmpty()) {
-                baseComissOpt = baseComissRepository.findFirstByBrandIdAndPositionIdOrderByReferenceMonthDesc(
-                        brand.getId(), position.getId()
-                );
+            Optional<BaseComiss> emMemoria = buscarBaseComissEmMemoria(contexto.basesComissao(), brand, position, mesRef);
+            if (emMemoria.isPresent()) {
+                return emMemoria.map(BaseComiss::getPercentage);
             }
         }
 
-        if (baseComissOpt.isEmpty() && brand.getCode() != null && position.getCode() != null) {
-            baseComissOpt = baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(
-                    brand.getCode(), position.getCode()
-            );
+        if (brand.getCode() == null || position.getCode() == null) {
+            return Optional.empty();
         }
-
-        return baseComissOpt.map(BaseComiss::getPercentage);
+        YearMonth ym = YearMonth.from(saleDate);
+        if (coberturaBaseService != null) {
+            return coberturaBaseService.obterTaxaBase(brand.getCode(), position.getCode(), ym);
+        }
+        return Optional.empty();
     }
 
     private boolean regraAplica(Regra r, LocalDate saleDate, Integer codMarca, Integer codLoja, Integer codCargo, String matricula, String canal) {

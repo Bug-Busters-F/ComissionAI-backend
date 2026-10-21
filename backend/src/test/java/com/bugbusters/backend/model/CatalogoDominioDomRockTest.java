@@ -174,7 +174,12 @@ class CatalogoDominioDomRockTest {
     @Test
     @DisplayName("8. InterpretadorService deve resolver taxa contratual dinâmica a partir de Marca e Cargo")
     void deveResolverTaxaContratualDinamicaNoInterpretador() {
-        InterpretadorService service = new InterpretadorService(null);
+        com.bugbusters.backend.service.CoberturaBaseService cobertura = org.mockito.Mockito.mock(com.bugbusters.backend.service.CoberturaBaseService.class);
+        org.mockito.Mockito.when(cobertura.obterTaxaBase(org.mockito.ArgumentMatchers.eq(30), org.mockito.ArgumentMatchers.eq(100), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(new BigDecimal("0.0200")));
+
+        com.bugbusters.backend.service.DominioCatalogoService dominio = new com.bugbusters.backend.service.DominioCatalogoService(null, null, null, cobertura, null);
+        InterpretadorService service = new InterpretadorService(null, null, dominio, null);
 
         // Texto com acréscimo para AZUL (30) e VENDEDOR LOJA (100) -> base = 0.0200, ajuste = 0.0100 -> total 0.0300
         OperacaoBaseDTO op = service.extrairOperacaoBase(
@@ -183,7 +188,8 @@ class CatalogoDominioDomRockTest {
                 30,
                 "AZUL",
                 100,
-                "VENDEDOR LOJA"
+                "VENDEDOR LOJA",
+                java.time.YearMonth.of(2026, 10)
         );
 
         assertEquals(TipoOperacaoBase.ACRESCIMO_PONTOS, op.tipoOperacao());

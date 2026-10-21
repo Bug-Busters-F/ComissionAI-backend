@@ -114,11 +114,36 @@ class ControllerRoutesTest {
             r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
             registrationRepository.save(r);
         }
-        if (baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(10, 150).isEmpty()) {
+        if (registrationRepository.findByRegistration("MATRIC-1234").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-1234");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (registrationRepository.findByRegistration("MATRIC-IDEMPOTENTE").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-IDEMPOTENTE");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (registrationRepository.findByRegistration("MATRIC-CONFLITO").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-CONFLITO");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, java.time.LocalDate.of(2026, 10, 1)).isEmpty()) {
             com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
                     brandRepository.findByCode(10).get(),
                     positionRepository.findByCode(150).get(),
-                    new java.math.BigDecimal("0.1000")
+                    new java.math.BigDecimal("0.1000"),
+                    java.time.LocalDate.of(2026, 10, 1)
             );
             baseComissRepository.save(bc);
         }
@@ -467,7 +492,8 @@ class ControllerRoutesTest {
 
         var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
-                .param("importType", "SALES"))
+                .param("importType", "SALES")
+                .param("competencia", "2026-10"))
                 .andExpect(status().isAccepted())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.reportId").isNumber())

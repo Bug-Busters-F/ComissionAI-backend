@@ -27,6 +27,12 @@ public record BaseComissResponseDTO(
         BigDecimal percentual,
 
         @Schema(description = "Mês de referência da competência contratual", example = "2025-12-01")
-        LocalDate mesReferencia
+        LocalDate mesReferencia,
+
+        @Schema(description = "Identificador do lote de origem", example = "550e8400-e29b-41d4-a716-446655440000", nullable = true)
+        String idLoteOrigem
 ) {
+    public BaseComissResponseDTO(UUID id, Integer codMarca, String descrMarca, Integer codCargo, String descriCargo, BigDecimal percentual, LocalDate mesReferencia) {
+        this(id, codMarca, descrMarca, codCargo, descriCargo, percentual, mesReferencia, null);
+    }
 }

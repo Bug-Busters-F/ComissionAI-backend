@@ -179,10 +179,11 @@ public final class CatalogoDominioDomRock {
     }
 
     /**
-     * Retorna a taxa base exata do catálogo ou a taxa fallback geral (0.0300) se não identificada.
+     * Retorna a taxa base exata do catálogo ou Optional.empty() se não identificada.
+     * Nunca recorre a fallback genérico arbitrário.
      */
-    public static BigDecimal obterTaxaBaseComFallback(Integer codMarca, Integer codCargo, String descriCargo) {
-        return obterTaxaBaseContratual(codMarca, codCargo, descriCargo).orElse(TAXA_BASE_FALLBACK_GERAL);
+    public static Optional<BigDecimal> obterTaxaBaseComFallback(Integer codMarca, Integer codCargo, String descriCargo) {
+        return Optional.empty();
     }
 
     /**

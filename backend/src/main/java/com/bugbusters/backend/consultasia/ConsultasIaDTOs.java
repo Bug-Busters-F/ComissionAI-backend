@@ -107,11 +107,21 @@ public final class ConsultasIaDTOs {
 
     @Schema(description = "Página de resultados")
     public record PaginaDTO<T>(
+            @Schema(description = "false quando não há dados ou a cobertura de base da competência é insuficiente")
+            boolean encontrado,
             List<T> content,
             int number,
             int size,
             int totalPages,
             long totalElements,
             boolean last
-    ) {}
+    ) {
+        public PaginaDTO(List<T> content, int number, int size, int totalPages, long totalElements, boolean last) {
+            this(content != null && !content.isEmpty(), content, number, size, totalPages, totalElements, last);
+        }
+
+        public static <T> PaginaDTO<T> coberturaInsuficiente(int number, int size) {
+            return new PaginaDTO<>(false, List.of(), number, size, 0, 0L, true);
+        }
+    }
 }

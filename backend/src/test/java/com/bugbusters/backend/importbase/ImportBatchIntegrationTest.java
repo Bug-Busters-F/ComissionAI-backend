@@ -35,12 +35,15 @@ class ImportBatchIntegrationTest {
         assertEquals(1L, complete(excel(new Object[][] {hr(registration)}), ImportType.HR).totalLinhas());
         assertEquals(1L, complete(excel(new Object[][] {
                 {"2026-10-01", 991, "Marca Batch", 991, "Loja Batch", registration, 150.0}
-        }), ImportType.SALES).totalLinhas());
+        }), ImportType.SALES, "2026-10").totalLinhas());
         assertEquals(1L, complete(excel(new Object[][] {
                 {991, "Marca Batch", 991, "Cargo Batch", 0.05}
-        }), ImportType.COMISSIONS).totalLinhas());
+        }), ImportType.COMISSIONS, "2026-10").totalLinhas());
         assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_EXECUTION WHERE STATUS = 'COMPLETED'", Long.class) >= 3);
         assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_sales WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
+        assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_registration WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
+        assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_basecomiss WHERE id_lote_origem IS NOT NULL", Long.class) >= 1);
+        assertTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_envio_arquivo WHERE status = 'CONCLUIDO'", Long.class) >= 3);
         for (String filePath : jdbc.queryForList("SELECT PARAMETER_VALUE FROM BATCH_JOB_EXECUTION_PARAMS WHERE PARAMETER_NAME = 'filePath'", String.class)) {
             assertFalse(Files.exists(Path.of(filePath)), "Temporary upload must be removed after execution");
         }
@@ -69,18 +72,88 @@ class ImportBatchIntegrationTest {
     }
 
     @Test
-    void duplicateRegistrationRollsBackAuxiliaryRecords() throws Exception {
-        long registrations = count("tb_registration");
-        long stores = count("tb_store");
-        long positions = count("tb_position");
-        String registration = UUID.randomUUID().toString();
-        Object[] first = hr(registration);
-        first[3] = 993;
-        first[8] = 993;
-        assertEquals(ImportStatus.FALHOU, complete(excel(new Object[][] {first, first}), ImportType.HR).status());
-        assertEquals(registrations, count("tb_registration"));
-        assertEquals(stores, count("tb_store"));
-        assertEquals(positions, count("tb_position"));
+    void overlappingAndDuplicateRegistrationsAreHandledCleanly() throws Exception {
+        String regA = "REG-A-" + UUID.randomUUID();
+        String regB = "REG-B-" + UUID.randomUUID();
+        String regC = "REG-C-" + UUID.randomUUID();
+
+        // Lote 1 com regA e regB
+        ImportResponse lote1 = complete(excel(new Object[][] {
+                hr(regA),
+                hr(regB)
+        }), ImportType.HR);
+        assertEquals(ImportStatus.CONCLUIDO, lote1.status());
+        assertEquals(2L, lote1.totalLinhas());
+
+        String idLote1 = jdbc.queryForObject("SELECT id_lote FROM tb_envio_arquivo WHERE report_id = ?", String.class, lote1.reportId());
+
+        // Lote 2 com regB (repetida) e regC (nova), além de regC repetida internamente no mesmo arquivo
+        ImportResponse lote2 = complete(excel(new Object[][] {
+                hr(regB),
+                hr(regC),
+                hr(regC)
+        }), ImportType.HR);
+        assertEquals(ImportStatus.CONCLUIDO, lote2.status());
+        assertEquals(1L, lote2.totalLinhas()); // Apenas 1 nova inserida
+
+        String idLote2 = jdbc.queryForObject("SELECT id_lote FROM tb_envio_arquivo WHERE report_id = ?", String.class, lote2.reportId());
+
+        // Verificar id_lote_origem
+        String regAOrigem = jdbc.queryForObject("SELECT id_lote_origem FROM tb_registration WHERE registration = ?", String.class, regA);
+        String regBOrigem = jdbc.queryForObject("SELECT id_lote_origem FROM tb_registration WHERE registration = ?", String.class, regB);
+        String regCOrigem = jdbc.queryForObject("SELECT id_lote_origem FROM tb_registration WHERE registration = ?", String.class, regC);
+
+        assertEquals(idLote1, regAOrigem);
+        assertEquals(idLote1, regBOrigem, "MATRIC-B deve manter o id_lote_origem do Lote 1");
+        assertEquals(idLote2, regCOrigem, "MATRIC-C deve ter o id_lote_origem do Lote 2");
+
+        // Excluir Lote 2
+        service.excluirLote(lote2.reportId(), "TEST_USER", "Exclusão de teste");
+
+        // MATRIC-C removida, MATRIC-A e MATRIC-B preservadas
+        assertEquals(1L, jdbc.queryForObject("SELECT COUNT(*) FROM tb_registration WHERE registration = ?", Long.class, regA));
+        assertEquals(1L, jdbc.queryForObject("SELECT COUNT(*) FROM tb_registration WHERE registration = ?", Long.class, regB));
+        assertEquals(0L, jdbc.queryForObject("SELECT COUNT(*) FROM tb_registration WHERE registration = ?", Long.class, regC));
+    }
+
+    @Test
+    void partialSalesImportRecordsWarningAndInconsistency() throws Exception {
+        String regValida = "REG-SALE-" + UUID.randomUUID();
+        complete(excel(new Object[][] {hr(regValida)}), ImportType.HR);
+
+        String regInexistente = "REG-ORPHAN-" + UUID.randomUUID();
+
+        // 2 vendas: 1 válida e 1 com matrícula inexistente
+        ImportResponse report = complete(excel(new Object[][] {
+                {"2026-10-01", 995, "Marca", 995, "Loja", regValida, 200.0},
+                {"2026-10-02", 995, "Marca", 995, "Loja", regInexistente, 300.0}
+        }), ImportType.SALES, "2026-10");
+
+        assertEquals(ImportStatus.CONCLUIDO, report.status());
+        assertEquals(1L, report.totalLinhas()); // 1 linha válida salva
+        assertNotNull(report.mensagem());
+        assertTrue(report.mensagem().contains("advertências"));
+
+        // Conferir na tabela tb_envio_arquivo
+        Integer totalLinhas = jdbc.queryForObject("SELECT total_linhas FROM tb_envio_arquivo WHERE report_id = ?", Integer.class, report.reportId());
+        Integer linhasValidas = jdbc.queryForObject("SELECT linhas_validas FROM tb_envio_arquivo WHERE report_id = ?", Integer.class, report.reportId());
+        assertEquals(2, totalLinhas);
+        assertEquals(1, linhasValidas);
+
+        // Conferir em tb_inconsistencia_importacao
+        Long envioId = jdbc.queryForObject("SELECT id FROM tb_envio_arquivo WHERE report_id = ?", Long.class, report.reportId());
+        Long inconsistencias = jdbc.queryForObject("SELECT COUNT(*) FROM tb_inconsistencia_importacao WHERE envio_id = ?", Long.class, envioId);
+        assertEquals(1L, inconsistencias);
+
+        String severidade = jdbc.queryForObject("SELECT severidade FROM tb_inconsistencia_importacao WHERE envio_id = ?", String.class, envioId);
+        String campo = jdbc.queryForObject("SELECT campo FROM tb_inconsistencia_importacao WHERE envio_id = ?", String.class, envioId);
+        String motivo = jdbc.queryForObject("SELECT motivo FROM tb_inconsistencia_importacao WHERE envio_id = ?", String.class, envioId);
+        Integer linha = jdbc.queryForObject("SELECT linha FROM tb_inconsistencia_importacao WHERE envio_id = ?", Integer.class, envioId);
+
+        assertEquals("ADVERTENCIA", severidade);
+        assertEquals("matricula", campo);
+        assertTrue(motivo.contains(regInexistente));
+        assertEquals(3, linha);
     }
 
     @Test
@@ -88,7 +161,7 @@ class ImportBatchIntegrationTest {
         long sales = count("tb_sales");
         ImportResponse report = complete(excel(new Object[][] {
                         {"2026-10-01", 994, "Marca", 994, "Loja", UUID.randomUUID().toString(), 10.0}
-                }), ImportType.SALES);
+                }), ImportType.SALES, "2026-10");
         assertEquals(ImportStatus.FALHOU, report.status());
         assertTrue(report.mensagem().contains("Matrícula não cadastrada"));
         assertEquals(sales, count("tb_sales"));
@@ -166,7 +239,11 @@ class ImportBatchIntegrationTest {
     }
 
     private ImportResponse complete(MockMultipartFile file, ImportType type) throws Exception {
-        return awaitReport(service.processImport(file, type).reportId());
+        return complete(file, type, null);
+    }
+
+    private ImportResponse complete(MockMultipartFile file, ImportType type, String competencia) throws Exception {
+        return awaitReport(service.processImport(file, type, competencia).reportId());
     }
 
     private ImportResponse awaitReport(long id) throws Exception {
