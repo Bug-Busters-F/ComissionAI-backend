@@ -11,8 +11,8 @@ ALTER TABLE tb_log_calculo_imutavel ADD COLUMN IF NOT EXISTS versao_regra VARCHA
 ALTER TABLE tb_log_calculo_imutavel ADD COLUMN IF NOT EXISTS parametros_aplicados TEXT;
 
 -- 2. Suporte à rastreabilidade de origem em tb_sales
-ALTER TABLE IF EXISTS tb_sales ADD COLUMN IF NOT EXISTS tipo_venda VARCHAR(50) DEFAULT 'INFORMADA';
-ALTER TABLE IF EXISTS tb_sales ADD COLUMN IF NOT EXISTS id_lote_origem VARCHAR(100);
+ALTER TABLE tb_sales ADD COLUMN IF NOT EXISTS tipo_venda VARCHAR(50) DEFAULT 'INFORMADA';
+ALTER TABLE tb_sales ADD COLUMN IF NOT EXISTS id_lote_origem VARCHAR(100);
 
 -- 3. Índices adicionais para consulta e auditoria
 CREATE INDEX IF NOT EXISTS idx_log_tipo_venda ON tb_log_calculo_imutavel (tipo_venda);
