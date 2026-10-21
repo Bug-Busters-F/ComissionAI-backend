@@ -37,6 +37,7 @@ public class ReferenciaPublicoService {
     private final CampanhaRepository campanhaRepository;
     private final com.bugbusters.backend.repository.RegraRepository regraRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ReferenciaPublicoService(
             SaleRepository saleRepository,
             CoberturaBaseService coberturaBaseService,
@@ -46,6 +47,14 @@ public class ReferenciaPublicoService {
         this.coberturaBaseService = coberturaBaseService;
         this.campanhaRepository = campanhaRepository;
         this.regraRepository = regraRepository;
+    }
+
+    public ReferenciaPublicoService(
+            SaleRepository saleRepository,
+            com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository,
+            CampanhaRepository campanhaRepository,
+            com.bugbusters.backend.repository.RegraRepository regraRepository) {
+        this(saleRepository, new CoberturaBaseService(baseComissRepository), campanhaRepository, regraRepository);
     }
 
     /**

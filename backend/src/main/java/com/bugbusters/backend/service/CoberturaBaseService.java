@@ -36,10 +36,15 @@ public class CoberturaBaseService {
     private final BaseComissRepository baseComissRepository;
     private final RegistrationRepository registrationRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public CoberturaBaseService(BaseComissRepository baseComissRepository,
                                  RegistrationRepository registrationRepository) {
         this.baseComissRepository = baseComissRepository;
         this.registrationRepository = registrationRepository;
+    }
+
+    public CoberturaBaseService(BaseComissRepository baseComissRepository) {
+        this(baseComissRepository, null);
     }
 
     /**

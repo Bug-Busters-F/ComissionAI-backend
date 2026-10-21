@@ -712,7 +712,13 @@ public class CalculoService {
             return tratarResultadoExistente(request, existente);
         }
 
-<<<<<<< HEAD
+        // Validação de cobertura ANTES de qualquer escrita em tb_resultado_calculo ou log imutável
+        if (coberturaBaseService != null) {
+            coberturaBaseService.validarCoberturaAvulsa(
+                    request.codMarca(), request.descrMarca(), request.matricula(), request.dataVenda()
+            );
+        }
+
         // 2. Localiza venda persistida ou constrói venda com vínculos necessários (BACK-14)
         Sale sale = null;
         if (request.idVenda() != null && saleRepository != null) {
@@ -800,26 +806,14 @@ public class CalculoService {
         BigDecimal comissao = calculada.total();
         UUID protocolo = UUID.randomUUID();
 
+        if (travaCompetencia != null && request.dataVenda() != null) {
+            travaCompetencia.adquirirTrava(java.time.YearMonth.from(request.dataVenda()).toString());
+        }
+
         Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
                 ? sale.getRegistration().getPosition().getCode() : null;
         Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : request.codMarca();
         Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : request.codLoja();
-=======
-        // Validação de cobertura ANTES de qualquer escrita em tb_resultado_calculo ou log imutável
-        if (coberturaBaseService != null) {
-            coberturaBaseService.validarCoberturaAvulsa(
-                    request.codMarca(), request.descrMarca(), request.matricula(), request.dataVenda()
-            );
-        }
-
-        // 2. Não existe: efetua novo cálculo e persiste resultado e log imutável
-        BigDecimal comissao = request.valorVenda().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
-        UUID protocolo = UUID.randomUUID();
-
-        if (travaCompetencia != null && request.dataVenda() != null) {
-            travaCompetencia.adquirirTrava(java.time.YearMonth.from(request.dataVenda()).toString());
-        }
->>>>>>> origin/dev
 
         ResultadoCalculo novoResultado = new ResultadoCalculo(
                 protocolo,

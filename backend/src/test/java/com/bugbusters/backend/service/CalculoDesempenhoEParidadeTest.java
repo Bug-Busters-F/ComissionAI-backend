@@ -131,10 +131,14 @@ class CalculoDesempenhoEParidadeTest {
             return registrationRepository.save(r);
         });
 
-        // Configura taxa base de 4% (0.0400) em tb_basecomiss
-        if (baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(20, 250).isEmpty()) {
-            BaseComiss bc = new BaseComiss(brand, position, new BigDecimal("0.0400"));
-            baseComissRepository.save(bc);
+        // Configura taxa base de 4% (0.0400) em tb_basecomiss para as competências do teste
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(20, 250, LocalDate.of(2026, 9, 1)).isEmpty()) {
+            BaseComiss bc1 = new BaseComiss(brand, position, new BigDecimal("0.0400"), LocalDate.of(2026, 9, 1));
+            baseComissRepository.save(bc1);
+        }
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(20, 250, LocalDate.of(2027, 5, 1)).isEmpty()) {
+            BaseComiss bc2 = new BaseComiss(brand, position, new BigDecimal("0.0400"), LocalDate.of(2027, 5, 1));
+            baseComissRepository.save(bc2);
         }
     }
 
@@ -231,7 +235,10 @@ class CalculoDesempenhoEParidadeTest {
                 calculoService.calcularComissao(request)
         );
 
-        assertTrue(ex.getMessage().contains("sem vínculo") || ex.getMessage().contains("não informado") || ex.getMessage().contains("cargo"));
+        assertTrue(ex.getMessage().contains("sem vínculo")
+                || ex.getMessage().contains("não informado")
+                || ex.getMessage().contains("cargo")
+                || ex.getMessage().contains("cobertura"));
     }
 
     @Test
