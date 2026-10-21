@@ -79,6 +79,19 @@ class CampanhaMultiplasRegrasTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.regras", hasSize(2)));
 
+        // Simular e registrar aceite para conformidade BACK-8
+        String simResponse = mockMvc.perform(post("/api/v1/simulacoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"competencia\":\"2026-10\",\"campanhaId\":%d}", id)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String simId = new JsonMapper().readValue(simResponse, java.util.Map.class).get("id").toString();
+
+        mockMvc.perform(post("/api/v1/simulacoes/" + simId + "/aceite")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite inicial\"}"))
+                .andExpect(status().isOk());
+
         mockMvc.perform(patch("/api/v1/campanhas/" + id + "/estado").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"estado\":\"ATIVA\"}"))
                 .andExpect(status().isOk())
@@ -89,10 +102,28 @@ class CampanhaMultiplasRegrasTest {
                 {"titulo":"Campanha N regras","textoOriginal":"revisada","dataInicio":"2026-10-01","dataFim":"2026-10-31",
                  "regras":[{"codLoja":75,"taxa":0.0350}]}
                 """;
+        // Edição substitui regras e, para segurança, invalida aceite e retorna para DRAFT
         mockMvc.perform(put("/api/v1/campanhas/" + id).contentType(MediaType.APPLICATION_JSON).content(nova))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.regras", hasSize(1)))
                 .andExpect(jsonPath("$.regras[0].taxa", is(0.035)))
+                .andExpect(jsonPath("$.regras[0].status", is("DRAFT")));
+
+        // Nova simulação e aceite da edição revisada para publicação em produção
+        String simNovaResp = mockMvc.perform(post("/api/v1/simulacoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"competencia\":\"2026-10\",\"campanhaId\":%d}", id)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String simNovaId = new JsonMapper().readValue(simNovaResp, java.util.Map.class).get("id").toString();
+
+        mockMvc.perform(post("/api/v1/simulacoes/" + simNovaId + "/aceite")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite da revisão\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + id + "/ativar"))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.regras[0].status", is("ATIVA")));
 
         mockMvc.perform(get("/api/v1/campanhas/" + id))

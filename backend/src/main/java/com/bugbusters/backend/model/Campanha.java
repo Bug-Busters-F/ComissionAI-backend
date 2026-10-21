@@ -33,6 +33,10 @@ public class Campanha {
     @OneToMany(mappedBy = "campanha", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Regra> regras = new ArrayList<>();
 
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "simulacao_aceita_id")
+    private Simulacao simulacaoAceita;
+
     @Column(name = "removido_em")
     private OffsetDateTime removidoEm;
 
@@ -117,4 +121,7 @@ public class Campanha {
     
     public OffsetDateTime getAtualizadoEm() { return atualizadoEm; }
     public void setAtualizadoEm(OffsetDateTime atualizadoEm) { this.atualizadoEm = atualizadoEm; }
+
+    public Simulacao getSimulacaoAceita() { return simulacaoAceita; }
+    public void setSimulacaoAceita(Simulacao simulacaoAceita) { this.simulacaoAceita = simulacaoAceita; }
 }

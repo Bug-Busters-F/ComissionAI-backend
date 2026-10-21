@@ -9,7 +9,10 @@ import com.bugbusters.backend.dto.error.ApiErrorResponse;
 import com.bugbusters.backend.dto.referencia.CompetenciaReferenciaDTO;
 import com.bugbusters.backend.dto.referencia.RecortePublicoRequest;
 import com.bugbusters.backend.dto.referencia.RecortePublicoResponse;
+import com.bugbusters.backend.dto.simulacao.SimulacaoCenariosRequest;
+import com.bugbusters.backend.dto.simulacao.SimulacaoCenariosResponse;
 import com.bugbusters.backend.service.ReferenciaPublicoService;
+import com.bugbusters.backend.service.SimulacaoCenariosService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,13 +24,20 @@ import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api/v1/referencias")
-@Tag(name = "Seleção de Referência e Recorte de Públicos", description = "Disponibilização de competências históricas e recorte reutilizável da união de públicos sem duplicação de vendas")
+@Tag(name = "Seleção de Referência e Recorte de Públicos", description = "Disponibilização de competências históricas, recorte reutilizável da união de públicos e simulação de cenários")
 public class ReferenciaController {
 
     private final ReferenciaPublicoService service;
+    private final SimulacaoCenariosService simulacaoService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReferenciaController(ReferenciaPublicoService service, SimulacaoCenariosService simulacaoService) {
+        this.service = service;
+        this.simulacaoService = simulacaoService;
+    }
 
     public ReferenciaController(ReferenciaPublicoService service) {
-        this.service = service;
+        this(service, null);
     }
 
     @Operation(
@@ -90,5 +100,44 @@ public class ReferenciaController {
     public ResponseEntity<RecortePublicoResponse> recortarPublicoGet(
             @ModelAttribute RecortePublicoRequest request) {
         return ResponseEntity.ok(service.recortarUniaoPublicos(request));
+    }
+
+    @Operation(
+            summary = "Simular cenários de impacto financeiro, sensibilidade e projeção temporal (POST)",
+            description = """
+                    Executa a simulação em sandbox pelo motor compartilhado de cálculo sobre as vendas recortadas da competência:
+                    - Cenário Base: comissão calculada estritamente pela taxa contratual de tb_basecomiss (ignora outras campanhas ativas).
+                    - Cenário Proposta (100%): aplicação hipotética das regras revisadas sem alterar datas históricas; se nenhuma regra aplicar, fallback na taxa base.
+                    - Cenários de Sensibilidade (80%, 120%, 150%): recálculo por venda escalando o valor e reavaliando faixas monetárias dinamicamente.
+                    - Projeção Temporal: cálculo pro-rata pelos dias inclusivos da campanha ÷ 30.
+                    - Sem persistência em tb_resultado_calculo e sem lançamento de comissões reais.
+                    """
+    )
+    @ApiResponse(responseCode = "200", description = "Simulação de cenários executada com sucesso")
+    @ApiResponse(responseCode = "400", description = "Parâmetros inválidos ou regras ausentes", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/simular-cenarios")
+    public ResponseEntity<SimulacaoCenariosResponse> simularCenariosPost(
+            @Valid @RequestBody SimulacaoCenariosRequest request) {
+        if (simulacaoService == null) {
+            throw new IllegalStateException("Serviço de simulação de cenários não inicializado.");
+        }
+        return ResponseEntity.ok(simulacaoService.simularCenarios(request));
+    }
+
+    @Operation(
+            summary = "Simular cenários de impacto financeiro, sensibilidade e projeção temporal (GET)",
+            description = "Atalho para simulação de cenários recebendo os parâmetros via Query String."
+    )
+    @ApiResponse(responseCode = "200", description = "Simulação de cenários executada com sucesso")
+    @ApiResponse(responseCode = "400", description = "Parâmetros inválidos", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/simular-cenarios")
+    public ResponseEntity<SimulacaoCenariosResponse> simularCenariosGet(
+            @ModelAttribute SimulacaoCenariosRequest request) {
+        if (simulacaoService == null) {
+            throw new IllegalStateException("Serviço de simulação de cenários não inicializado.");
+        }
+        return ResponseEntity.ok(simulacaoService.simularCenarios(request));
     }
 }

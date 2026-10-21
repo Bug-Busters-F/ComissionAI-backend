@@ -30,9 +30,16 @@ public record CampanhaRequest(
 
         @Schema(description = "Coleção de regras vinculadas à campanha")
         @NotEmpty(message = "A campanha deve conter pelo menos uma regra vinculada")
-        List<@Valid RegraItemRequest> regras
+        List<@Valid RegraItemRequest> regras,
+
+        @Schema(description = "Identificador opcional da simulação aceita a vincular", example = "550e8400-e29b-41d4-a716-446655440000")
+        java.util.UUID simulacaoAceitaId
 ) {
     public CampanhaRequest(String titulo, String textoOriginal, LocalDate dataInicio, LocalDate dataFim, List<RegraItemRequest> regras) {
-        this(titulo, textoOriginal, dataInicio, dataFim, EstadoCampanha.DRAFT, regras);
+        this(titulo, textoOriginal, dataInicio, dataFim, EstadoCampanha.DRAFT, regras, null);
+    }
+
+    public CampanhaRequest(String titulo, String textoOriginal, LocalDate dataInicio, LocalDate dataFim, EstadoCampanha estado, List<RegraItemRequest> regras) {
+        this(titulo, textoOriginal, dataInicio, dataFim, estado, regras, null);
     }
 }

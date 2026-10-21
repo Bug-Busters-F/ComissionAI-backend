@@ -7,8 +7,17 @@ import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,8 +45,14 @@ import com.bugbusters.backend.repository.LogCalculoRepository;
 import com.bugbusters.backend.repository.LogCalculoSpecification;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.ResultadoCalculoRepository;
+import com.bugbusters.backend.brand.Brand;
+import com.bugbusters.backend.brand.BrandRepository;
+import com.bugbusters.backend.registration.Registration;
+import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.store.Store;
+import com.bugbusters.backend.store.StoreRepository;
 
 /**
  * Serviço responsável pelo processamento do cálculo de comissões, abrangendo:
@@ -63,6 +78,12 @@ public class CalculoService {
     private final TaxaComissaoResolver taxaComissaoResolver;
     private final CoberturaBaseService coberturaBaseService;
     private final com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia;
+    private final RegistrationRepository registrationRepository;
+    private final BrandRepository brandRepository;
+    private final StoreRepository storeRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @org.springframework.beans.factory.annotation.Autowired
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -70,8 +91,11 @@ public class CalculoService {
                           RegraRepository regraRepository,
                           SaleRepository saleRepository,
                           TaxaComissaoResolver taxaComissaoResolver,
-                          CoberturaBaseService coberturaBaseService,
-                          @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia) {
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) CoberturaBaseService coberturaBaseService,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) RegistrationRepository registrationRepository,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) BrandRepository brandRepository,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) StoreRepository storeRepository) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.regraRepository = regraRepository;
@@ -79,6 +103,19 @@ public class CalculoService {
         this.taxaComissaoResolver = taxaComissaoResolver;
         this.coberturaBaseService = coberturaBaseService;
         this.travaCompetencia = travaCompetencia;
+        this.registrationRepository = registrationRepository;
+        this.brandRepository = brandRepository;
+        this.storeRepository = storeRepository;
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          CoberturaBaseService coberturaBaseService,
+                          com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, travaCompetencia, null, null, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -87,7 +124,18 @@ public class CalculoService {
                           SaleRepository saleRepository,
                           TaxaComissaoResolver taxaComissaoResolver,
                           CoberturaBaseService coberturaBaseService) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, null, null, null, null);
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          RegistrationRepository registrationRepository,
+                          BrandRepository brandRepository,
+                          StoreRepository storeRepository) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, registrationRepository, brandRepository, storeRepository);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -95,13 +143,13 @@ public class CalculoService {
                           RegraRepository regraRepository,
                           SaleRepository saleRepository,
                           TaxaComissaoResolver taxaComissaoResolver) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, null, null, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
                           LogCalculoRepository logCalculoRepository,
                           RegraRepository regraRepository) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, null, null, null, null, null, null, null);
     }
 
     /**
@@ -353,17 +401,36 @@ public class CalculoService {
         BigDecimal totalVendasCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal totalComissoesCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
+        // Otimização BACK-14: Pré-carregar contexto da competência (regras e bases) e resultados existentes
+        TaxaComissaoResolver.ContextoCompetencia contexto = taxaComissaoResolver != null
+                ? taxaComissaoResolver.carregarContexto(inicio, fim)
+                : null;
+
+        List<UUID> idsVendas = vendas.stream()
+                .map(Sale::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        Map<UUID, ResultadoCalculo> existentesPorIdVenda = Collections.emptyMap();
+        if (!idsVendas.isEmpty()) {
+            existentesPorIdVenda = resultadoCalculoRepository.findByIdVendaIn(idsVendas).stream()
+                    .collect(Collectors.toMap(ResultadoCalculo::getIdVenda, Function.identity(), (a, b) -> a));
+        }
+
+        List<ResultadoCalculo> resultadosParaSalvar = new ArrayList<>();
+        List<LogCalculoImutavel> logsParaSalvar = new ArrayList<>();
+
         for (Sale vendaPersistida : vendas) {
-            Sale sale = bloquearVenda(vendaPersistida);
+            Sale sale = recalcular ? bloquearVenda(vendaPersistida) : vendaPersistida;
             UUID idVenda = sale.getId();
             String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
-            Optional<ResultadoCalculo> existenteOpt = idVenda != null
-                    ? resultadoCalculoRepository.findByIdVenda(idVenda)
-                    : Optional.empty();
+            ResultadoCalculo existente = idVenda != null ? existentesPorIdVenda.get(idVenda) : null;
+            if (existente == null && idVenda != null && resultadoCalculoRepository != null) {
+                existente = resultadoCalculoRepository.findByIdVenda(idVenda).orElse(null);
+            }
 
             // Sem recálculo, o resultado vigente é reutilizado sem consultar as regras atuais.
-            if (existenteOpt.isPresent() && !recalcular) {
-                ResultadoCalculo existente = existenteOpt.get();
+            if (existente != null && !recalcular) {
                 if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
                     impedimentos.add(impedimentoPorDivergencia(idVenda, matricula, sale, existente));
                     continue;
@@ -375,9 +442,17 @@ public class CalculoService {
                 continue;
             }
 
-            ResolucaoTaxaResult resolucao = taxaComissaoResolver != null
-                    ? taxaComissaoResolver.resolverTaxa(sale)
-                    : ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
+            ResolucaoTaxaResult resolucao = null;
+            if (taxaComissaoResolver != null) {
+                if (contexto != null) {
+                    resolucao = taxaComissaoResolver.resolverTaxa(sale, contexto);
+                }
+                if (resolucao == null) {
+                    resolucao = taxaComissaoResolver.resolverTaxa(sale);
+                }
+            } else {
+                resolucao = ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
+            }
 
             if (!resolucao.sucesso()) {
                 impedimentos.add(new CalculoImpedimentoDTO(
@@ -402,9 +477,9 @@ public class CalculoService {
             Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : null;
             ResultadoCalculo resultado;
 
-            if (existenteOpt.isPresent()) {
+            if (existente != null) {
                 resultado = atualizarResultadoExistente(
-                        existenteOpt.get(), idVenda, matricula, codMarca, codLoja, codCargo,
+                        existente, idVenda, matricula, codMarca, codLoja, codCargo,
                         idRegra, sale, taxaAplicada, comissao, resolucao.origemTaxa()
                 );
                 resultado.setValorBonusPercentual(calculada.bonusPercentual());
@@ -429,13 +504,16 @@ public class CalculoService {
                 resultado.setValorBonusFixo(calculada.bonusFixo());
             }
 
-            ResultadoCalculo salvo = resultadoCalculoRepository.save(resultado);
-            registrarLog(salvo, sale, resolucao);
+            resultadosParaSalvar.add(resultado);
+            logsParaSalvar.add(criarLogImutavel(resultado, sale, resolucao));
 
-            sucessos.add(toItem(salvo));
-            totalVendasCalculadas = totalVendasCalculadas.add(salvo.getValorVenda());
-            totalComissoesCalculadas = totalComissoesCalculadas.add(salvo.getValorComissao());
+            sucessos.add(toItem(resultado));
+            totalVendasCalculadas = totalVendasCalculadas.add(resultado.getValorVenda());
+            totalComissoesCalculadas = totalComissoesCalculadas.add(resultado.getValorComissao());
         }
+
+        // Persistência em blocos
+        salvarEmBlocos(resultadosParaSalvar, logsParaSalvar);
 
         return new CalculoCompetenciaResponseDTO(
                 competenciaStr,
@@ -520,18 +598,23 @@ public class CalculoService {
         );
     }
 
-    private void registrarLog(ResultadoCalculo resultado, Sale sale, ResolucaoTaxaResult resolucao) {
+    private LogCalculoImutavel criarLogImutavel(ResultadoCalculo resultado, Sale sale, ResolucaoTaxaResult resolucao) {
         String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank()
                 ? sale.getTipoVenda() : "IMPORTADA";
         String canal = sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO";
         String versaoRegra = resolucao.versaoOuReferenciaRegra() != null
                 ? resolucao.versaoOuReferenciaRegra() : "REGRA#" + resultado.getRegraId();
+        ComissaoCalculada calculada = new ComissaoCalculada(
+                resultado.getValorComissao(),
+                resultado.getValorBonusPercentual(),
+                resultado.getValorBonusFixo()
+        );
         String parametrosSnapshot = montarSnapshotParametros(
                 resultado.getValorVenda(), resultado.getTaxaAplicada(), resultado.getValorComissao(),
                 resultado.getRegraId(), resolucao.origemTaxa(), versaoRegra, resultado.getDataVenda(),
                 resultado.getMatricula(), resultado.getCodCargo(), resultado.getCodLoja(), resultado.getCodMarca(),
                 canal, tipoVenda, sale.getIdLoteOrigem(),
-                new ComissaoCalculada(resultado.getValorComissao(), resultado.getValorBonusPercentual(), resultado.getValorBonusFixo())
+                calculada
         );
         LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                 resultado.getProtocoloCalculo(),
@@ -555,7 +638,44 @@ public class CalculoService {
         logImutavel.setOrigemTaxa(resolucao.origemTaxa());
         logImutavel.setValorBonusPercentual(resultado.getValorBonusPercentual());
         logImutavel.setValorBonusFixo(resultado.getValorBonusFixo());
-        logCalculoRepository.save(logImutavel);
+        return logImutavel;
+    }
+
+    private void registrarLog(ResultadoCalculo resultado, Sale sale, ResolucaoTaxaResult resolucao) {
+        logCalculoRepository.save(criarLogImutavel(resultado, sale, resolucao));
+    }
+
+    private static final int TAMANHO_BLOCO = 100;
+
+    private void salvarEmBlocos(List<ResultadoCalculo> resultados, List<LogCalculoImutavel> logs) {
+        if (resultados != null && !resultados.isEmpty()) {
+            if (resultados.size() == 1) {
+                resultadoCalculoRepository.save(resultados.get(0));
+            } else {
+                for (int i = 0; i < resultados.size(); i += TAMANHO_BLOCO) {
+                    int fimBloco = Math.min(i + TAMANHO_BLOCO, resultados.size());
+                    resultadoCalculoRepository.saveAll(resultados.subList(i, fimBloco));
+                    if (entityManager != null) {
+                        entityManager.flush();
+                    }
+                }
+            }
+        }
+
+        if (logs != null && !logs.isEmpty()) {
+            if (logs.size() == 1) {
+                logCalculoRepository.save(logs.get(0));
+            } else {
+                for (int i = 0; i < logs.size(); i += TAMANHO_BLOCO) {
+                    int fimBloco = Math.min(i + TAMANHO_BLOCO, logs.size());
+                    logCalculoRepository.saveAll(logs.subList(i, fimBloco));
+                    if (entityManager != null) {
+                        entityManager.flush();
+                        entityManager.clear();
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -581,18 +701,10 @@ public class CalculoService {
      */
     @Transactional
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
-        Regra regraAplicada = garantirRegraPadraoExistente(REGRA_PADRAO_ID, TAXA_PADRAO);
-        Long idRegra = (regraAplicada != null && regraAplicada.getId() != null) ? regraAplicada.getId() : REGRA_PADRAO_ID;
-        BigDecimal taxaAplicada = TAXA_PADRAO;
-
         // 1. Verifica se já existe cálculo pelo UUID da venda (se informado) ou pela chave de negócio
         Optional<ResultadoCalculo> existenteOpt = Optional.empty();
-        if (request.idVenda() != null) {
+        if (request.idVenda() != null && resultadoCalculoRepository != null) {
             existenteOpt = resultadoCalculoRepository.findByIdVenda(request.idVenda());
-        }
-        if (existenteOpt.isEmpty()) {
-            existenteOpt = resultadoCalculoRepository
-                    .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra);
         }
 
         if (existenteOpt.isPresent()) {
@@ -607,21 +719,109 @@ public class CalculoService {
             );
         }
 
-        // 2. Não existe: efetua novo cálculo e persiste resultado e log imutável
-        BigDecimal comissao = request.valorVenda().multiply(taxaAplicada).setScale(2, RoundingMode.HALF_UP);
+        // 2. Localiza venda persistida ou constrói venda com vínculos necessários (BACK-14)
+        Sale sale = null;
+        if (request.idVenda() != null && saleRepository != null) {
+            sale = saleRepository.findById(request.idVenda()).orElse(null);
+        }
+
+        if (sale == null) {
+            sale = new Sale();
+            sale.setId(request.idVenda());
+            sale.setValue(request.valorVenda());
+            sale.setSaleDate(request.dataVenda());
+            sale.setSaleChannel(request.canal());
+            sale.setTipoVenda("INFORMADA");
+
+            Registration reg = null;
+            if (registrationRepository != null && request.matricula() != null) {
+                reg = registrationRepository.findByRegistration(request.matricula()).orElse(null);
+            }
+            if (reg == null && request.matricula() != null) {
+                reg = new Registration();
+                reg.setRegistration(request.matricula());
+            }
+            sale.setRegistration(reg);
+
+            Brand brand = null;
+            if (brandRepository != null) {
+                if (request.codMarca() != null) {
+                    brand = brandRepository.findByCode(request.codMarca()).orElse(null);
+                }
+                if (brand == null && request.descrMarca() != null) {
+                    brand = brandRepository.findByDescription(request.descrMarca()).orElse(null);
+                }
+            }
+            if (brand == null && request.codMarca() != null) {
+                brand = new Brand();
+                brand.setCode(request.codMarca());
+                if (request.descrMarca() != null) {
+                    brand.setDescription(request.descrMarca());
+                }
+            }
+            sale.setBrand(brand);
+
+            Store store = null;
+            if (storeRepository != null && request.codLoja() != null) {
+                store = storeRepository.findByCode(request.codLoja()).orElse(null);
+            }
+            if (store == null && reg != null && reg.getStore() != null) {
+                store = reg.getStore();
+            }
+            if (store == null && request.codLoja() != null) {
+                store = new Store();
+                store.setCode(request.codLoja());
+            }
+            sale.setStore(store);
+        } else {
+            if (request.valorVenda() != null) {
+                sale.setValue(request.valorVenda());
+            }
+            if (request.dataVenda() != null) {
+                sale.setSaleDate(request.dataVenda());
+            }
+            if (request.canal() != null) {
+                sale.setSaleChannel(request.canal());
+            }
+        }
+
+        // 3. Resolve a taxa com o motor compartilhado (S1-B08 / BACK-14)
+        ResolucaoTaxaResult resolucao = null;
+        if (taxaComissaoResolver != null) {
+            resolucao = taxaComissaoResolver.resolverTaxa(sale);
+        }
+        if (resolucao == null) {
+            resolucao = ResolucaoTaxaResult.sucesso(TAXA_PADRAO, REGRA_PADRAO_ID, "PADRAO");
+        }
+
+        if (!resolucao.sucesso()) {
+            throw new BusinessException(resolucao.motivoImpedimento());
+        }
+
+        BigDecimal taxaAplicada = resolucao.taxa();
+        Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
+        garantirRegraPadraoExistente(idRegra, taxaAplicada);
+
+        ComissaoCalculada calculada = calcularComissaoTotal(request.valorVenda(), taxaAplicada, resolucao);
+        BigDecimal comissao = calculada.total();
         UUID protocolo = UUID.randomUUID();
 
         if (travaCompetencia != null && request.dataVenda() != null) {
             travaCompetencia.adquirirTrava(java.time.YearMonth.from(request.dataVenda()).toString());
         }
 
+        Integer codCargo = sale.getRegistration() != null && sale.getRegistration().getPosition() != null
+                ? sale.getRegistration().getPosition().getCode() : null;
+        Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : request.codMarca();
+        Integer codLoja = sale.getStore() != null ? sale.getStore().getCode() : request.codLoja();
+
         ResultadoCalculo novoResultado = new ResultadoCalculo(
                 protocolo,
                 request.idVenda(),
                 request.matricula(),
-                request.codMarca(),
-                request.codLoja(),
-                null,
+                codMarca,
+                codLoja,
+                codCargo,
                 idRegra,
                 request.dataVenda(),
                 request.valorVenda(),
@@ -629,28 +829,33 @@ public class CalculoService {
                 comissao,
                 "INDIVIDUAL"
         );
-        novoResultado.setOrigemTaxa("PADRAO");
+        novoResultado.setOrigemTaxa(resolucao.origemTaxa());
+        novoResultado.setValorBonusPercentual(calculada.bonusPercentual());
+        novoResultado.setValorBonusFixo(calculada.bonusFixo());
 
         try {
             ResultadoCalculo resultadoSalvo = resultadoCalculoRepository.save(novoResultado);
 
             // Grava o log imutável de auditoria apenas na primeira execução com sucesso (BUG-23)
-            String tipoVenda = "INFORMADA";
-            String idLoteOrigem = null;
-            String versaoRegra = "REGRA_PADRAO_V1";
+            String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank()
+                    ? sale.getTipoVenda() : "INFORMADA";
+            String idLoteOrigem = sale.getIdLoteOrigem();
+            String versaoRegra = resolucao.versaoOuReferenciaRegra() != null
+                    ? resolucao.versaoOuReferenciaRegra()
+                    : "REGRA#" + idRegra;
             String parametrosSnapshot = montarSnapshotParametros(
-                    request.valorVenda(), taxaAplicada, comissao, idRegra, "PADRAO", versaoRegra,
-                    request.dataVenda(), request.matricula(), null, request.codLoja(), request.codMarca(),
-                    request.canal(), tipoVenda, idLoteOrigem
+                    request.valorVenda(), taxaAplicada, comissao, idRegra, resolucao.origemTaxa(), versaoRegra,
+                    request.dataVenda(), request.matricula(), codCargo, codLoja, codMarca,
+                    request.canal(), tipoVenda, idLoteOrigem, calculada
             );
 
             LogCalculoImutavel logImutavel = new LogCalculoImutavel(
                     resultadoSalvo.getProtocoloCalculo(),
                     request.idVenda(),
                     request.matricula(),
-                    null,
-                    request.codLoja(),
-                    request.codMarca(),
+                    codCargo,
+                    codLoja,
+                    codMarca,
                     request.valorVenda(),
                     taxaAplicada,
                     comissao,
@@ -663,7 +868,9 @@ public class CalculoService {
                     versaoRegra,
                     parametrosSnapshot
             );
-            logImutavel.setOrigemTaxa("PADRAO");
+            logImutavel.setOrigemTaxa(resolucao.origemTaxa());
+            logImutavel.setValorBonusPercentual(calculada.bonusPercentual());
+            logImutavel.setValorBonusFixo(calculada.bonusFixo());
             logCalculoRepository.save(logImutavel);
 
             return new CalculoComissaoResponse(
@@ -676,21 +883,20 @@ public class CalculoService {
                     resultadoSalvo.getCalculadoEm()
             );
         } catch (DataIntegrityViolationException ex) {
-            log.warn("Violação de integridade por concorrência detectada para venda/matrícula {}. Recuperando cálculo existente.",
-                    request.matricula());
-            ResultadoCalculo concorrente;
+            log.warn("Violação de integridade por concorrência detectada ao persistir cálculo para matrícula {} na data {}. Recuperando resultado existente.",
+                    request.matricula(), request.dataVenda());
+
+            ResultadoCalculo resultadoConcorrente = null;
             if (request.idVenda() != null) {
-                concorrente = resultadoCalculoRepository.findByIdVenda(request.idVenda())
-                        .orElseGet(() -> resultadoCalculoRepository
-                                .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra)
-                                .orElseThrow(() -> ex));
-            } else {
-                concorrente = resultadoCalculoRepository
+                resultadoConcorrente = resultadoCalculoRepository.findByIdVenda(request.idVenda()).orElse(null);
+            }
+            if (resultadoConcorrente == null) {
+                resultadoConcorrente = resultadoCalculoRepository
                         .findByMatriculaAndDataVendaAndRegraId(request.matricula(), request.dataVenda(), idRegra)
                         .orElseThrow(() -> ex);
             }
 
-            return tratarResultadoExistente(request, concorrente);
+            return tratarResultadoExistente(request, resultadoConcorrente);
         }
     }
 

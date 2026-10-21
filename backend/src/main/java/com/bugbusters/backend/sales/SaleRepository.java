@@ -19,6 +19,7 @@ import jakarta.persistence.LockModeType;
 
 @Repository
 public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificationExecutor<Sale> {
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
 
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })

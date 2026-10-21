@@ -38,6 +38,11 @@ public interface ResultadoCalculoRepository extends JpaRepository<ResultadoCalcu
      */
     List<ResultadoCalculo> findByMatricula(String matricula);
 
+    /**
+     * Busca resultados de cálculo em lote para uma coleção de IDs de venda (Otimização BACK-14).
+     */
+    List<ResultadoCalculo> findByIdVendaIn(java.util.Collection<UUID> idsVendas);
+
     boolean existsByIdVendaIn(java.util.Collection<UUID> idsVendas);
 
     List<ResultadoCalculo> findTop5ByIdVendaIn(java.util.Collection<UUID> idsVendas);

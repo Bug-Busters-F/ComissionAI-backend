@@ -3,12 +3,14 @@ package com.bugbusters.backend.dto.campanha;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.model.EstadoCampanha;
+import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Schema(description = "Representação detalhada da campanha e da coleção de regras vinculadas")
 public record CampanhaResponse(
@@ -21,8 +23,25 @@ public record CampanhaResponse(
         List<RegraVinculadaDTO> regras,
         Boolean possuiIncompletas,
         OffsetDateTime criadoEm,
-        OffsetDateTime atualizadoEm
+        OffsetDateTime atualizadoEm,
+        UUID simulacaoAceitaId,
+        StatusAceiteSimulacao statusAceite
 ) {
+    public CampanhaResponse(
+            Long id,
+            String titulo,
+            String textoOriginal,
+            EstadoCampanha estado,
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            List<RegraVinculadaDTO> regras,
+            Boolean possuiIncompletas,
+            OffsetDateTime criadoEm,
+            OffsetDateTime atualizadoEm
+    ) {
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null);
+    }
+
     public record RegraVinculadaDTO(
             Long id,
             String blocoId,

@@ -1,18 +1,24 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse.RegraVinculadaDTO;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
+import com.bugbusters.backend.dto.simulacao.ConferenciaSimulacaoResponse;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Campanha;
 import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.model.Regra;
+import com.bugbusters.backend.model.Simulacao;
+import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.repository.SimulacaoRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,10 +32,22 @@ public class CampanhaService {
 
     private final CampanhaRepository campanhaRepository;
     private final RegraRepository regraRepository;
+    private final CampanhaSimulacaoValidator campanhaSimulacaoValidator;
+    private final SimulacaoRepository simulacaoRepository;
 
-    public CampanhaService(CampanhaRepository campanhaRepository, RegraRepository regraRepository) {
+    @Autowired
+    public CampanhaService(CampanhaRepository campanhaRepository,
+                           RegraRepository regraRepository,
+                           CampanhaSimulacaoValidator campanhaSimulacaoValidator,
+                           SimulacaoRepository simulacaoRepository) {
         this.campanhaRepository = campanhaRepository;
         this.regraRepository = regraRepository;
+        this.campanhaSimulacaoValidator = campanhaSimulacaoValidator;
+        this.simulacaoRepository = simulacaoRepository;
+    }
+
+    public CampanhaService(CampanhaRepository campanhaRepository, RegraRepository regraRepository) {
+        this(campanhaRepository, regraRepository, null, null);
     }
 
     @Transactional
@@ -47,9 +65,12 @@ public class CampanhaService {
             throw new BusinessException("Campanha contendo regras ou propostas incompletas só pode ser salva como rascunho (DRAFT).");
         }
 
-        EstadoCampanha estadoFinal = (request.estado() != null && !possuiIncompleta) 
-                ? request.estado() 
-                : EstadoCampanha.DRAFT;
+        if (request.estado() == EstadoCampanha.ATIVA) {
+            throw new BusinessException("Não é permitido ativar uma campanha diretamente na criação. " +
+                    "A campanha deve ser salva como rascunho (DRAFT), submetida à simulação sem impedimentos e aceita formalmente antes da ativação.");
+        }
+
+        EstadoCampanha estadoFinal = request.estado() != null ? request.estado() : EstadoCampanha.DRAFT;
 
         Campanha campanha = new Campanha();
         campanha.setTitulo(request.titulo());
@@ -68,6 +89,21 @@ public class CampanhaService {
         }
 
         List<Regra> regrasSalvas = regraRepository.saveAll(regrasParaSalvar);
+
+        if (request.simulacaoAceitaId() != null && simulacaoRepository != null) {
+            simulacaoRepository.findById(request.simulacaoAceitaId()).ifPresent(sim -> {
+                sim.setCampanha(campanhaSalva);
+                if (sim.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+                    sim.setStatusAceite(StatusAceiteSimulacao.ACEITA);
+                    sim.setAceitoEm(OffsetDateTime.now());
+                    sim.setAceitoPor("gestor");
+                    sim.setMotivoAceite("Aceite formal vinculado na criação da campanha");
+                }
+                simulacaoRepository.save(sim);
+                campanhaSalva.setSimulacaoAceita(sim);
+                campanhaRepository.save(campanhaSalva);
+            });
+        }
 
         return mapearParaResponse(campanhaSalva, regrasSalvas);
     }
@@ -112,9 +148,37 @@ public class CampanhaService {
     }
 
     @Transactional
+    public CampanhaResponse alterarEstado(Long id, AlterarEstadoCampanhaRequest request) {
+        if (request == null) {
+            return alterarEstado(id, EstadoCampanha.DRAFT, null, null, null);
+        }
+        return alterarEstado(id, request.estado(), request.simulacaoAceitaId(), request.aceitoPor(), request.motivoAceite());
+    }
+
+    @Transactional
     public CampanhaResponse alterarEstado(Long id, EstadoCampanha novoEstado) {
+        return alterarEstado(id, novoEstado, null, null, null);
+    }
+
+    @Transactional
+    public CampanhaResponse alterarEstado(Long id, EstadoCampanha novoEstado, UUID simulacaoAceitaId, String aceitoPor, String motivoAceite) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
+
+        if (simulacaoAceitaId != null && simulacaoRepository != null) {
+            simulacaoRepository.findById(simulacaoAceitaId).ifPresent(sim -> {
+                sim.setCampanha(campanha);
+                if (sim.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+                    sim.setStatusAceite(StatusAceiteSimulacao.ACEITA);
+                    sim.setAceitoEm(OffsetDateTime.now());
+                    sim.setAceitoPor(aceitoPor != null && !aceitoPor.isBlank() ? aceitoPor : "gestor");
+                    sim.setMotivoAceite(motivoAceite != null ? motivoAceite : "Aceite formal vinculado na alteração de estado");
+                }
+                simulacaoRepository.save(sim);
+                campanha.setSimulacaoAceita(sim);
+                campanhaRepository.save(campanha);
+            });
+        }
 
         List<Regra> regras = regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(id);
 
@@ -122,6 +186,9 @@ public class CampanhaService {
             boolean temIncompleta = regras.stream().anyMatch(r -> Boolean.FALSE.equals(r.getCompleta()) || r.getTaxa() == null);
             if (temIncompleta) {
                 throw new BusinessException("Não é permitido ativar campanha contendo regras ou propostas incompletas (Campanha ID " + id + "). Conclua todas as regras antes de ativar.");
+            }
+            if (campanhaSimulacaoValidator != null) {
+                campanhaSimulacaoValidator.validarAptaParaAtivacao(campanha);
             }
         }
 
@@ -152,18 +219,20 @@ public class CampanhaService {
         }
         validarFaixas(request.regras());
 
-        boolean possuiIncompleta = request.regras().stream().anyMatch(this::isRegraIncompleta);
-        EstadoCampanha estadoDesejado = request.estado() != null ? request.estado() : campanha.getEstado();
+        // Qualquer edição na proposta invalida simulações aceitas prévias (BACK-8)
+        invalidarAceiteCampanha(campanha, "Aceite invalidado por edição na proposta da campanha (regras ou vigência alteradas).");
 
-        if (possuiIncompleta && estadoDesejado == EstadoCampanha.ATIVA) {
-            throw new BusinessException("Campanha contendo regras ou propostas incompletas só pode ser salva como rascunho (DRAFT).");
+        if (request.estado() == EstadoCampanha.ATIVA) {
+            throw new BusinessException("Não é permitido salvar alterações diretamente com estado ATIVA. " +
+                    "A edição invalida simulações anteriores. Salve como rascunho (DRAFT), execute nova simulação e aprove o aceite.");
         }
 
         campanha.setTitulo(request.titulo());
         campanha.setTextoOriginal(request.textoOriginal());
         campanha.setDataInicio(periodo.inicio());
         campanha.setDataFim(periodo.fim());
-        campanha.setEstado(possuiIncompleta ? EstadoCampanha.DRAFT : estadoDesejado);
+        campanha.setSimulacaoAceita(null);
+        campanha.setEstado(EstadoCampanha.DRAFT);
         campanha.setAtualizadoEm(OffsetDateTime.now());
 
         Campanha campanhaAtualizada = campanhaRepository.save(campanha);
@@ -309,6 +378,57 @@ public class CampanhaService {
         return new PeriodoCalculado(inicio, fim);
     }
 
+    @Transactional(readOnly = true)
+    public ConferenciaSimulacaoResponse conferirSimulacao(Long id) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
+        if (campanhaSimulacaoValidator != null) {
+            return campanhaSimulacaoValidator.conferirCorrespondencia(campanha);
+        }
+        return new ConferenciaSimulacaoResponse(
+                campanha.getId(), campanha.getTitulo(), campanha.getEstado(), false, null, null, null, null, null, null, null,
+                List.of("Validador de simulação não configurado."), "Validador indisponível."
+        );
+    }
+
+    @Transactional
+    public CampanhaResponse ativarCampanha(Long id) {
+        return alterarEstado(id, EstadoCampanha.ATIVA);
+    }
+
+    @Transactional
+    public void invalidarAceiteCampanha(Campanha campanha, String motivo) {
+        if (campanha == null || campanha.getId() == null) {
+            return;
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+        if (campanha.getSimulacaoAceita() != null) {
+            Simulacao sim = campanha.getSimulacaoAceita();
+            sim.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+            sim.setInvalidadoEm(agora);
+            sim.setMotivoInvalidacao(motivo);
+            if (simulacaoRepository != null) {
+                simulacaoRepository.save(sim);
+            }
+            campanha.setSimulacaoAceita(null);
+            campanhaRepository.save(campanha);
+        }
+
+        if (simulacaoRepository != null) {
+            List<Simulacao> ativas = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
+                    campanha.getId(), StatusAceiteSimulacao.ACEITA);
+            for (Simulacao s : ativas) {
+                s.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+                s.setInvalidadoEm(agora);
+                s.setMotivoInvalidacao(motivo);
+            }
+            if (!ativas.isEmpty()) {
+                simulacaoRepository.saveAll(ativas);
+            }
+        }
+    }
+
     private CampanhaResponse mapearParaResponse(Campanha c, List<Regra> regras) {
         List<RegraVinculadaDTO> regrasDTO = (regras != null) ? regras.stream().map(r -> new RegraVinculadaDTO(
                 r.getId(),
@@ -356,7 +476,9 @@ public class CampanhaService {
                 regrasDTO,
                 possuiIncompletas,
                 c.getCriadoEm(),
-                c.getAtualizadoEm()
+                c.getAtualizadoEm(),
+                c.getSimulacaoAceita() != null ? c.getSimulacaoAceita().getId() : null,
+                c.getSimulacaoAceita() != null ? c.getSimulacaoAceita().getStatusAceite() : null
         );
     }
 

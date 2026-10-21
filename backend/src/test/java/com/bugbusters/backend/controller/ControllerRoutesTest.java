@@ -58,6 +58,30 @@ class ControllerRoutesTest {
     @Autowired
     private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
 
+    @Autowired
+    private com.bugbusters.backend.repository.SimulacaoVendaRepository simulacaoVendaRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.SimulacaoRepository simulacaoRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.RegraRepository regraRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.CampanhaRepository campanhaRepository;
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        for (com.bugbusters.backend.model.Campanha c : campanhaRepository.findAll()) {
+            c.setSimulacaoAceita(null);
+            campanhaRepository.saveAndFlush(c);
+        }
+        simulacaoVendaRepository.deleteAllInBatch();
+        simulacaoRepository.deleteAllInBatch();
+        regraRepository.deleteAllInBatch();
+        campanhaRepository.deleteAllInBatch();
+    }
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
@@ -129,12 +153,12 @@ class ControllerRoutesTest {
     // 2. Calculo Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/comissoes/calcular - Deve processar cálculo com 200 OK")
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve processar cálculo com 200 OK utilizando motor compartilhado")
     void deveCalcularComissao() throws Exception {
         String payload = """
             {
                 "id": "11111111-1111-1111-1111-111111111111",
-                "matricula": "MATRIC-1234",
+                "matricula": "MAT-00456",
                 "codMarca": 10,
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
@@ -147,10 +171,10 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty())
-                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
-                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
                 .andExpect(jsonPath("$.valorOriginal").value(1000.00))
                 .andExpect(jsonPath("$.valorComissao").value(100.00))
+                .andExpect(jsonPath("$.taxaAplicada").value(0.1000))
                 .andExpect(jsonPath("$.dataCalculo").isNotEmpty());
     }
 
@@ -159,7 +183,8 @@ class ControllerRoutesTest {
     void deveRejeitarCalculoSemIdCom400BadRequest() throws Exception {
         String payloadSemId = """
             {
-                "matricula": "MATRIC-SEM-ID",
+                "matricula": "MAT-00456",
+                "codMarca": 10,
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
                 "dataVenda": "2026-10-05"
@@ -176,12 +201,33 @@ class ControllerRoutesTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve rejeitar cálculo quando vínculos essenciais forem inválidos (BACK-14)")
+    void deveRejeitarCalculoComVinculoInvalido() throws Exception {
+        String payloadInvalido = """
+            {
+                "id": "99999999-9999-9999-9999-999999999999",
+                "matricula": "MAT-INEXISTENTE",
+                "codMarca": 10,
+                "valorVenda": 1000.00,
+                "canal": "ECOMMERCE",
+                "dataVenda": "2026-10-05"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadInvalido))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
     @DisplayName("POST /api/v1/comissoes/calcular - Deve retornar resultado idêntico sem duplicar logs em caso de reenvio (Idempotência)")
     void deveRetornarMesmoResultadoEmReenvioIdentico() throws Exception {
         String payload = """
             {
                 "id": "22222222-2222-2222-2222-222222222222",
-                "matricula": "MATRIC-IDEMPOTENTE",
+                "matricula": "MAT-00456",
                 "codMarca": 10,
                 "valorVenda": 2000.00,
                 "canal": "LOJA_FISICA",
@@ -194,7 +240,7 @@ class ControllerRoutesTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payload))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
                 .andExpect(jsonPath("$.valorComissao").value(200.00))
                 .andReturn().getResponse().getContentAsString();
 
@@ -206,7 +252,7 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.protocoloCalculo").value(protocoloOriginal))
-                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
                 .andExpect(jsonPath("$.valorComissao").value(200.00));
     }
 
@@ -216,7 +262,7 @@ class ControllerRoutesTest {
         String payloadOriginal = """
             {
                 "id": "33333333-3333-3333-3333-333333333333",
-                "matricula": "MATRIC-CONFLITO",
+                "matricula": "MAT-00456",
                 "codMarca": 10,
                 "valorVenda": 500.00,
                 "canal": "APP",
@@ -227,7 +273,7 @@ class ControllerRoutesTest {
         String payloadDivergente = """
             {
                 "id": "33333333-3333-3333-3333-333333333333",
-                "matricula": "MATRIC-CONFLITO",
+                "matricula": "MAT-00456",
                 "codMarca": 10,
                 "valorVenda": 750.00,
                 "canal": "APP",
@@ -241,7 +287,7 @@ class ControllerRoutesTest {
                 .content(payloadOriginal))
                 .andExpect(status().isOk());
 
-        // 2ª chamada com valor alterado para a mesma matrícula e data de venda -> Rejeitada
+        // 2ª chamada com valor alterado para a mesma venda -> Rejeitada
         mockMvc.perform(post("/api/v1/comissoes/calcular")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payloadDivergente))
@@ -813,7 +859,20 @@ class ControllerRoutesTest {
 
         long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
 
-        // 1. Alterar para ATIVA
+        // 1. Simular e aceitar simulação para conformidade BACK-8
+        String simResponse = mockMvc.perform(post("/api/v1/simulacoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"competencia\":\"2026-10\",\"campanhaId\":%d}", campanhaId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String simId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(simResponse).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/simulacoes/" + simId + "/aceite")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aceitoPor\":\"diretoria@empresa.com\",\"motivo\":\"Aprovado no teste\"}"))
+                .andExpect(status().isOk());
+
+        // 2. Alterar para ATIVA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"estado\": \"ATIVA\"}"))

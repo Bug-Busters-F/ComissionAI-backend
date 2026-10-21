@@ -58,7 +58,36 @@ public class CampanhaController {
     public ResponseEntity<CampanhaResponse> alterarEstado(
             @PathVariable Long id,
             @Valid @RequestBody AlterarEstadoCampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.alterarEstado(id, request.estado()));
+        return ResponseEntity.ok(campanhaService.alterarEstado(id, request));
+    }
+
+    @Operation(
+            summary = "Ativar campanha com validação vinculada à simulação aceita (BACK-8)",
+            description = """
+                    Ativa a campanha garantindo estritamente que existe uma simulação aceita sem impedimentos
+                    e que nenhuma regra, taxa ou período foi alterado desde o aceite formal.
+                    """
+    )
+    @ApiResponse(responseCode = "200", description = "Campanha ativada com sucesso")
+    @ApiResponse(responseCode = "400", description = "Ativação bloqueada por falta de simulação aceita ou divergência na proposta", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/{id}/ativar")
+    public ResponseEntity<CampanhaResponse> ativarCampanha(@PathVariable Long id) {
+        return ResponseEntity.ok(campanhaService.ativarCampanha(id));
+    }
+
+    @Operation(
+            summary = "Conferir correspondência entre proposta atual e simulação aceita (BACK-8)",
+            description = """
+                    Verifica se a campanha está apta para ativação em produção, comparando suas regras
+                    e vigência atuais com a assinatura da simulação aceita e detalhando eventuais divergências.
+                    """
+    )
+    @ApiResponse(responseCode = "200", description = "Resultado da conferência retornado com sucesso")
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/{id}/conferencia-simulacao")
+    public ResponseEntity<com.bugbusters.backend.dto.simulacao.ConferenciaSimulacaoResponse> conferirSimulacao(@PathVariable Long id) {
+        return ResponseEntity.ok(campanhaService.conferirSimulacao(id));
     }
 
     @Operation(summary = "Consultar detalhe da campanha por ID com coleção de regras")

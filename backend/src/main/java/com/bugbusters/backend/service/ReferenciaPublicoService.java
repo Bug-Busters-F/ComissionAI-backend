@@ -37,6 +37,7 @@ public class ReferenciaPublicoService {
     private final CampanhaRepository campanhaRepository;
     private final com.bugbusters.backend.repository.RegraRepository regraRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ReferenciaPublicoService(
             SaleRepository saleRepository,
             CoberturaBaseService coberturaBaseService,
@@ -46,6 +47,14 @@ public class ReferenciaPublicoService {
         this.coberturaBaseService = coberturaBaseService;
         this.campanhaRepository = campanhaRepository;
         this.regraRepository = regraRepository;
+    }
+
+    public ReferenciaPublicoService(
+            SaleRepository saleRepository,
+            com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository,
+            CampanhaRepository campanhaRepository,
+            com.bugbusters.backend.repository.RegraRepository regraRepository) {
+        this(saleRepository, new CoberturaBaseService(baseComissRepository), campanhaRepository, regraRepository);
     }
 
     /**
@@ -560,7 +569,7 @@ public class ReferenciaPublicoService {
         return diagnosticos;
     }
 
-    private List<RegraItemRequest> resolverRegras(RecortePublicoRequest request) {
+    public List<RegraItemRequest> resolverRegras(RecortePublicoRequest request) {
         if (request.regras() != null && !request.regras().isEmpty()) {
             return request.regras();
         }
@@ -592,7 +601,7 @@ public class ReferenciaPublicoService {
         throw new BusinessException("Informe a coleção 'regras' ou um 'campanhaId' válido para executar o recorte de público.");
     }
 
-    private RegraItemRequest toItemRequest(Regra r) {
+    public RegraItemRequest toItemRequest(Regra r) {
         return new RegraItemRequest(
                 "regra-" + r.getId(),
                 r.getNome(),
@@ -618,7 +627,9 @@ public class ReferenciaPublicoService {
                 null,
                 null,
                 true,
-                r.getStatus() != null ? r.getStatus() : StatusRegra.ATIVA
+                r.getStatus() != null ? r.getStatus() : StatusRegra.ATIVA,
+                r.getBonusPercentual(),
+                r.getBonusValorFixo()
         );
     }
 
