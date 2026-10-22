@@ -86,6 +86,33 @@ public class SaleController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "Excluir vendas por competência", description = """
+            Remove todas as vendas de uma competência (mês e ano). A exclusão é bloqueada
+            caso existam cálculos ou logs financeiros de auditoria vinculados às vendas dessa competência.
+            """)
+    @ApiResponse(responseCode = "200", description = "Vendas da competência excluídas com sucesso")
+    @ApiResponse(responseCode = "400", description = "Mês ou ano inválido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Vendas possuem cálculos ou logs vinculados", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/competencia/{mes}/{ano}")
+    public ResponseEntity<com.bugbusters.backend.dto.TotalExcluidoResponseDTO> deletarVendasPorCompetencia(
+            @Parameter(description = "Mês da competência (1 a 12)", example = "9") @PathVariable int mes,
+            @Parameter(description = "Ano da competência", example = "2025") @PathVariable int ano) {
+        long total = saleService.deletarVendasPorCompetencia(mes, ano);
+        return ResponseEntity.ok(new com.bugbusters.backend.dto.TotalExcluidoResponseDTO(total));
+    }
+
+    @Operation(summary = "Excluir todas as vendas", description = """
+            Remove todas as vendas cadastradas no sistema. A exclusão é bloqueada caso
+            existam cálculos ou logs financeiros de auditoria vinculados no sistema.
+            """)
+    @ApiResponse(responseCode = "200", description = "Todas as vendas excluídas com sucesso")
+    @ApiResponse(responseCode = "409", description = "Vendas possuem cálculos ou logs vinculados", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/todas")
+    public ResponseEntity<com.bugbusters.backend.dto.TotalExcluidoResponseDTO> deletarTodasVendas() {
+        long total = saleService.deletarTodasVendas();
+        return ResponseEntity.ok(new com.bugbusters.backend.dto.TotalExcluidoResponseDTO(total));
+    }
+
     @Operation(summary = "Excluir venda", description = "Remove uma venda individual pelo seu ID.")
     @ApiResponse(responseCode = "204", description = "Venda excluída com sucesso")
     @ApiResponse(responseCode = "404", description = "Venda não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))

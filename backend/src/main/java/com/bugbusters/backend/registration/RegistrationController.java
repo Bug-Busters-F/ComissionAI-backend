@@ -62,6 +62,18 @@ public class RegistrationController {
     }
 
 
+    @Operation(summary = "Excluir todas as matrículas", description = """
+            Remove todas as matrículas cadastradas. A exclusão é bloqueada caso existam vendas,
+            cálculos ou logs financeiros vinculados a qualquer matrícula.
+            """)
+    @ApiResponse(responseCode = "200", description = "Matrículas excluídas com sucesso")
+    @ApiResponse(responseCode = "409", description = "Existem dependências ativas (vendas, cálculos ou logs) vinculadas às matrículas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/todas")
+    public ResponseEntity<com.bugbusters.backend.dto.TotalExcluidoResponseDTO> deletarTodas() {
+        long total = service.deletarTodas();
+        return ResponseEntity.ok(new com.bugbusters.backend.dto.TotalExcluidoResponseDTO(total));
+    }
+
     @Operation(summary = "Excluir matrícula", description = """
             Remove uma matrícula pelo seu ID. A exclusão é bloqueada caso existam vendas
             vinculadas à matrícula, para preservar o histórico de comissionamento.

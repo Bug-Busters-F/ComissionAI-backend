@@ -65,6 +65,19 @@ public class BaseComissController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @Operation(summary = "Excluir todas as taxas base de comissão", description = """
+            Remove todas as taxas de comissão base cadastradas. A exclusão é bloqueada caso
+            existam cálculos ou logs financeiros vinculados no sistema.
+            """)
+    @ApiResponse(responseCode = "200", description = "Taxas base excluídas com sucesso")
+    @ApiResponse(responseCode = "409", description = "Taxas base possuem cálculos ou logs vinculados",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/todas")
+    public ResponseEntity<com.bugbusters.backend.dto.TotalExcluidoResponseDTO> deletarTodas() {
+        long total = service.deletarTodas();
+        return ResponseEntity.ok(new com.bugbusters.backend.dto.TotalExcluidoResponseDTO(total));
+    }
+
     @Operation(summary = "Excluir taxa base de comissão", description = """
             Remove um registro de taxa de comissão base pelo seu ID (UUID). A exclusão é
             bloqueada caso existam cálculos ou logs financeiros vinculados à marca e cargo

@@ -60,4 +60,8 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
     @Query("DELETE FROM Sale s WHERE s.idLoteOrigem = :idLoteOrigem")
     int deleteByIdLoteOrigem(@Param("idLoteOrigem") String idLoteOrigem);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("DELETE FROM Sale s WHERE s.saleDate BETWEEN :inicio AND :fim")
+    int deleteBySaleDateBetween(@Param("inicio") LocalDate inicio, @Param("fim") LocalDate fim);
 }

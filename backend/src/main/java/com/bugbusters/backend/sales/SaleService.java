@@ -1,10 +1,14 @@
 package com.bugbusters.backend.sales;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -13,11 +17,18 @@ import org.springframework.transaction.annotation.Transactional;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandResolver;
 import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.exception.ResourceConflictException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
+import com.bugbusters.backend.model.EnvioArquivo;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.registration.RegistrationResolver;
+import com.bugbusters.backend.repository.EnvioArquivoRepository;
+import com.bugbusters.backend.repository.LogCalculoRepository;
+import com.bugbusters.backend.repository.ResultadoCalculoRepository;
+import com.bugbusters.backend.repository.SimulacaoVendaRepository;
 import com.bugbusters.backend.sales.dto.SaleRequestDTO;
 import com.bugbusters.backend.sales.dto.SaleResponseDTO;
+import com.bugbusters.backend.service.lock.TravaCompetencia;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreResolver;
 
@@ -30,16 +41,31 @@ public class SaleService {
     private final RegistrationResolver registrationResolver;
     private final BrandResolver brandResolver;
     private final StoreResolver storeResolver;
+    private final ResultadoCalculoRepository resultadoCalculoRepository;
+    private final LogCalculoRepository logCalculoRepository;
+    private final SimulacaoVendaRepository simulacaoVendaRepository;
+    private final TravaCompetencia travaCompetencia;
+    private final EnvioArquivoRepository envioArquivoRepository;
 
     public SaleService(
             SaleRepository vendaRepository,
             RegistrationResolver registrationResolver,
             BrandResolver brandResolver,
-            StoreResolver storeResolver) {
+            StoreResolver storeResolver,
+            @Autowired(required = false) ResultadoCalculoRepository resultadoCalculoRepository,
+            @Autowired(required = false) LogCalculoRepository logCalculoRepository,
+            @Autowired(required = false) SimulacaoVendaRepository simulacaoVendaRepository,
+            @Autowired(required = false) TravaCompetencia travaCompetencia,
+            @Autowired(required = false) EnvioArquivoRepository envioArquivoRepository) {
         this.vendaRepository = vendaRepository;
         this.registrationResolver = registrationResolver;
         this.brandResolver = brandResolver;
         this.storeResolver = storeResolver;
+        this.resultadoCalculoRepository = resultadoCalculoRepository;
+        this.logCalculoRepository = logCalculoRepository;
+        this.simulacaoVendaRepository = simulacaoVendaRepository;
+        this.travaCompetencia = travaCompetencia;
+        this.envioArquivoRepository = envioArquivoRepository;
     }
 
     /**
@@ -53,6 +79,121 @@ public class SaleService {
         }
         vendaRepository.deleteById(id);
         log.info("Venda ID {} excluída.", id);
+    }
+
+    /**
+     * Exclui todas as vendas de uma competência específica (mês e ano), validando ausência de cálculos e logs financeiros.
+     * Atualiza os lotes de vendas correspondentes para EXCLUIDO.
+     */
+    @Transactional
+    public long deletarVendasPorCompetencia(int mes, int ano) {
+        if (mes < 1 || mes > 12 || ano < 1900 || ano > 2100) {
+            throw new BusinessException("Mês ou ano de competência inválido: " + mes + "/" + ano);
+        }
+
+        String competencia = String.format("%04d-%02d", ano, mes);
+        LocalDate inicio = LocalDate.of(ano, mes, 1);
+        LocalDate fim = inicio.withDayOfMonth(inicio.lengthOfMonth());
+
+        if (travaCompetencia != null) {
+            travaCompetencia.adquirirTrava(competencia);
+        }
+
+        List<Sale> vendas = vendaRepository.findBySaleDateBetweenOrderBySaleDateAsc(inicio, fim);
+        if (vendas.isEmpty()) {
+            return 0;
+        }
+
+        List<UUID> idsVendas = vendas.stream().map(Sale::getId).toList();
+
+        if (resultadoCalculoRepository != null && resultadoCalculoRepository.existsByIdVendaIn(idsVendas)) {
+            throw new ResourceConflictException(String.format(
+                    "Não é possível excluir as vendas da competência %s: existem cálculos vinculados a elas. Remova os cálculos primeiro.",
+                    competencia));
+        }
+
+        if (logCalculoRepository != null && logCalculoRepository.existsByIdVendaIn(idsVendas)) {
+            throw new ResourceConflictException(String.format(
+                    "Não é possível excluir as vendas da competência %s: existem logs de auditoria financeira vinculados a elas.",
+                    competencia));
+        }
+
+        if (simulacaoVendaRepository != null) {
+            simulacaoVendaRepository.deleteByIdVendaIn(idsVendas);
+        }
+
+        long total = vendas.size();
+        vendaRepository.deleteAllInBatch(vendas);
+
+        if (envioArquivoRepository != null) {
+            List<EnvioArquivo> lotes = envioArquivoRepository.findByTipoBaseIgnoreCaseAndCompetencia("SALES", competencia);
+            OffsetDateTime agora = OffsetDateTime.now();
+            for (EnvioArquivo lote : lotes) {
+                if (!"EXCLUIDO".equalsIgnoreCase(lote.getStatus())) {
+                    lote.setStatus("EXCLUIDO");
+                    lote.setExcluidoEm(agora);
+                    lote.setExcluidoPor("SISTEMA");
+                    lote.setMensagem("Exclusão de vendas da competência " + competencia + " solicitada pelo usuário");
+                }
+            }
+            envioArquivoRepository.saveAll(lotes);
+        }
+
+        log.info("Excluídas {} vendas da competência {}.", total, competencia);
+        return total;
+    }
+
+    /**
+     * Exclui todas as vendas cadastradas no sistema, validando ausência de cálculos e logs financeiros vinculados.
+     * Atualiza todos os lotes de vendas para EXCLUIDO.
+     */
+    @Transactional
+    public long deletarTodasVendas() {
+        if (resultadoCalculoRepository != null) {
+            long totalCalculos = resultadoCalculoRepository.count();
+            if (totalCalculos > 0) {
+                throw new ResourceConflictException(String.format(
+                        "Não é possível excluir todas as vendas: existem %d cálculo(s) realizados vinculados a elas no sistema.",
+                        totalCalculos));
+            }
+        }
+
+        if (logCalculoRepository != null) {
+            long totalLogs = logCalculoRepository.count();
+            if (totalLogs > 0) {
+                throw new ResourceConflictException(String.format(
+                        "Não é possível excluir todas as vendas: existem %d log(s) de auditoria financeira vinculados a elas no sistema.",
+                        totalLogs));
+            }
+        }
+
+        long total = vendaRepository.count();
+        if (total == 0) {
+            return 0;
+        }
+
+        if (simulacaoVendaRepository != null) {
+            simulacaoVendaRepository.deleteAllInBatch();
+        }
+
+        vendaRepository.deleteAllInBatch();
+
+        if (envioArquivoRepository != null) {
+            List<EnvioArquivo> lotes = envioArquivoRepository.findByTipoBaseIgnoreCase("SALES");
+            OffsetDateTime agora = OffsetDateTime.now();
+            for (EnvioArquivo lote : lotes) {
+                if (!"EXCLUIDO".equalsIgnoreCase(lote.getStatus())) {
+                    lote.setStatus("EXCLUIDO");
+                    lote.setExcluidoEm(agora);
+                    lote.setExcluidoPor("SISTEMA");
+                    lote.setMensagem("Exclusão de todas as vendas solicitada pelo usuário");
+                }
+            }
+            envioArquivoRepository.saveAll(lotes);
+        }
+
+        log.info("Excluídas todas as {} vendas cadastradas no sistema.", total);
+        return total;
     }
 
     /**

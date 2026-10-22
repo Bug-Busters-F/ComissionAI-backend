@@ -13,10 +13,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import com.bugbusters.backend.model.EnvioArquivo;
+import com.bugbusters.backend.repository.EnvioArquivoRepository;
 
 @Service
 @Transactional(readOnly = true)
@@ -26,16 +30,19 @@ public class BaseComissService {
     private final ResultadoCalculoRepository resultadoCalculoRepository;
     private final LogCalculoRepository logCalculoRepository;
     private final TravaCompetencia travaCompetencia;
+    private final EnvioArquivoRepository envioArquivoRepository;
 
     @Autowired
     public BaseComissService(BaseComissRepository repository,
                              ResultadoCalculoRepository resultadoCalculoRepository,
                              LogCalculoRepository logCalculoRepository,
-                             @Autowired(required = false) TravaCompetencia travaCompetencia) {
+                             @Autowired(required = false) TravaCompetencia travaCompetencia,
+                             @Autowired(required = false) EnvioArquivoRepository envioArquivoRepository) {
         this.repository = repository;
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.travaCompetencia = travaCompetencia;
+        this.envioArquivoRepository = envioArquivoRepository;
     }
 
     public Page<BaseComissResponseDTO> listar(Pageable pageable, Integer codMarca, Integer codCargo, LocalDate mesReferencia) {
@@ -131,5 +138,55 @@ public class BaseComissService {
         }
 
         repository.delete(baseComiss);
+    }
+
+    /**
+     * Exclui todas as taxas de comissão base cadastradas, validando ausência de cálculos e logs financeiros dependentes.
+     * Atualiza os lotes de COMISSIONS para EXCLUIDO.
+     */
+    @Transactional
+    public long deletarTodas() {
+        if (resultadoCalculoRepository != null) {
+            long totalCalculos = resultadoCalculoRepository.count();
+            if (totalCalculos > 0) {
+                throw new ResourceConflictException(String.format(
+                        "Não é possível excluir todas as taxas base: existem %d cálculo(s) realizados no sistema dependentes de taxas base.",
+                        totalCalculos));
+            }
+        }
+
+        if (logCalculoRepository != null) {
+            long totalLogs = logCalculoRepository.count();
+            if (totalLogs > 0) {
+                throw new ResourceConflictException(String.format(
+                        "Não é possível excluir todas as taxas base: existem %d log(s) de auditoria financeira no sistema dependentes de taxas base.",
+                        totalLogs));
+            }
+        }
+
+        long total = repository.count();
+        if (total == 0) {
+            return 0;
+        }
+
+        repository.deleteAllInBatch();
+
+        if (envioArquivoRepository != null) {
+            List<EnvioArquivo> lotes = new java.util.ArrayList<>();
+            lotes.addAll(envioArquivoRepository.findByTipoBaseIgnoreCase("COMISSIONS"));
+            lotes.addAll(envioArquivoRepository.findByTipoBaseIgnoreCase("COMISS"));
+            OffsetDateTime agora = OffsetDateTime.now();
+            for (EnvioArquivo lote : lotes) {
+                if (!"EXCLUIDO".equalsIgnoreCase(lote.getStatus())) {
+                    lote.setStatus("EXCLUIDO");
+                    lote.setExcluidoEm(agora);
+                    lote.setExcluidoPor("SISTEMA");
+                    lote.setMensagem("Exclusão de todas as taxas base solicitada pelo usuário");
+                }
+            }
+            envioArquivoRepository.saveAll(lotes);
+        }
+
+        return total;
     }
 }

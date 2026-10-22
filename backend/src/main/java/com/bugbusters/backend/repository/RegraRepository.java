@@ -27,6 +27,8 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
 
     boolean existsByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
 
+    boolean existsByMatriculaIsNotNullAndRemovidoEmIsNull();
+
     List<Regra> findTop5ByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
 
     @Query("""
