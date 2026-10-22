@@ -24,10 +24,13 @@ import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.position.PositionRepository;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.registration.RegistrationRepository;
+import com.bugbusters.backend.model.ResultadoCalculo;
+import com.bugbusters.backend.repository.ResultadoCalculoRepository;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
 
 import static org.hamcrest.Matchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -55,6 +58,9 @@ class FerramentasConsultaIntegrationTest {
 
     @Autowired
     private BaseComissRepository baseComissRepository;
+
+    @Autowired
+    private ResultadoCalculoRepository resultadoCalculoRepository;
 
 
     private Brand marca;
@@ -209,5 +215,60 @@ class FerramentasConsultaIntegrationTest {
                 .andExpect(jsonPath("$.codMarca", is(10)))
                 .andExpect(jsonPath("$.codCargo", is(100)))
                 .andExpect(jsonPath("$.percentual", is(0.0250)));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/{id} deve excluir taxa base sem dependências com 204 No Content")
+    void deveExcluirBaseComissaoComSucesso() throws Exception {
+        BaseComiss bc = new BaseComiss(marca, cargo, new BigDecimal("0.0350"));
+        bc.setReferenceMonth(LocalDate.of(2028, 5, 1));
+        bc = baseComissRepository.save(bc);
+        UUID id = bc.getId();
+
+        mockMvc.perform(delete("/api/v1/bases-comissao/{id}", id))
+                .andExpect(status().isNoContent());
+
+        org.junit.jupiter.api.Assertions.assertTrue(baseComissRepository.findById(id).isEmpty());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/{id} com ID inexistente deve retornar 404 Not Found")
+    void deveRetornar404AoExcluirBaseComissaoInexistente() throws Exception {
+        mockMvc.perform(delete("/api/v1/bases-comissao/{id}", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status", is(404)))
+                .andExpect(jsonPath("$.message", containsString("Taxa base não encontrada")));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/{id} com cálculo vinculado deve retornar 409 Conflict")
+    void deveRetornar409AoExcluirBaseComissaoComCalculosVinculados() throws Exception {
+        BaseComiss bc = new BaseComiss(marca, cargo, new BigDecimal("0.0400"));
+        bc.setReferenceMonth(LocalDate.of(2027, 3, 1));
+        bc = baseComissRepository.save(bc);
+        UUID id = bc.getId();
+
+        ResultadoCalculo calculo = new ResultadoCalculo(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "MATRIC-999",
+                10,
+                1,
+                100,
+                null,
+                LocalDate.of(2027, 3, 15),
+                new BigDecimal("500.00"),
+                new BigDecimal("0.0400"),
+                new BigDecimal("20.00"),
+                "INDIVIDUAL"
+        );
+        resultadoCalculoRepository.saveAndFlush(calculo);
+
+        mockMvc.perform(delete("/api/v1/bases-comissao/{id}", id))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status", is(409)))
+                .andExpect(jsonPath("$.message", containsString("cálculo(s)")));
+
+        org.junit.jupiter.api.Assertions.assertTrue(baseComissRepository.existsById(id));
     }
 }
