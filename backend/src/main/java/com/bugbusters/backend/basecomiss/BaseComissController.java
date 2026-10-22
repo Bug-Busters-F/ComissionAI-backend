@@ -13,16 +13,19 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/bases-comissao")
-@Tag(name = "Bases de Comissão", description = "Consulta de taxas contratuais padrão por Marca e Cargo (tb_basecomiss)")
+@Tag(name = "Bases de Comissão", description = "Consulta e exclusão de taxas contratuais padrão por Marca e Cargo (tb_basecomiss)")
 public class BaseComissController {
 
     private final BaseComissService service;
@@ -60,5 +63,35 @@ public class BaseComissController {
         return service.consultarTaxaBase(codMarca, codCargo, mesReferencia)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Excluir todas as taxas base de comissão", description = """
+            Remove todas as taxas de comissão base cadastradas. A exclusão é bloqueada caso
+            existam cálculos ou logs financeiros vinculados no sistema.
+            """)
+    @ApiResponse(responseCode = "200", description = "Taxas base excluídas com sucesso")
+    @ApiResponse(responseCode = "409", description = "Taxas base possuem cálculos ou logs vinculados",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/todas")
+    public ResponseEntity<com.bugbusters.backend.dto.TotalExcluidoResponseDTO> deletarTodas() {
+        long total = service.deletarTodas();
+        return ResponseEntity.ok(new com.bugbusters.backend.dto.TotalExcluidoResponseDTO(total));
+    }
+
+    @Operation(summary = "Excluir taxa base de comissão", description = """
+            Remove um registro de taxa de comissão base pelo seu ID (UUID). A exclusão é
+            bloqueada caso existam cálculos ou logs financeiros vinculados à marca e cargo
+            na mesma competência.
+            """)
+    @ApiResponse(responseCode = "204", description = "Taxa base excluída com sucesso")
+    @ApiResponse(responseCode = "404", description = "Taxa base não encontrada",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Taxa base possui cálculos ou logs vinculados na competência",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(
+            @Parameter(description = "ID (UUID) da taxa base a ser excluída") @PathVariable UUID id) {
+        service.delete(id);
+        return ResponseEntity.noContent().build();
     }
 }

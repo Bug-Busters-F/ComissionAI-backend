@@ -24,10 +24,13 @@ import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.position.PositionRepository;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.registration.RegistrationRepository;
+import com.bugbusters.backend.model.ResultadoCalculo;
+import com.bugbusters.backend.repository.ResultadoCalculoRepository;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
 
 import static org.hamcrest.Matchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -56,6 +59,11 @@ class FerramentasConsultaIntegrationTest {
     @Autowired
     private BaseComissRepository baseComissRepository;
 
+    @Autowired
+    private ResultadoCalculoRepository resultadoCalculoRepository;
+
+    @Autowired
+    private com.bugbusters.backend.sales.SaleRepository saleRepository;
 
     private Brand marca;
     private Position cargo;
@@ -209,5 +217,196 @@ class FerramentasConsultaIntegrationTest {
                 .andExpect(jsonPath("$.codMarca", is(10)))
                 .andExpect(jsonPath("$.codCargo", is(100)))
                 .andExpect(jsonPath("$.percentual", is(0.0250)));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/{id} deve excluir taxa base sem dependências com 204 No Content")
+    void deveExcluirBaseComissaoComSucesso() throws Exception {
+        BaseComiss bc = new BaseComiss(marca, cargo, new BigDecimal("0.0350"));
+        bc.setReferenceMonth(LocalDate.of(2028, 5, 1));
+        bc = baseComissRepository.save(bc);
+        UUID id = bc.getId();
+
+        mockMvc.perform(delete("/api/v1/bases-comissao/{id}", id))
+                .andExpect(status().isNoContent());
+
+        org.junit.jupiter.api.Assertions.assertTrue(baseComissRepository.findById(id).isEmpty());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/{id} com ID inexistente deve retornar 404 Not Found")
+    void deveRetornar404AoExcluirBaseComissaoInexistente() throws Exception {
+        mockMvc.perform(delete("/api/v1/bases-comissao/{id}", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status", is(404)))
+                .andExpect(jsonPath("$.message", containsString("Taxa base não encontrada")));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/{id} com cálculo vinculado deve retornar 409 Conflict")
+    void deveRetornar409AoExcluirBaseComissaoComCalculosVinculados() throws Exception {
+        BaseComiss bc = new BaseComiss(marca, cargo, new BigDecimal("0.0400"));
+        bc.setReferenceMonth(LocalDate.of(2027, 3, 1));
+        bc = baseComissRepository.save(bc);
+        UUID id = bc.getId();
+
+        ResultadoCalculo calculo = new ResultadoCalculo(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "MATRIC-999",
+                10,
+                1,
+                100,
+                null,
+                LocalDate.of(2027, 3, 15),
+                new BigDecimal("500.00"),
+                new BigDecimal("0.0400"),
+                new BigDecimal("20.00"),
+                "INDIVIDUAL"
+        );
+        resultadoCalculoRepository.saveAndFlush(calculo);
+
+        mockMvc.perform(delete("/api/v1/bases-comissao/{id}", id))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status", is(409)))
+                .andExpect(jsonPath("$.message", containsString("cálculo(s)")));
+
+        org.junit.jupiter.api.Assertions.assertTrue(baseComissRepository.existsById(id));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/matriculas/todas com vendas vinculadas deve retornar 409 Conflict")
+    void deveBloquearExclusaoTodasMatriculasQuandoHouverVendas() throws Exception {
+        com.bugbusters.backend.sales.Sale venda = new com.bugbusters.backend.sales.Sale();
+        venda.setRegistration(matricula);
+        venda.setBrand(marca);
+        venda.setStore(loja);
+        venda.setValue(new BigDecimal("100.00"));
+        venda.setSaleDate(LocalDate.of(2028, 1, 10));
+        saleRepository.saveAndFlush(venda);
+
+        mockMvc.perform(delete("/api/v1/matriculas/todas"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status", is(409)))
+                .andExpect(jsonPath("$.message", containsString("venda(s) cadastradas")));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/matriculas/todas sem vendas vinculadas deve excluir com 200 OK")
+    void deveExcluirTodasMatriculasComSucesso() throws Exception {
+        saleRepository.deleteAllInBatch();
+        resultadoCalculoRepository.deleteAllInBatch();
+
+        mockMvc.perform(delete("/api/v1/matriculas/todas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalExcluido", greaterThanOrEqualTo(1)));
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, registrationRepository.count());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/vendas/competencia/{mes}/{ano} com sucesso deve excluir e retornar total")
+    void deveExcluirVendasPorCompetenciaComSucesso() throws Exception {
+        resultadoCalculoRepository.deleteAllInBatch();
+
+        com.bugbusters.backend.sales.Sale venda1 = new com.bugbusters.backend.sales.Sale();
+        venda1.setRegistration(matricula);
+        venda1.setBrand(marca);
+        venda1.setStore(loja);
+        venda1.setValue(new BigDecimal("150.00"));
+        venda1.setSaleDate(LocalDate.of(2028, 9, 15));
+        saleRepository.saveAndFlush(venda1);
+
+        com.bugbusters.backend.sales.Sale venda2 = new com.bugbusters.backend.sales.Sale();
+        venda2.setRegistration(matricula);
+        venda2.setBrand(marca);
+        venda2.setStore(loja);
+        venda2.setValue(new BigDecimal("250.00"));
+        venda2.setSaleDate(LocalDate.of(2028, 10, 5));
+        saleRepository.saveAndFlush(venda2);
+
+        mockMvc.perform(delete("/api/v1/vendas/competencia/9/2028"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalExcluido", is(1)));
+
+        org.junit.jupiter.api.Assertions.assertTrue(saleRepository.existsById(venda2.getId()));
+        org.junit.jupiter.api.Assertions.assertFalse(saleRepository.existsById(venda1.getId()));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/vendas/competencia/{mes}/{ano} com cálculo vinculado deve retornar 409 Conflict")
+    void deveBloquearExclusaoVendasPorCompetenciaComCalculosVinculados() throws Exception {
+        com.bugbusters.backend.sales.Sale venda = new com.bugbusters.backend.sales.Sale();
+        venda.setRegistration(matricula);
+        venda.setBrand(marca);
+        venda.setStore(loja);
+        venda.setValue(new BigDecimal("300.00"));
+        venda.setSaleDate(LocalDate.of(2028, 4, 12));
+        venda = saleRepository.saveAndFlush(venda);
+
+        ResultadoCalculo calculo = new ResultadoCalculo(
+                UUID.randomUUID(),
+                venda.getId(),
+                matricula.getRegistration(),
+                marca.getCode(),
+                loja.getCode(),
+                cargo.getCode(),
+                null,
+                LocalDate.of(2028, 4, 12),
+                new BigDecimal("300.00"),
+                new BigDecimal("0.0500"),
+                new BigDecimal("15.00"),
+                "INDIVIDUAL"
+        );
+        resultadoCalculoRepository.saveAndFlush(calculo);
+
+        mockMvc.perform(delete("/api/v1/vendas/competencia/4/2028"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status", is(409)))
+                .andExpect(jsonPath("$.message", containsString("cálculos vinculados")));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/vendas/todas deve excluir todas as vendas sem cálculos com 200 OK")
+    void deveExcluirTodasVendasComSucesso() throws Exception {
+        resultadoCalculoRepository.deleteAllInBatch();
+
+        com.bugbusters.backend.sales.Sale venda = new com.bugbusters.backend.sales.Sale();
+        venda.setRegistration(matricula);
+        venda.setBrand(marca);
+        venda.setStore(loja);
+        venda.setValue(new BigDecimal("120.00"));
+        venda.setSaleDate(LocalDate.of(2028, 7, 20));
+        saleRepository.saveAndFlush(venda);
+
+        mockMvc.perform(delete("/api/v1/vendas/todas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalExcluido", greaterThanOrEqualTo(1)));
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, saleRepository.count());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/bases-comissao/todas e /api/v1/comissoes/todas devem excluir com 200 OK")
+    void deveExcluirTodasComissoesComSucesso() throws Exception {
+        resultadoCalculoRepository.deleteAllInBatch();
+
+        // Testa rota canônica /bases-comissao/todas
+        mockMvc.perform(delete("/api/v1/bases-comissao/todas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalExcluido", greaterThanOrEqualTo(1)));
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, baseComissRepository.count());
+
+        // Insere nova taxa para testar rota alias /comissoes/todas
+        BaseComiss bc = new BaseComiss(marca, cargo, new java.math.BigDecimal("0.0500"));
+        bc.setReferenceMonth(LocalDate.of(2028, 12, 1));
+        baseComissRepository.saveAndFlush(bc);
+
+        mockMvc.perform(delete("/api/v1/comissoes/todas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalExcluido", is(1)));
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, baseComissRepository.count());
     }
 }

@@ -18,4 +18,8 @@ public interface SimulacaoVendaRepository extends JpaRepository<SimulacaoVenda, 
     Optional<SimulacaoVenda> findBySimulacaoIdAndIdVenda(UUID simulacaoId, UUID idVenda);
 
     long countBySimulacaoId(UUID simulacaoId);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("DELETE FROM SimulacaoVenda sv WHERE sv.idVenda IN :idsVendas")
+    void deleteByIdVendaIn(@org.springframework.data.repository.query.Param("idsVendas") java.util.Collection<UUID> idsVendas);
 }

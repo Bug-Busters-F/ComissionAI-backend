@@ -55,4 +55,8 @@ public interface EnvioArquivoRepository extends JpaRepository<EnvioArquivo, Long
             @Param("tipoBase") String tipoBase,
             @Param("competencia") String competencia
     );
+
+    List<EnvioArquivo> findByTipoBaseIgnoreCase(String tipoBase);
+
+    List<EnvioArquivo> findByTipoBaseIgnoreCaseAndCompetencia(String tipoBase, String competencia);
 }
