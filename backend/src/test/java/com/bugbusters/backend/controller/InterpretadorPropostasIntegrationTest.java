@@ -330,6 +330,38 @@ class InterpretadorPropostasIntegrationTest {
     }
 
     @Test
+    @DisplayName("Taxa editada manualmente não é recalculada sobre a base e os campos editados seguem para o agente")
+    void devePreservarTaxaEditadaManualmente() throws Exception {
+        mockServer.expect(requestTo(endsWith("/api/v2/atualizar-artefatos")))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.camposEditados[0]").value("taxa"))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.bloco.taxa").value(0.0500))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.bloco.operacao.tipo").value("TAXA_ABSOLUTA"))
+                .andExpect(MockRestRequestMatchers.jsonPath("$.bloco.referencias.length()").value(0))
+                .andRespond(withSuccess("""
+                        {"bloco": {"idLocal": "bloco-1", "taxa": "0.0500",
+                                   "explicacao": "Taxa de 5,00% definida manualmente pelo gestor (origem: MANUAL).",
+                                   "codigoPython": "REGRA = {'taxa': Decimal('0.0500')}"}}
+                        """, MediaType.APPLICATION_JSON));
+
+        mockMvc.perform(post("/api/v1/interpretador/atualizar-artefatos")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {"camposEditados": ["taxa"],
+                             "proposta": {
+                                "blocoId": "bloco-1",
+                                "filtros": {"codMarca": 10, "descrMarca": "PRETO", "codCargo": 150, "descriCargo": "GERENTE DE LOJA"},
+                                "operacaoBase": {"tipoOperacao": "ACRESCIMO_PONTOS", "valorAjuste": 0.0100,
+                                    "referenciaBase": {"tipoBase": "BASE_COMISS", "taxaBaseConsultada": 0.0250, "descricao": "Base PRETO"}},
+                                "taxaFinal": 0.0500,
+                                "vigencia": {"dataInicio": "2026-10-01", "dataFim": "2026-10-31"}}}
+                            """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taxaCalculada", is(0.0500)))
+                .andExpect(jsonPath("$.explicacao", containsString("manualmente")));
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("Se o agente estiver indisponível, atualizar artefatos usa a geração local e não bloqueia a edição")
     void deveAtualizarArtefatosLocalmenteQuandoAgenteIndisponivel() throws Exception {
         mockServer.expect(requestTo(endsWith("/api/v2/atualizar-artefatos")))
@@ -387,7 +419,8 @@ class InterpretadorPropostasIntegrationTest {
                 .andExpect(jsonPath("$.propostas[0].pythonEquivalente", containsString("Decimal('0.0253')")))
                 .andExpect(jsonPath("$.propostas[1].operacaoBase.tipoOperacao", is("ACRESCIMO_PONTOS")))
                 .andExpect(jsonPath("$.propostas[1].taxaFinal").doesNotExist())
-                .andExpect(jsonPath("$.propostas[1].pendencias[?(@.codigo == 'BASE_AUSENTE')]", hasSize(1)))
+                .andExpect(jsonPath("$.propostas[1].pendencias", hasSize(1)))
+                .andExpect(jsonPath("$.propostas[1].pendencias[0].codigo", is("BASE_AUSENTE")))
                 .andExpect(jsonPath("$.propostas[1].completa", is(false)));
         mockServer.verify();
     }

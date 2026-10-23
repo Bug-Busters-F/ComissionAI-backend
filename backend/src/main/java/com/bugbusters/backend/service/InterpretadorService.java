@@ -450,6 +450,10 @@ public class InterpretadorService {
         PropostaRegraDTO p = request.proposta();
 
         OperacaoBaseDTO operacao = p.operacaoBase();
+        if (request.camposEditados().contains("taxa")) {
+            // taxa digitada pelo usuário é a origem da regra: não é recalculada sobre a base
+            operacao = OperacaoBaseDTO.definirTaxa(p.taxaFinal());
+        }
         YearMonth ymRef = (p.vigencia() != null && p.vigencia().dataInicio() != null)
                 ? YearMonth.from(p.vigencia().dataInicio())
                 : null;
@@ -498,7 +502,7 @@ public class InterpretadorService {
         List<PendenciaPropostaDTO> pendencias = artefatoService.validarProposta(candidata);
         boolean completa = pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva);
 
-        String[] artefatos = gerarArtefatos(candidata);
+        String[] artefatos = gerarArtefatos(candidata, request.camposEditados());
         String novaExplicacao = artefatos[0];
         String novoPython = artefatos[1];
 
@@ -542,10 +546,11 @@ public class InterpretadorService {
      * Gera explicação e Python do bloco no serviço de IA (/api/v2/atualizar-artefatos), a partir dos campos já
      * recalculados aqui. Se o serviço estiver indisponível, usa a geração local para a edição não ficar bloqueada.
      */
-    private String[] gerarArtefatos(PropostaRegraDTO proposta) {
+    private String[] gerarArtefatos(PropostaRegraDTO proposta, List<String> camposEditados) {
         try {
             Map<String, Object> payload = new HashMap<>();
             payload.put("bloco", blocoParaAgente(proposta));
+            payload.put("camposEditados", camposEditados);
             Map<String, Object> resposta = aiClient.atualizarArtefatosV2(payload);
             Map<String, Object> bloco = mapa(resposta == null ? null : resposta.get("bloco"));
             String explicacao = texto(bloco.get("explicacao"), null);
@@ -804,6 +809,13 @@ public class InterpretadorService {
                 decimal(bonus.get("percentual")), decimal(bonus.get("valorFixo")));
 
         List<PendenciaPropostaDTO> pendencias = new ArrayList<>(artefatoService.validarProposta(propostaBase));
+        // Quando o agente já explicou por que a taxa está pendente (ex.: BASE_AUSENTE), as pendências genéricas de
+        // taxa não calculável seriam o mesmo problema repetido.
+        boolean agenteExplicouTaxa = agenteEnviouOperacao && listaDeMapas(bloco.get("pendencias")).stream()
+                .anyMatch(p -> "taxa".equals(texto(p.get("campo"), "")));
+        if (agenteExplicouTaxa) {
+            pendencias.removeIf(pen -> "BASE_REFERENCIA_NAO_ENCONTRADA".equals(pen.codigo()) || "TAXA_NAO_CALCULAVEL".equals(pen.codigo()));
+        }
 
         boolean datasDiferentes = temVigenciaCampanha && (
                 (dataInicioAgente != null && !Objects.equals(dataInicioAgente, vigenciaCampanha.dataInicio()))
