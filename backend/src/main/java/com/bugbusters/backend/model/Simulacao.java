@@ -29,6 +29,10 @@ public class Simulacao {
     @JoinColumn(name = "campanha_id")
     private Campanha campanha;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "campanha_versao_id")
+    private CampanhaVersao campanhaVersao;
+
     @Column(name = "titulo_campanha")
     private String tituloCampanha;
 
@@ -239,6 +243,8 @@ public class Simulacao {
 
     public Campanha getCampanha() { return campanha; }
     public void setCampanha(Campanha campanha) { this.campanha = campanha; }
+    public CampanhaVersao getCampanhaVersao() { return campanhaVersao; }
+    public void setCampanhaVersao(CampanhaVersao campanhaVersao) { this.campanhaVersao = campanhaVersao; }
 
     public String getTituloCampanha() { return tituloCampanha; }
     public void setTituloCampanha(String tituloCampanha) { this.tituloCampanha = tituloCampanha; }

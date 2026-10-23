@@ -104,6 +104,13 @@ public class CampanhaController {
         return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request));
     }
 
+    @Operation(summary = "Cancelar proposta de alteração sem afetar a versão vigente")
+    @DeleteMapping("/{id}/proposta")
+    public ResponseEntity<Void> cancelarProposta(@PathVariable Long id) {
+        campanhaService.cancelarProposta(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @Operation(summary = "Remoção lógica da campanha", description = "Aplica soft delete preservando referências históricas para cálculos.")
     @ApiResponse(responseCode = "204", description = "Campanha desativada com sucesso")
     @DeleteMapping("/{id}")

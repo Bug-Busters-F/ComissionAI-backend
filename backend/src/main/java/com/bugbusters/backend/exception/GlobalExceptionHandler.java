@@ -84,6 +84,16 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
         }
 
+        @ExceptionHandler({jakarta.persistence.OptimisticLockException.class,
+                org.springframework.orm.ObjectOptimisticLockingFailureException.class})
+        public ResponseEntity<ApiErrorResponse> handleOptimisticLock(Exception ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(), HttpStatus.CONFLICT.value(), "Conflict",
+                                "A campanha foi alterada por outro usuário. Atualize os dados antes de publicar.",
+                                request.getRequestURI(), List.of());
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+        }
+
         @ExceptionHandler(AusenciaCoberturaException.class)
         public ResponseEntity<ApiErrorResponse> handleAusenciaCobertura(
                         AusenciaCoberturaException ex, HttpServletRequest request) {

@@ -25,7 +25,9 @@ public record CampanhaResponse(
         OffsetDateTime criadoEm,
         OffsetDateTime atualizadoEm,
         UUID simulacaoAceitaId,
-        StatusAceiteSimulacao statusAceite
+        StatusAceiteSimulacao statusAceite,
+        Integer versaoVigente,
+        Integer versaoProposta
 ) {
     public CampanhaResponse(
             Long id,
@@ -39,7 +41,7 @@ public record CampanhaResponse(
             OffsetDateTime criadoEm,
             OffsetDateTime atualizadoEm
     ) {
-        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null);
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null, null, null);
     }
 
     public record RegraVinculadaDTO(

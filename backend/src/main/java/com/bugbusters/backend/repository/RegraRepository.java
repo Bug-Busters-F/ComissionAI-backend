@@ -20,6 +20,7 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
     }
 
     List<Regra> findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(Long campanhaId);
+    List<Regra> findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(Long campanhaVersaoId);
 
     List<Regra> findAllByStatusAndRemovidoEmIsNull(StatusRegra status);
 
