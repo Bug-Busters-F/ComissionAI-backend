@@ -78,6 +78,7 @@ public class SimulacaoCenariosService {
     private final SimulacaoRepository simulacaoRepository;
     private final SimulacaoVendaRepository simulacaoVendaRepository;
     private final CampanhaSimulacaoValidator campanhaSimulacaoValidator;
+    private final CampanhaService campanhaService;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -88,7 +89,8 @@ public class SimulacaoCenariosService {
             ReferenciaPublicoService referenciaPublicoService,
             SimulacaoRepository simulacaoRepository,
             SimulacaoVendaRepository simulacaoVendaRepository,
-            CampanhaSimulacaoValidator campanhaSimulacaoValidator) {
+            CampanhaSimulacaoValidator campanhaSimulacaoValidator,
+            CampanhaService campanhaService) {
         this.saleRepository = saleRepository;
         this.baseComissRepository = baseComissRepository;
         this.campanhaRepository = campanhaRepository;
@@ -98,6 +100,7 @@ public class SimulacaoCenariosService {
         this.campanhaSimulacaoValidator = campanhaSimulacaoValidator != null 
                 ? campanhaSimulacaoValidator 
                 : new CampanhaSimulacaoValidator(simulacaoRepository, null);
+        this.campanhaService = campanhaService;
         this.objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
     }
 
@@ -108,7 +111,7 @@ public class SimulacaoCenariosService {
             ReferenciaPublicoService referenciaPublicoService,
             SimulacaoRepository simulacaoRepository,
             SimulacaoVendaRepository simulacaoVendaRepository) {
-        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, simulacaoRepository, simulacaoVendaRepository, null);
+        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, simulacaoRepository, simulacaoVendaRepository, null, null);
     }
 
     public SimulacaoCenariosService(
@@ -116,7 +119,7 @@ public class SimulacaoCenariosService {
             BaseComissRepository baseComissRepository,
             CampanhaRepository campanhaRepository,
             ReferenciaPublicoService referenciaPublicoService) {
-        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, null, null, null);
+        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, null, null, null, null);
     }
 
     public record ResultadoSimulacaoInterna(
@@ -154,6 +157,10 @@ public class SimulacaoCenariosService {
         simulacao.setExecutadoEm(OffsetDateTime.now());
         simulacao.setCompetencia(resp.competencia());
         simulacao.setCampanha(resultado.campanha());
+        if (resultado.campanha() != null) {
+            simulacao.setCampanhaVersao(resultado.campanha().getVersaoProposta() != null
+                    ? resultado.campanha().getVersaoProposta() : resultado.campanha().getVersaoVigente());
+        }
         simulacao.setTituloCampanha(resp.tituloCampanha());
         simulacao.setDataInicioCampanha(resp.dataInicioCampanha());
         simulacao.setDataFimCampanha(resp.dataFimCampanha());
@@ -378,7 +385,10 @@ public class SimulacaoCenariosService {
             List<Simulacao> aceitesAnteriores = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
                     campanha.getId(), StatusAceiteSimulacao.ACEITA);
             for (Simulacao anterior : aceitesAnteriores) {
-                if (!anterior.getId().equals(simulacao.getId())) {
+                // Uma revisão publicada é histórico auditável. Só substitui aceite da mesma proposta.
+                if (!anterior.getId().equals(simulacao.getId())
+                        && Objects.equals(anterior.getCampanhaVersao() != null ? anterior.getCampanhaVersao().getId() : null,
+                                          simulacao.getCampanhaVersao() != null ? simulacao.getCampanhaVersao().getId() : null)) {
                     anterior.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
                     anterior.setInvalidadoEm(agora);
                     anterior.setMotivoInvalidacao("Substituída por novo aceite da simulação (Protocolo: " + simulacao.getProtocolo() + ")");
@@ -400,7 +410,11 @@ public class SimulacaoCenariosService {
 
         if (campanha != null) {
             campanha.setSimulacaoAceita(salva);
-            campanhaRepository.save(campanha);
+            if (campanhaService != null) {
+                campanhaService.publicarVersaoAceita(campanha, salva, request != null ? request.versaoEsperada() : null);
+            } else {
+                campanhaRepository.save(campanha);
+            }
         }
 
         return new AceiteSimulacaoResponse(

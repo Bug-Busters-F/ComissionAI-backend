@@ -97,7 +97,7 @@ public class CampanhaSimulacaoValidator {
         }
 
         Simulacao simulacaoAceita = resolverSimulacaoAceita(campanha);
-        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
+        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
         String hashCampanhaAtual = calcularHashPropostaCampanha(campanha.getDataInicio(), campanha.getDataFim(), regrasAtuais,
                 simulacaoAceita != null ? simulacaoAceita.getCompetencia() : "COMPETENCIA_PADRAO");
 
@@ -174,7 +174,7 @@ public class CampanhaSimulacaoValidator {
         }
 
         // 2. Regras simuladas vs regras salvas
-        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
+        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
         List<RegraItemRequest> regrasSimuladas = extrairRegrasSimuladas(simulacao);
 
         if (regrasAtuais.size() != regrasSimuladas.size()) {
@@ -255,7 +255,7 @@ public class CampanhaSimulacaoValidator {
         // Se a campanha ainda não tiver simulação diretamente vinculada, busca simulações recentes sem impedimentos
         // que correspondam exatamente às regras e vigência desta proposta.
         if (simulacaoRepository != null && campanha.getId() != null) {
-            List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
+            List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
             List<Simulacao> candidatas = simulacaoRepository.findTop10ByQtdVendasComImpedimentoOrderByExecutadoEmDesc(0);
             for (Simulacao cand : candidatas) {
                 String hashCampanha = calcularHashPropostaCampanha(campanha.getDataInicio(), campanha.getDataFim(), regrasAtuais, cand.getCompetencia());
@@ -281,6 +281,14 @@ public class CampanhaSimulacaoValidator {
             return List.of();
         }
         return regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanhaId);
+    }
+
+    private List<Regra> carregarRegrasAtuais(Campanha campanha) {
+        if (campanha == null || regraRepository == null) return List.of();
+        var versao = campanha.getVersaoProposta() != null ? campanha.getVersaoProposta() : campanha.getVersaoVigente();
+        return versao != null
+                ? regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId())
+                : carregarRegrasAtuais(campanha.getId());
     }
 
     private List<RegraItemRequest> extrairRegrasSimuladas(Simulacao simulacao) {

@@ -19,6 +19,10 @@ public class Regra {
     @JoinColumn(name = "campanha_id")
     private Campanha campanha;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "campanha_versao_id")
+    private CampanhaVersao campanhaVersao;
+
     @Column(nullable = false)
     private String nome;
 
@@ -173,6 +177,8 @@ public class Regra {
 
     public Campanha getCampanha() { return campanha; }
     public void setCampanha(Campanha campanha) { this.campanha = campanha; }
+    public CampanhaVersao getCampanhaVersao() { return campanhaVersao; }
+    public void setCampanhaVersao(CampanhaVersao campanhaVersao) { this.campanhaVersao = campanhaVersao; }
 
     public String getNome() { return nome; }
     public void setNome(String nome) { this.nome = nome; }
