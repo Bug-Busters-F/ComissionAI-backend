@@ -17,6 +17,9 @@ public class CampanhaVersao {
     @Column(name = "data_fim", nullable = false) private LocalDate dataFim;
     @Column(name = "criado_em", nullable = false, updatable = false) private OffsetDateTime criadoEm = OffsetDateTime.now();
     @Column(name = "publicado_em") private OffsetDateTime publicadoEm;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "versao_anterior_id") private CampanhaVersao versaoAnterior;
+    @Column(name = "publicado_por", length = 150) private String publicadoPor;
+    @OneToOne(fetch = FetchType.LAZY) @JoinColumn(name = "simulacao_aceita_id") private Simulacao simulacaoAceita;
 
     public Long getId(){return id;} public void setId(Long id){this.id=id;}
     public Campanha getCampanha(){return campanha;} public void setCampanha(Campanha c){this.campanha=c;}
@@ -28,4 +31,7 @@ public class CampanhaVersao {
     public LocalDate getDataFim(){return dataFim;} public void setDataFim(LocalDate v){this.dataFim=v;}
     public OffsetDateTime getCriadoEm(){return criadoEm;} public void setCriadoEm(OffsetDateTime v){this.criadoEm=v;}
     public OffsetDateTime getPublicadoEm(){return publicadoEm;} public void setPublicadoEm(OffsetDateTime v){this.publicadoEm=v;}
+    public CampanhaVersao getVersaoAnterior(){return versaoAnterior;} public void setVersaoAnterior(CampanhaVersao v){this.versaoAnterior=v;}
+    public String getPublicadoPor(){return publicadoPor;} public void setPublicadoPor(String v){this.publicadoPor=v;}
+    public Simulacao getSimulacaoAceita(){return simulacaoAceita;} public void setSimulacaoAceita(Simulacao v){this.simulacaoAceita=v;}
 }

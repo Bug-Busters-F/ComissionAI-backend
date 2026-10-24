@@ -10,4 +10,5 @@ public interface CampanhaVersaoRepository extends JpaRepository<CampanhaVersao, 
     Optional<CampanhaVersao> findFirstByCampanhaIdAndStatus(Long campanhaId, StatusVersaoCampanha status);
     List<CampanhaVersao> findAllByCampanhaIdOrderByNumeroDesc(Long campanhaId);
     Optional<CampanhaVersao> findFirstByCampanhaIdOrderByNumeroDesc(Long campanhaId);
+    Optional<CampanhaVersao> findByCampanhaIdAndNumero(Long campanhaId, Integer numero);
 }
