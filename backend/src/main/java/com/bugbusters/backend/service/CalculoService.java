@@ -385,15 +385,17 @@ public class CalculoService {
         LocalDate inicio = ym.atDay(1);
         LocalDate fim = ym.atEndOfMonth();
 
+        // A trava é adquirida antes de ler vendas, cobertura e regras. Assim, alterações e
+        // exclusões que usam a mesma competência não conseguem produzir um snapshot misto.
+        if (travaCompetencia != null) {
+            travaCompetencia.adquirirTrava(ym.toString());
+        }
+
         List<Sale> vendas = saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(inicio, fim);
 
         // Validação centralizada de cobertura por marca, cargo e competência ANTES dos cálculos e escritas
         if (coberturaBaseService != null && !vendas.isEmpty()) {
             coberturaBaseService.validarCobertura(vendas, ym);
-        }
-
-        if (travaCompetencia != null) {
-            travaCompetencia.adquirirTrava(ym.toString());
         }
 
         List<CalculoItemResponseDTO> sucessos = new ArrayList<>();
