@@ -38,27 +38,42 @@ public class CampanhaService {
     private final CampanhaSimulacaoValidator campanhaSimulacaoValidator;
     private final SimulacaoRepository simulacaoRepository;
     private final CampanhaVersaoRepository campanhaVersaoRepository;
+    private final FechamentoService fechamentoService;
 
     @Autowired
     public CampanhaService(CampanhaRepository campanhaRepository,
                            RegraRepository regraRepository,
                            CampanhaSimulacaoValidator campanhaSimulacaoValidator,
                            SimulacaoRepository simulacaoRepository,
-                           CampanhaVersaoRepository campanhaVersaoRepository) {
+                           CampanhaVersaoRepository campanhaVersaoRepository,
+                           @Autowired(required = false) FechamentoService fechamentoService) {
         this.campanhaRepository = campanhaRepository;
         this.regraRepository = regraRepository;
         this.campanhaSimulacaoValidator = campanhaSimulacaoValidator;
         this.simulacaoRepository = simulacaoRepository;
         this.campanhaVersaoRepository = campanhaVersaoRepository;
+        this.fechamentoService = fechamentoService;
+    }
+
+    public CampanhaService(CampanhaRepository campanhaRepository,
+                           RegraRepository regraRepository,
+                           CampanhaSimulacaoValidator campanhaSimulacaoValidator,
+                           SimulacaoRepository simulacaoRepository,
+                           CampanhaVersaoRepository campanhaVersaoRepository) {
+        this(campanhaRepository, regraRepository, campanhaSimulacaoValidator, simulacaoRepository, campanhaVersaoRepository, null);
     }
 
     public CampanhaService(CampanhaRepository campanhaRepository, RegraRepository regraRepository) {
-        this(campanhaRepository, regraRepository, null, null, null);
+        this(campanhaRepository, regraRepository, null, null, null, null);
     }
 
     @Transactional
     public CampanhaResponse criarCampanha(CampanhaRequest request) {
         PeriodoCalculado periodo = calcularEValidarPeriodo(request.dataInicio(), request.dataFim());
+
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodoDisponivel(periodo.inicio(), periodo.fim());
+        }
 
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
@@ -160,6 +175,10 @@ public class CampanhaService {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
 
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
+
         vincularAceiteExistente(campanha, simulacaoAceitaId);
 
         List<Regra> regras = regrasDaVersaoExibida(campanha);
@@ -204,6 +223,11 @@ public class CampanhaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
 
         PeriodoCalculado periodo = calcularEValidarPeriodo(request.dataInicio(), request.dataFim());
+
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+            fechamentoService.validarPeriodoDisponivel(periodo.inicio(), periodo.fim());
+        }
 
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
@@ -264,6 +288,10 @@ public class CampanhaService {
     public void removerLogicamente(Long id) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
+
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
 
         OffsetDateTime agora = OffsetDateTime.now();
         campanha.setRemovidoEm(agora);
@@ -510,6 +538,9 @@ public class CampanhaService {
     /** Publica exatamente a proposta usada pela simulação, em uma única transação. */
     @Transactional
     public void publicarVersaoAceita(Campanha campanha, Simulacao simulacao, Integer versaoEsperada) {
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
         if (campanhaVersaoRepository == null) return;
         if (campanha.getVersaoVigente() != null && versaoEsperada == null) {
             throw new ResourceConflictException("Informe versaoEsperada para publicar uma revisão da campanha.");

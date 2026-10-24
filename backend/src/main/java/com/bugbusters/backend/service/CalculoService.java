@@ -81,6 +81,7 @@ public class CalculoService {
     private final RegistrationRepository registrationRepository;
     private final BrandRepository brandRepository;
     private final StoreRepository storeRepository;
+    private final com.bugbusters.backend.repository.FechamentoCompetenciaRepository fechamentoCompetenciaRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -95,7 +96,8 @@ public class CalculoService {
                           @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia,
                           @org.springframework.beans.factory.annotation.Autowired(required = false) RegistrationRepository registrationRepository,
                           @org.springframework.beans.factory.annotation.Autowired(required = false) BrandRepository brandRepository,
-                          @org.springframework.beans.factory.annotation.Autowired(required = false) StoreRepository storeRepository) {
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) StoreRepository storeRepository,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.repository.FechamentoCompetenciaRepository fechamentoCompetenciaRepository) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.regraRepository = regraRepository;
@@ -106,6 +108,20 @@ public class CalculoService {
         this.registrationRepository = registrationRepository;
         this.brandRepository = brandRepository;
         this.storeRepository = storeRepository;
+        this.fechamentoCompetenciaRepository = fechamentoCompetenciaRepository;
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          CoberturaBaseService coberturaBaseService,
+                          com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia,
+                          RegistrationRepository registrationRepository,
+                          BrandRepository brandRepository,
+                          StoreRepository storeRepository) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, travaCompetencia, registrationRepository, brandRepository, storeRepository, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -115,7 +131,7 @@ public class CalculoService {
                           TaxaComissaoResolver taxaComissaoResolver,
                           CoberturaBaseService coberturaBaseService,
                           com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, travaCompetencia, null, null, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, travaCompetencia, null, null, null, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -124,7 +140,7 @@ public class CalculoService {
                           SaleRepository saleRepository,
                           TaxaComissaoResolver taxaComissaoResolver,
                           CoberturaBaseService coberturaBaseService) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, null, null, null, null);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, null, null, null, null, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -135,7 +151,7 @@ public class CalculoService {
                           RegistrationRepository registrationRepository,
                           BrandRepository brandRepository,
                           StoreRepository storeRepository) {
-        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, registrationRepository, brandRepository, storeRepository);
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, null, null, registrationRepository, brandRepository, storeRepository, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -201,6 +217,15 @@ public class CalculoService {
                     existente.getOrigemTaxa(),
                     existente.getCalculadoEm()
             );
+        }
+
+        // Validação de bloqueio por fechamento final concluído na competência da venda
+        if (sale.getSaleDate() != null) {
+            YearMonth ym = YearMonth.from(sale.getSaleDate());
+            if (fechamentoCompetenciaRepository != null
+                    && fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(ym.toString(), com.bugbusters.backend.model.StatusFechamento.CONCLUIDO)) {
+                throw new BusinessException("A competência da venda (" + ym + ") possui fechamento final concluído e está bloqueada para novas apurações.");
+            }
         }
 
         // 2. Validação rigorosa de cobertura de taxa base ANTES de qualquer cálculo ou escrita
@@ -363,6 +388,25 @@ public class CalculoService {
      */
     @Transactional
     public CalculoCompetenciaResponseDTO calcularPorCompetencia(String competenciaStr, boolean recalcular) {
+        return processarCompetencia(competenciaStr, recalcular, null, null);
+    }
+
+    /**
+     * Processa a apuração oficial do fechamento final da competência (BACK-11).
+     * Força o recálculo com a versão vigente mais recente para todas as vendas do período,
+     * registra o vínculo com o fechamento e gera logs com origem de fechamento final.
+     */
+    @Transactional
+    public CalculoCompetenciaResponseDTO processarCompetenciaFechamento(String competenciaStr, UUID fechamentoId, String executadoPor) {
+        return processarCompetencia(competenciaStr, true, fechamentoId, executadoPor);
+    }
+
+    private CalculoCompetenciaResponseDTO processarCompetencia(
+            String competenciaStr,
+            boolean recalcular,
+            UUID fechamentoId,
+            String executadoPor
+    ) {
         if (competenciaStr == null || competenciaStr.isBlank()) {
             throw new BusinessException("A competência é obrigatória para o cálculo em lote.");
         }
@@ -380,6 +424,14 @@ public class CalculoService {
             }
         } catch (Exception e) {
             throw new BusinessException("Formato de competência inválido: '" + competenciaStr + "'. Utilize YYYY-MM ou YYYY-MM-DD.");
+        }
+
+        // Se a competência já está com fechamento final concluído e for um cálculo avulso/rotineiro
+        if (fechamentoId == null && fechamentoCompetenciaRepository != null
+                && fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(ym.toString(), com.bugbusters.backend.model.StatusFechamento.CONCLUIDO)) {
+            if (recalcular) {
+                throw new BusinessException("A competência " + ym + " já possui fechamento final concluído e está bloqueada para recálculo.");
+            }
         }
 
         LocalDate inicio = ym.atDay(1);
@@ -484,6 +536,11 @@ public class CalculoService {
                 );
                 resultado.setValorBonusPercentual(calculada.bonusPercentual());
                 resultado.setValorBonusFixo(calculada.bonusFixo());
+                resultado.setVersaoCampanhaNumero(resolucao.versaoCampanhaNumero());
+                if (fechamentoId != null) {
+                    resultado.setFechamentoId(fechamentoId);
+                    resultado.setTipoCalculo("FECHAMENTO_FINAL");
+                }
             } else {
                 resultado = new ResultadoCalculo(
                         UUID.randomUUID(),
@@ -497,15 +554,21 @@ public class CalculoService {
                         sale.getValue(),
                         taxaAplicada,
                         comissao,
-                        "COMPETENCIA"
+                        fechamentoId != null ? "FECHAMENTO_FINAL" : "COMPETENCIA"
                 );
                 resultado.setOrigemTaxa(resolucao.origemTaxa());
                 resultado.setValorBonusPercentual(calculada.bonusPercentual());
                 resultado.setValorBonusFixo(calculada.bonusFixo());
+                resultado.setVersaoCampanhaNumero(resolucao.versaoCampanhaNumero());
+                if (fechamentoId != null) {
+                    resultado.setFechamentoId(fechamentoId);
+                }
             }
 
             resultadosParaSalvar.add(resultado);
-            logsParaSalvar.add(criarLogImutavel(resultado, sale, resolucao));
+            String origemLog = fechamentoId != null ? "FECHAMENTO_FINAL" : "MOTOR_PRODUCAO";
+            String executorLog = (fechamentoId != null && executadoPor != null && !executadoPor.isBlank()) ? executadoPor : "SISTEMA";
+            logsParaSalvar.add(criarLogImutavel(resultado, sale, resolucao, origemLog, executorLog));
 
             sucessos.add(toItem(resultado));
             totalVendasCalculadas = totalVendasCalculadas.add(resultado.getValorVenda());
@@ -594,11 +657,22 @@ public class CalculoService {
                 resultado.getValorComissao(),
                 resultado.getRegraId(),
                 resultado.getOrigemTaxa(),
-                resultado.getCalculadoEm()
+                resultado.getCalculadoEm(),
+                resultado.getVersaoCampanhaNumero()
         );
     }
 
     private LogCalculoImutavel criarLogImutavel(ResultadoCalculo resultado, Sale sale, ResolucaoTaxaResult resolucao) {
+        return criarLogImutavel(resultado, sale, resolucao, "MOTOR_PRODUCAO", "SISTEMA");
+    }
+
+    private LogCalculoImutavel criarLogImutavel(
+            ResultadoCalculo resultado,
+            Sale sale,
+            ResolucaoTaxaResult resolucao,
+            String origemExecucao,
+            String usuarioExecutor
+    ) {
         String tipoVenda = sale.getTipoVenda() != null && !sale.getTipoVenda().isBlank()
                 ? sale.getTipoVenda() : "IMPORTADA";
         String canal = sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO";
@@ -629,7 +703,7 @@ public class CalculoService {
                 resultado.getRegraId(),
                 resultado.getDataVenda(),
                 canal,
-                "MOTOR_PRODUCAO",
+                origemExecucao != null ? origemExecucao : "MOTOR_PRODUCAO",
                 tipoVenda,
                 sale.getIdLoteOrigem(),
                 versaoRegra,
@@ -638,6 +712,9 @@ public class CalculoService {
         logImutavel.setOrigemTaxa(resolucao.origemTaxa());
         logImutavel.setValorBonusPercentual(resultado.getValorBonusPercentual());
         logImutavel.setValorBonusFixo(resultado.getValorBonusFixo());
+        if (usuarioExecutor != null && !usuarioExecutor.isBlank()) {
+            logImutavel.setUsuarioExecutor(usuarioExecutor);
+        }
         return logImutavel;
     }
 
