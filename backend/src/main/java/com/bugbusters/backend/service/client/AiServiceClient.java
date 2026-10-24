@@ -27,6 +27,12 @@ public class AiServiceClient {
     @Value("${ai.service.v2.endpoint:/api/v2/interpretar}")
     private String v2Endpoint;
 
+    @Value("${ai.service.v2.reinterpretar-endpoint:/api/v2/reinterpretar}")
+    private String v2ReinterpretarEndpoint;
+
+    @Value("${ai.service.v2.atualizar-artefatos-endpoint:/api/v2/atualizar-artefatos}")
+    private String v2AtualizarArtefatosEndpoint;
+
     public AiServiceClient(RestClient aiRestClient, @Value("${ai.service.endpoint:/api/v1/interpretar}") String endpoint) {
         this.aiRestClient = aiRestClient;
         this.endpoint = endpoint;
@@ -66,9 +72,29 @@ public class AiServiceClient {
      * ao cadastro). A resposta vem como mapa e é convertida para PropostaRegraDTO pelo InterpretadorService.
      */
     public Map<String, Object> chamarServicoPythonV2(Map<String, Object> payload) {
+        return postarV2(v2Endpoint, payload);
+    }
+
+    /**
+     * Reinterpretação localizada de uma regra editada (/api/v2/reinterpretar): devolve as propostas que
+     * substituem o bloco alvo (uma ou, se o texto foi dividido, várias).
+     */
+    public Map<String, Object> reinterpretarBlocoV2(Map<String, Object> payload) {
+        return postarV2(v2ReinterpretarEndpoint, payload);
+    }
+
+    /**
+     * Gera explicação e código Python do bloco a partir dos campos atuais (/api/v2/atualizar-artefatos).
+     * Não usa o LLM: é determinístico e não reinterpreta o texto.
+     */
+    public Map<String, Object> atualizarArtefatosV2(Map<String, Object> payload) {
+        return postarV2(v2AtualizarArtefatosEndpoint, payload);
+    }
+
+    private Map<String, Object> postarV2(String uri, Map<String, Object> payload) {
         try {
             return aiRestClient.post()
-                    .uri(v2Endpoint)
+                    .uri(uri)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(payload)
                     .retrieve()

@@ -21,6 +21,8 @@ import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.ValidarPropostaResponse;
 import com.bugbusters.backend.exception.AiInvalidResponseException;
+import com.bugbusters.backend.exception.AiServiceUnavailableException;
+import com.bugbusters.backend.exception.AiTimeoutException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Cargo;
 import com.bugbusters.backend.model.CatalogoDominioDomRock;
@@ -36,6 +38,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -45,6 +48,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class InterpretadorService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InterpretadorService.class);
 
     public static final Map<Integer, String> MARCAS_CONHECIDAS = CatalogoDominioDomRock.MARCAS;
     public static final Map<Integer, String> CARGOS_CONHECIDOS = CatalogoDominioDomRock.CARGOS_POR_CODIGO;
@@ -368,18 +373,74 @@ public class InterpretadorService {
             throw new ResourceNotFoundException("Bloco com ID '" + blocoAlvoId + "' não encontrado na lista de propostas informada.");
         }
 
-        InterpretacaoRegraRequest subRequest = new InterpretacaoRegraRequest(request.instrucaoAjuste(), request.contexto());
-        InterpretacaoRegraResponse respostaAjuste = processarInterpretacao(subRequest);
+        Map<String, Object> contexto = request.contexto();
+        PeriodoVigenciaDTO vigenciaCampanha = extrairVigenciaCampanha(contexto);
 
-        PropostaRegraDTO blocoAnterior = propostasAtuais.get(indexAlvo);
-        PropostaRegraDTO blocoAtualizado = mesclarProposta(blocoAnterior, respostaAjuste, request.instrucaoAjuste(), request.contexto());
+        List<Map<String, Object>> demaisBlocos = new ArrayList<>();
+        for (int i = 0; i < propostasAtuais.size(); i++) {
+            if (i != indexAlvo) {
+                demaisBlocos.add(blocoParaAgente(propostasAtuais.get(i)));
+            }
+        }
+        Map<String, Object> payload = montarPayloadContexto(contexto);
+        payload.put("idLocal", blocoAlvoId);
+        payload.put("textoAlterado", request.instrucaoAjuste());
+        payload.put("blocoAtual", blocoParaAgente(propostasAtuais.get(indexAlvo)));
+        payload.put("demaisBlocos", demaisBlocos);
+
+        Map<String, Object> resposta = aiClient.reinterpretarBlocoV2(payload);
+        if (resposta == null) {
+            throw new AiInvalidResponseException("O serviço de IA retornou uma resposta vazia.");
+        }
+        if (resposta.get("propostasSubstituicao") != null && !(resposta.get("propostasSubstituicao") instanceof List)) {
+            throw new AiInvalidResponseException("O campo 'propostasSubstituicao' retornado pelo serviço de IA deve ser uma lista.");
+        }
+        List<Map<String, Object>> substitutos = listaDeMapas(resposta.get("propostasSubstituicao"));
+        if (substitutos.isEmpty()) {
+            throw new AiInvalidResponseException("O serviço de IA não devolveu nenhuma proposta para o bloco '" + blocoAlvoId + "'.");
+        }
+
+        // O primeiro substituto mantém o id do bloco alvo; blocos extras (divisão em várias regras) ganham ids próprios.
+        Set<String> idsUsados = new HashSet<>();
+        for (int i = 0; i < propostasAtuais.size(); i++) {
+            if (i != indexAlvo) {
+                idsUsados.add(propostasAtuais.get(i).blocoId().toLowerCase());
+            }
+        }
+        List<PropostaRegraDTO> substituidas = new ArrayList<>();
+        for (int i = 0; i < substitutos.size(); i++) {
+            String id = i == 0 ? blocoAlvoId : extrairIdAgente(substitutos.get(i));
+            int contador = i + 1;
+            while (id == null || idsUsados.contains(id.toLowerCase()) || (i > 0 && id.equalsIgnoreCase(blocoAlvoId))) {
+                id = blocoAlvoId + "_" + contador++;
+            }
+            idsUsados.add(id.toLowerCase());
+            substituidas.add(converterBlocoDoAgente(substitutos.get(i), id, vigenciaCampanha, contexto));
+        }
+
+        List<PendenciaPropostaDTO> pendenciasGerais = new ArrayList<>();
+        for (Map<String, Object> p : listaDeMapas(resposta.get("pendenciasGerais"))) {
+            pendenciasGerais.add(pendenciaDoAgente(texto(p.get("campo"), "geral"), texto(p.get("codigo"), "AVISO_AGENTE"), texto(p.get("mensagem"), "")));
+        }
+        if (!pendenciasGerais.isEmpty()) {
+            substituidas.set(0, comPendenciasAdicionais(substituidas.get(0), pendenciasGerais));
+        }
 
         List<PropostaRegraDTO> listaAtualizada = new ArrayList<>(propostasAtuais);
-        listaAtualizada.set(indexAlvo, blocoAtualizado);
+        listaAtualizada.remove(indexAlvo);
+        listaAtualizada.addAll(indexAlvo, substituidas);
 
-        String resumo = "Bloco '" + blocoAlvoId + "' reprocessado com sucesso com base na instrução de ajuste.";
+        StringBuilder resumo = new StringBuilder("Bloco '" + blocoAlvoId + "' reinterpretado pelo agente de IA");
+        if (substituidas.size() > 1) {
+            resumo.append(" e dividido em ").append(substituidas.size()).append(" regras");
+        }
+        List<String> camposAlterados = listaDeTextos(resposta.get("camposAlterados"));
+        if (!camposAlterados.isEmpty()) {
+            resumo.append("; campos alterados: ").append(String.join(", ", camposAlterados));
+        }
+        resumo.append('.');
 
-        return new ReinterpretarBlocoResponse(blocoAlvoId, resumo, listaAtualizada);
+        return new ReinterpretarBlocoResponse(blocoAlvoId, resumo.toString(), listaAtualizada);
     }
 
     /**
@@ -389,6 +450,10 @@ public class InterpretadorService {
         PropostaRegraDTO p = request.proposta();
 
         OperacaoBaseDTO operacao = p.operacaoBase();
+        if (request.camposEditados().contains("taxa")) {
+            // taxa digitada pelo usuário é a origem da regra: não é recalculada sobre a base
+            operacao = OperacaoBaseDTO.definirTaxa(p.taxaFinal());
+        }
         YearMonth ymRef = (p.vigencia() != null && p.vigencia().dataInicio() != null)
                 ? YearMonth.from(p.vigencia().dataInicio())
                 : null;
@@ -437,8 +502,9 @@ public class InterpretadorService {
         List<PendenciaPropostaDTO> pendencias = artefatoService.validarProposta(candidata);
         boolean completa = pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva);
 
-        String novaExplicacao = artefatoService.gerarExplicacao(candidata);
-        String novoPython = artefatoService.gerarPythonEquivalente(candidata);
+        String[] artefatos = gerarArtefatos(candidata, request.camposEditados());
+        String novaExplicacao = artefatos[0];
+        String novoPython = artefatos[1];
 
         return new AtualizarArtefatosResponse(
                 p.blocoId(),
@@ -458,9 +524,14 @@ public class InterpretadorService {
      * no topo e, em "contexto", guarda só os ids da campanha (o resto é ignorado e a vigência se perderia).
      */
     private Map<String, Object> montarPayloadAgente(String texto, Map<String, Object> contextoRecebido) {
+        Map<String, Object> payload = montarPayloadContexto(contextoRecebido);
+        payload.put("texto", texto);
+        return payload;
+    }
+
+    private Map<String, Object> montarPayloadContexto(Map<String, Object> contextoRecebido) {
         Map<String, Object> contexto = new HashMap<>(contextoRecebido);
         Map<String, Object> payload = new HashMap<>();
-        payload.put("texto", texto);
         for (String campo : CAMPOS_TOPO_AGENTE) {
             Object valor = contexto.remove(campo);
             if (valor != null) {
@@ -469,6 +540,170 @@ public class InterpretadorService {
         }
         payload.put("contexto", contexto);
         return payload;
+    }
+
+    /**
+     * Gera explicação e Python do bloco no serviço de IA (/api/v2/atualizar-artefatos), a partir dos campos já
+     * recalculados aqui. Se o serviço estiver indisponível, usa a geração local para a edição não ficar bloqueada.
+     */
+    private String[] gerarArtefatos(PropostaRegraDTO proposta, List<String> camposEditados) {
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("bloco", blocoParaAgente(proposta));
+            payload.put("camposEditados", camposEditados);
+            Map<String, Object> resposta = aiClient.atualizarArtefatosV2(payload);
+            Map<String, Object> bloco = mapa(resposta == null ? null : resposta.get("bloco"));
+            String explicacao = texto(bloco.get("explicacao"), null);
+            String codigo = texto(bloco.get("codigoPython"), null);
+            if (explicacao != null && !explicacao.isBlank() && codigo != null && !codigo.isBlank()) {
+                return new String[] {explicacao, codigo};
+            }
+            log.warn("Serviço de IA devolveu artefatos incompletos para o bloco {}; usando geração local.", proposta.blocoId());
+        } catch (AiServiceUnavailableException | AiTimeoutException | AiInvalidResponseException ex) {
+            log.warn("Serviço de IA indisponível ao atualizar artefatos do bloco {} ({}); usando geração local.",
+                    proposta.blocoId(), ex.getMessage());
+        }
+        return new String[] {artefatoService.gerarExplicacao(proposta), artefatoService.gerarPythonEquivalente(proposta)};
+    }
+
+    /** Operação devolvida pelo agente (contrato v2) no modelo de operações do backend. */
+    private OperacaoBaseDTO operacaoDoAgente(Map<String, Object> operacao, Map<String, Object> bloco,
+                                             FiltrosRegraDTO filtros, YearMonth ymRef) {
+        String tipo = texto(operacao.get("tipo"), "TAXA_ABSOLUTA");
+        BigDecimal valor = decimal(operacao.get("valor"));
+        if ("TAXA_ABSOLUTA".equals(tipo) || valor == null) {
+            return OperacaoBaseDTO.definirTaxa(valor);
+        }
+        TipoOperacaoBase tipoBackend;
+        BigDecimal valorBackend = valor;
+        switch (tipo) {
+            case "ADICIONAR_PP" -> tipoBackend = TipoOperacaoBase.ACRESCIMO_PONTOS;
+            case "REDUZIR_PP" -> tipoBackend = TipoOperacaoBase.DESCONTO_PONTOS;
+            case "AUMENTAR_PERCENTUAL" -> {
+                tipoBackend = TipoOperacaoBase.MULTIPLICADOR_BASE;
+                valorBackend = BigDecimal.ONE.add(valor);
+            }
+            case "REDUZIR_PERCENTUAL" -> {
+                tipoBackend = TipoOperacaoBase.MULTIPLICADOR_BASE;
+                valorBackend = BigDecimal.ONE.subtract(valor);
+            }
+            default -> {
+                return OperacaoBaseDTO.definirTaxa(decimal(bloco.get("taxa")));
+            }
+        }
+        BigDecimal taxaBase = listaDeMapas(bloco.get("referencias")).stream()
+                .filter(r -> "BASE_COMISS".equals(r.get("fonte")))
+                .map(r -> decimal(r.get("taxaBase")))
+                .filter(Objects::nonNull)
+                .findFirst().orElse(null);
+        ReferenciaBaseDTO referencia = taxaBase == null ? null : new ReferenciaBaseDTO("BASE_COMISS", taxaBase,
+                ymRef != null
+                        ? dominioService.gerarDescricaoReferencia(filtros.codMarca(), filtros.descrMarca(), filtros.codCargo(), filtros.descriCargo(), ymRef)
+                        : "Taxa Contratual Padrão");
+        return new OperacaoBaseDTO(tipoBackend, valorBackend, referencia);
+    }
+
+    /** Proposta do backend no formato de bloco do contrato v2 do agente. */
+    private Map<String, Object> blocoParaAgente(PropostaRegraDTO p) {
+        Map<String, Object> condicoes = new LinkedHashMap<>();
+        FiltrosRegraDTO f = p.filtros();
+        colocarSeNaoNulo(condicoes, "canal", f.canal());
+        colocarSeNaoNulo(condicoes, "codMarca", f.codMarca());
+        colocarSeNaoNulo(condicoes, "descrMarca", f.descrMarca());
+        colocarSeNaoNulo(condicoes, "codCargo", f.codCargo());
+        colocarSeNaoNulo(condicoes, "descriCargo", f.descriCargo());
+        colocarSeNaoNulo(condicoes, "codLoja", f.codLoja());
+        colocarSeNaoNulo(condicoes, "matricula", f.matricula());
+        FaixaValorDTO faixa = p.condicaoValor();
+        if (faixa != null && faixa.possuiFaixa()) {
+            Map<String, Object> faixaAgente = new LinkedHashMap<>();
+            colocarSeNaoNulo(faixaAgente, "min", faixa.valorMinimo());
+            colocarSeNaoNulo(faixaAgente, "max", faixa.valorMaximo());
+            colocarSeNaoNulo(faixaAgente, "minInclusivo", faixa.minInclusivo());
+            colocarSeNaoNulo(faixaAgente, "maxInclusivo", faixa.maxInclusivo());
+            condicoes.put("faixaValor", faixaAgente);
+        }
+
+        Map<String, Object> bloco = new LinkedHashMap<>();
+        bloco.put("idLocal", p.blocoId());
+        bloco.put("condicoes", condicoes);
+
+        OperacaoBaseDTO op = p.operacaoBase();
+        List<Map<String, Object>> referencias = new ArrayList<>();
+        if (op != null && op.tipoOperacao() != null && op.valorAjuste() != null) {
+            String tipo = null;
+            BigDecimal valor = op.valorAjuste();
+            switch (op.tipoOperacao()) {
+                case DEFINIR_TAXA -> tipo = "TAXA_ABSOLUTA";
+                case ACRESCIMO_PONTOS -> tipo = "ADICIONAR_PP";
+                case DESCONTO_PONTOS -> tipo = "REDUZIR_PP";
+                case MULTIPLICADOR_BASE -> {
+                    boolean aumento = valor.compareTo(BigDecimal.ONE) >= 0;
+                    tipo = aumento ? "AUMENTAR_PERCENTUAL" : "REDUZIR_PERCENTUAL";
+                    valor = aumento ? valor.subtract(BigDecimal.ONE) : BigDecimal.ONE.subtract(valor);
+                }
+                default -> tipo = null; // DIVISOR_BASE não tem equivalente no agente: vale a taxa final
+            }
+            if (tipo != null) {
+                Map<String, Object> operacao = new LinkedHashMap<>();
+                operacao.put("tipo", tipo);
+                operacao.put("valor", valor);
+                bloco.put("operacao", operacao);
+            }
+        }
+        if (op != null && op.referenciaBase() != null && op.referenciaBase().taxaBaseConsultada() != null) {
+            Map<String, Object> chave = new LinkedHashMap<>();
+            colocarSeNaoNulo(chave, "codMarca", f.codMarca());
+            colocarSeNaoNulo(chave, "codCargo", f.codCargo());
+            if (p.vigencia() != null && p.vigencia().dataInicio() != null) {
+                chave.put("competencia", YearMonth.from(p.vigencia().dataInicio()).toString());
+            }
+            Map<String, Object> ref = new LinkedHashMap<>();
+            ref.put("fonte", "BASE_COMISS");
+            ref.put("chave", chave);
+            ref.put("taxaBase", op.referenciaBase().taxaBaseConsultada());
+            referencias.add(ref);
+        }
+        bloco.put("referencias", referencias);
+        colocarSeNaoNulo(bloco, "taxa", p.taxaFinal());
+        if (p.bonusPercentual() != null || p.bonusValorFixo() != null) {
+            Map<String, Object> bonus = new LinkedHashMap<>();
+            bonus.put("percentual", p.bonusPercentual());
+            bonus.put("valorFixo", p.bonusValorFixo());
+            bloco.put("bonus", bonus);
+        }
+        if (p.vigencia() != null) {
+            colocarSeNaoNulo(bloco, "dataInicio", p.vigencia().dataInicio() == null ? null : p.vigencia().dataInicio().toString());
+            colocarSeNaoNulo(bloco, "dataFim", p.vigencia().dataFim() == null ? null : p.vigencia().dataFim().toString());
+        }
+        if (p.trechoOrigem() != null && !p.trechoOrigem().isBlank()) {
+            bloco.put("origem", Map.of("trecho", p.trechoOrigem()));
+        }
+        return bloco;
+    }
+
+    private static void colocarSeNaoNulo(Map<String, Object> destino, String chave, Object valor) {
+        if (valor != null) {
+            destino.put(chave, valor);
+        }
+    }
+
+    private static String textoOu(Object valor, java.util.function.Supplier<String> alternativa) {
+        String t = texto(valor, null);
+        return t == null || t.isBlank() ? alternativa.get() : t;
+    }
+
+    private static List<String> listaDeTextos(Object valor) {
+        return valor instanceof List<?> l ? l.stream().filter(Objects::nonNull).map(Object::toString).toList() : List.of();
+    }
+
+    private static PropostaRegraDTO comPendenciasAdicionais(PropostaRegraDTO p, List<PendenciaPropostaDTO> extras) {
+        List<PendenciaPropostaDTO> pendencias = new ArrayList<>(p.pendencias());
+        pendencias.addAll(extras);
+        return new PropostaRegraDTO(p.blocoId(), p.trechoOrigem(), p.filtros(), p.condicaoValor(), p.operacaoBase(),
+                p.taxaFinal(), p.referenciasConsultadas(), p.origensPorCampo(), pendencias,
+                pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva), p.explicacao(), p.pythonEquivalente(),
+                p.vigencia(), p.bonusPercentual(), p.bonusValorFixo());
     }
 
     /** Converte um bloco devolvido pelo agente para o contrato de proposta do backend. */
@@ -509,17 +744,28 @@ public class InterpretadorService {
         PeriodoVigenciaDTO vigencia = PeriodoVigenciaDTO.de(dataInicio, dataFim);
         YearMonth ymRef = extrairCompetenciaReferencia(contexto, vigencia);
 
-        // O agente não calcula ajustes sobre a taxa base (pontos, multiplicador...); a extração determinística
-        // daqui resolve o ajuste a partir do trecho da regra, como antes.
+        // O agente resolve os ajustes sobre a base (pontos percentuais ou variação relativa) e devolve operação e taxa
+        // final. Respostas sem operação (agentes anteriores) continuam usando a extração determinística do trecho.
         BigDecimal taxaAgente = decimal(bloco.get("taxa"));
-        OperacaoBaseDTO operacao = extrairOperacaoBase(trechoOrigem, taxaAgente, filtros.codMarca(), filtros.descrMarca(),
-                filtros.codCargo(), filtros.descriCargo(), ymRef);
-        BigDecimal taxaFinal = artefatoService.calcularTaxaEfetiva(operacao);
-        if (taxaFinal == null) {
-            if (operacao.tipoOperacao() == TipoOperacaoBase.DEFINIR_TAXA) {
+        Map<String, Object> operacaoAgente = mapa(bloco.get("operacao"));
+        boolean agenteEnviouOperacao = operacaoAgente.get("tipo") != null;
+        boolean agenteDeixouTaxaPendente = !agenteEnviouOperacao && taxaAgente == null
+                && listaDeMapas(bloco.get("pendencias")).stream().anyMatch(p -> "taxa".equals(texto(p.get("campo"), ""))
+                        && !"CAMPO_AUSENTE".equals(texto(p.get("codigo"), "")));
+        OperacaoBaseDTO operacao;
+        BigDecimal taxaFinal;
+        if (agenteEnviouOperacao) {
+            operacao = operacaoDoAgente(operacaoAgente, bloco, filtros, ymRef);
+            taxaFinal = taxaAgente;
+        } else if (agenteDeixouTaxaPendente) {
+            operacao = OperacaoBaseDTO.definirTaxa(null);
+            taxaFinal = null;
+        } else {
+            operacao = extrairOperacaoBase(trechoOrigem, taxaAgente, filtros.codMarca(), filtros.descrMarca(),
+                    filtros.codCargo(), filtros.descriCargo(), ymRef);
+            taxaFinal = artefatoService.calcularTaxaEfetiva(operacao);
+            if (taxaFinal == null && operacao.tipoOperacao() == TipoOperacaoBase.DEFINIR_TAXA) {
                 taxaFinal = taxaAgente;
-            } else {
-                taxaFinal = null;
             }
         }
         boolean ajusteResolvido = operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA && taxaFinal != null;
@@ -533,7 +779,7 @@ public class InterpretadorService {
                     dimensoesConsultadas.add(dimensao);
                     referencias.add(referenciaDeCadastro(dimensao, valor, filtros));
                 });
-            } else {
+            } else if (!(agenteEnviouOperacao && "BASE_COMISS".equals(ref.get("fonte")))) {
                 referencias.add(new ReferenciaConsultadaDTO(texto(ref.get("fonte"), "REFERENCIA"), chave.toString(),
                         "Taxa base " + texto(ref.get("taxaBase"), "não informada")));
             }
@@ -563,6 +809,13 @@ public class InterpretadorService {
                 decimal(bonus.get("percentual")), decimal(bonus.get("valorFixo")));
 
         List<PendenciaPropostaDTO> pendencias = new ArrayList<>(artefatoService.validarProposta(propostaBase));
+        // Quando o agente já explicou por que a taxa está pendente (ex.: BASE_AUSENTE), as pendências genéricas de
+        // taxa não calculável seriam o mesmo problema repetido.
+        boolean agenteExplicouTaxa = agenteEnviouOperacao && listaDeMapas(bloco.get("pendencias")).stream()
+                .anyMatch(p -> "taxa".equals(texto(p.get("campo"), "")));
+        if (agenteExplicouTaxa) {
+            pendencias.removeIf(pen -> "BASE_REFERENCIA_NAO_ENCONTRADA".equals(pen.codigo()) || "TAXA_NAO_CALCULAVEL".equals(pen.codigo()));
+        }
 
         boolean datasDiferentes = temVigenciaCampanha && (
                 (dataInicioAgente != null && !Objects.equals(dataInicioAgente, vigenciaCampanha.dataInicio()))
@@ -602,7 +855,8 @@ public class InterpretadorService {
 
         return new PropostaRegraDTO(blocoId, trechoOrigem, filtros, faixa, operacao, taxaFinal, referencias, origens,
                 pendencias, pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva),
-                artefatoService.gerarExplicacao(propostaBase), artefatoService.gerarPythonEquivalente(propostaBase),
+                textoOu(bloco.get("explicacao"), () -> artefatoService.gerarExplicacao(propostaBase)),
+                textoOu(bloco.get("codigoPython"), () -> artefatoService.gerarPythonEquivalente(propostaBase)),
                 vigencia, propostaBase.bonusPercentual(), propostaBase.bonusValorFixo());
     }
 
@@ -737,111 +991,6 @@ public class InterpretadorService {
 
     private static String texto(Object valor, String padrao) {
         return valor == null ? padrao : valor.toString();
-    }
-
-    private PropostaRegraDTO mesclarProposta(PropostaRegraDTO anterior, InterpretacaoRegraResponse novo, String instrucao, Map<String, Object> contexto) {
-        String matricula = anterior.filtros().matricula();
-        var matOpt = CatalogoDominioDomRock.extrairMatricula(instrucao);
-        if (matOpt.isPresent()) {
-            matricula = matOpt.get();
-        }
-
-        Integer codLoja = novo.codLoja() != null ? novo.codLoja() : anterior.filtros().codLoja();
-        if (codLoja == null) {
-            codLoja = CatalogoDominioDomRock.extrairCodigoLoja(instrucao).orElse(null);
-        }
-
-        FiltrosRegraDTO filtros = new FiltrosRegraDTO(
-                novo.canal() != null ? novo.canal() : anterior.filtros().canal(),
-                novo.codMarca() != null ? novo.codMarca() : anterior.filtros().codMarca(),
-                novo.descrMarca() != null ? novo.descrMarca() : anterior.filtros().descrMarca(),
-                codLoja,
-                novo.codCargo() != null ? novo.codCargo() : anterior.filtros().codCargo(),
-                novo.descriCargo() != null ? novo.descriCargo() : anterior.filtros().descriCargo(),
-                matricula
-        );
-
-        FaixaValorDTO faixaNova = extrairFaixaValor(instrucao);
-        FaixaValorDTO faixa = faixaNova.possuiFaixa() ? faixaNova : anterior.condicaoValor();
-
-        PeriodoVigenciaDTO vigencia = new PeriodoVigenciaDTO(
-                novo.dataInicio() != null ? novo.dataInicio() : anterior.vigencia().dataInicio(),
-                novo.dataFim() != null ? novo.dataFim() : anterior.vigencia().dataFim()
-        );
-        YearMonth ymRef = extrairCompetenciaReferencia(contexto, vigencia);
-
-        OperacaoBaseDTO opNova = extrairOperacaoBase(
-                instrucao,
-                novo.taxa(),
-                filtros.codMarca(),
-                filtros.descrMarca(),
-                filtros.codCargo(),
-                filtros.descriCargo(),
-                ymRef
-        );
-        OperacaoBaseDTO operacao = (opNova.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA || novo.taxa() != null)
-                ? opNova
-                : anterior.operacaoBase();
-
-        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) {
-            BigDecimal base = ymRef != null
-                    ? dominioService.obterTaxaBaseContratual(filtros.codMarca(), filtros.codCargo(), filtros.descriCargo(), ymRef).orElse(null)
-                    : null;
-            String descrRef = ymRef != null
-                    ? dominioService.gerarDescricaoReferencia(filtros.codMarca(), filtros.descrMarca(), filtros.codCargo(), filtros.descriCargo(), ymRef)
-                    : "Taxa Contratual Padrão";
-            ReferenciaBaseDTO ref = new ReferenciaBaseDTO("BASE_COMISS", base, descrRef);
-            operacao = new OperacaoBaseDTO(operacao.tipoOperacao(), operacao.valorAjuste(), ref);
-        }
-
-        BigDecimal taxaCalculada = artefatoService.calcularTaxaEfetiva(operacao);
-        BigDecimal taxaFinal;
-        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) {
-            taxaFinal = taxaCalculada;
-        } else {
-            taxaFinal = taxaCalculada != null ? taxaCalculada : (novo.taxa() != null ? novo.taxa() : anterior.taxaFinal());
-        }
-
-        PropostaRegraDTO propostaBase = new PropostaRegraDTO(
-                anterior.blocoId(),
-                anterior.trechoOrigem() + " [Ajuste: " + instrucao + "]",
-                filtros,
-                faixa,
-                operacao,
-                taxaFinal,
-                anterior.referenciasConsultadas(),
-                anterior.origensPorCampo(),
-                null,
-                null,
-                null,
-                null,
-                vigencia,
-                anterior.bonusPercentual(),
-                anterior.bonusValorFixo()
-        );
-
-        List<PendenciaPropostaDTO> pendencias = artefatoService.validarProposta(propostaBase);
-        boolean completa = pendencias.stream().noneMatch(PendenciaPropostaDTO::isImpeditiva);
-        String explicacao = artefatoService.gerarExplicacao(propostaBase);
-        String python = artefatoService.gerarPythonEquivalente(propostaBase);
-
-        return new PropostaRegraDTO(
-                propostaBase.blocoId(),
-                propostaBase.trechoOrigem(),
-                filtros,
-                faixa,
-                operacao,
-                taxaFinal,
-                propostaBase.referenciasConsultadas(),
-                propostaBase.origensPorCampo(),
-                pendencias,
-                completa,
-                explicacao,
-                python,
-                vigencia,
-                anterior.bonusPercentual(),
-                anterior.bonusValorFixo()
-        );
     }
 
     private FaixaValorDTO extrairFaixaValor(String texto) {
