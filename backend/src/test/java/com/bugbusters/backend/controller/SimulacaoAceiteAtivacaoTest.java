@@ -104,6 +104,9 @@ class SimulacaoAceiteAtivacaoTest {
     @Autowired
     private SaleRepository saleRepository;
 
+    @Autowired
+    private com.bugbusters.backend.service.TaxaComissaoResolver taxaResolver;
+
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     private Campanha campanha;
@@ -208,6 +211,11 @@ class SimulacaoAceiteAtivacaoTest {
         // 3. Verificar persistência e vínculo com a campanha
         Campanha atualizada = campanhaRepository.findById(campanha.getId()).orElseThrow();
         assertThat(atualizada.getSimulacaoAceita()).isNotNull();
+        assertThat(atualizada.getEstado()).isEqualTo(EstadoCampanha.DRAFT);
+        assertThat(atualizada.getVersaoVigente()).isNull();
+        assertThat(atualizada.getVersaoProposta().getNumero()).isEqualTo(1);
+        assertThat(regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(atualizada.getVersaoProposta().getId()))
+                .allMatch(r -> r.getStatus() == StatusRegra.DRAFT);
         assertThat(atualizada.getSimulacaoAceita().getId()).isEqualTo(simResp.id());
         assertThat(atualizada.getSimulacaoAceita().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.ACEITA);
     }
@@ -442,4 +450,147 @@ class SimulacaoAceiteAtivacaoTest {
         List<Regra> regrasAtivadas = regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanha.getId());
         assertThat(regrasAtivadas.get(0).getStatus()).isEqualTo(StatusRegra.ATIVA);
     }
+
+    @Test
+    void deveRejeitarSimulacaoAnteriorAEdicaoMesmoSemAceitePrevio() {
+        var sim = simularAtual();
+        campanhaService.atualizarCampanha(campanha.getId(), propostaRevisada("0.0600"));
+        assertThat(simulacaoRepository.findById(sim.id()).orElseThrow().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.INVALIDADA);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> aceitar(sim.id()))
+                .isInstanceOf(com.bugbusters.backend.exception.BusinessException.class);
+        assertThat(campanha.getEstado()).isEqualTo(EstadoCampanha.DRAFT);
+    }
+
+    @Test
+    void naoDeveConcederAceiteAutomaticoAoConsultarConferencia() {
+        var sim = simularAtual();
+        assertThat(campanhaService.conferirSimulacao(campanha.getId()).aptaParaAtivacao()).isFalse();
+        assertThat(simulacaoRepository.findById(sim.id()).orElseThrow().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.PENDENTE);
+    }
+
+    @Test
+    void deveManterVersaoPublicadaAoEditarSimularEAceitarUmaRevisao() {
+        var primeira = publicarInicial();
+        var vigente = campanha.getVersaoVigente();
+        var regrasVigentes = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(vigente.getId());
+        var req = propostaRevisada("0.0600");
+        req = new CampanhaRequest("Título revisado", "Texto revisado", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31), EstadoCampanha.DRAFT, req.regras());
+        var salva = campanhaService.atualizarCampanha(campanha.getId(), req);
+        assertThat(salva.titulo()).isEqualTo("Título revisado");
+        assertThat(salva.dataInicio()).isEqualTo(LocalDate.of(2026, 7, 1));
+        assertThat(salva.versaoProposta()).isEqualTo(2);
+        assertThat(campanha.getTitulo()).isEqualTo("Campanha Teste BACK-8");
+        assertThat(campanha.getDataInicio()).isEqualTo(LocalDate.of(2026, 6, 1));
+        var segunda = simularAtual();
+        assertThat(segunda.tituloCampanha()).isEqualTo("Título revisado");
+        assertThat(segunda.dataInicioCampanha()).isEqualTo(LocalDate.of(2026, 7, 1));
+        assertThat(segunda.diasInclusivos()).isEqualTo(31);
+        aceitar(segunda.id());
+        assertThat(campanha.getVersaoVigente()).isSameAs(vigente);
+        assertThat(regrasVigentes).allMatch(r -> r.getStatus() == StatusRegra.ATIVA && r.getTaxa().compareTo(new BigDecimal("0.0500")) == 0);
+        assertThat(campanhaService.conferirSimulacao(campanha.getId()).aptaParaAtivacao()).isTrue();
+        assertThat(simulacaoRepository.findById(primeira.id()).orElseThrow().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.ACEITA);
+    }
+
+    @Test
+    void devePublicarRevisaoSomenteNaAtivacaoFinalComVersaoEsperada() throws Exception {
+        var primeira = publicarInicial();
+        var anterior = campanha.getVersaoVigente();
+        campanhaService.atualizarCampanha(campanha.getId(), propostaRevisada("0.0600"));
+        var segunda = simularAtual();
+        aceitar(segunda.id());
+        assertThat(taxaResolver.resolverTaxa(vendaDaCampanha()).taxa()).isEqualByComparingTo("0.0500");
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isConflict());
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":99}"))
+                .andExpect(status().isConflict());
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":1}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.versaoVigente").value(2))
+                .andExpect(jsonPath("$.versaoProposta").doesNotExist());
+        assertThat(regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(anterior.getId()))
+                .allMatch(r -> r.getStatus() == StatusRegra.INATIVA);
+        assertThat(regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(campanha.getVersaoVigente().getId()))
+                .allMatch(r -> r.getStatus() == StatusRegra.ATIVA && r.getTaxa().compareTo(new BigDecimal("0.0600")) == 0);
+        assertThat(simulacaoRepository.findById(primeira.id()).orElseThrow().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.ACEITA);
+        assertThat(taxaResolver.resolverTaxa(vendaDaCampanha()).taxa()).isEqualByComparingTo("0.0600");
+    }
+
+    @Test
+    void devePermitirOutraRevisaoAposCancelarPreservandoHistoricoEAceiteVigente() {
+        var primeira = publicarInicial();
+        campanhaService.atualizarCampanha(campanha.getId(), propostaRevisada("0.0600"));
+        var cancelada = campanha.getVersaoProposta();
+        var segunda = simularAtual();
+        aceitar(segunda.id());
+        campanhaService.cancelarProposta(campanha.getId());
+        assertThat(cancelada.getStatus()).isEqualTo(StatusVersaoCampanha.CANCELADA);
+        assertThat(campanha.getVersaoProposta()).isNull();
+        assertThat(campanha.getVersaoVigente().getNumero()).isEqualTo(1);
+        assertThat(campanha.getEstado()).isEqualTo(EstadoCampanha.ATIVA);
+        assertThat(campanha.getSimulacaoAceita().getId()).isEqualTo(primeira.id());
+        assertThat(simulacaoRepository.findById(segunda.id()).orElseThrow().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.INVALIDADA);
+        var nova = campanhaService.atualizarCampanha(campanha.getId(), propostaRevisada("0.0700"));
+        assertThat(nova.versaoProposta()).isEqualTo(3);
+        assertThat(cancelada.getStatus()).isEqualTo(StatusVersaoCampanha.CANCELADA);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> aceitar(segunda.id()))
+                .isInstanceOf(com.bugbusters.backend.exception.BusinessException.class);
+    }
+
+    @Test
+    void deveInativarRegrasVigentesSemAtivarOuAlterarAPropostaPendente() {
+        publicarInicial();
+        var vigente = campanha.getVersaoVigente();
+        campanhaService.atualizarCampanha(campanha.getId(), propostaRevisada("0.0600"));
+        var proposta = campanha.getVersaoProposta();
+        campanhaService.alterarEstado(campanha.getId(), EstadoCampanha.INATIVA);
+        assertThat(regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(vigente.getId()))
+                .allMatch(r -> r.getStatus() == StatusRegra.INATIVA);
+        assertThat(regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(proposta.getId()))
+                .allMatch(r -> r.getStatus() == StatusRegra.DRAFT);
+    }
+
+    @Test
+    void deveRejeitarSimulacaoAntigaDeOutraVersaoMesmoComCamposIguais() {
+        var primeira = publicarInicial();
+        campanhaService.atualizarCampanha(campanha.getId(), propostaRevisada("0.0500"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> aceitar(primeira.id()))
+                .isInstanceOf(com.bugbusters.backend.exception.BusinessException.class);
+        assertThat(campanha.getVersaoVigente().getNumero()).isEqualTo(1);
+    }
+
+    private SimulacaoCenariosResponse simularAtual() {
+        // Omite datas para verificar a resolução da vigência da proposta, sem usar a versão vigente.
+        return simulacaoService.simularEPersistir(new SimulacaoCenariosRequest(
+                "2026-06", campanha.getId(), null, null, null, 50, 0, false, false));
+    }
+
+    private Sale vendaDaCampanha() {
+        return saleRepository.findAll().stream()
+                .filter(v -> v.getRegistration() != null && "MAT-B8-001".equals(v.getRegistration().getRegistration()))
+                .findFirst().orElseThrow();
+    }
+
+    private void aceitar(UUID id) {
+        simulacaoService.aceitarSimulacao(id, new AceiteSimulacaoRequest("gestor", "Conferido"));
+    }
+
+    private SimulacaoCenariosResponse publicarInicial() {
+        var sim = simularAtual();
+        aceitar(sim.id());
+        campanhaService.ativarCampanha(campanha.getId());
+        return sim;
+    }
+
+    private CampanhaRequest propostaRevisada(String taxa) {
+        var regra = new RegraItemRequest("revisada", "Texto revisado", "Regra revisada", "ECOMMERCE",
+                10, null, 75, 100, null, null, null, null, null, null,
+                TipoOperacaoBase.DEFINIR_TAXA, null, null, null, null,
+                new BigDecimal(taxa), null, null, List.of(), true, StatusRegra.DRAFT);
+        return new CampanhaRequest("Campanha revisada", "Texto revisado", campanha.getDataInicio(),
+                campanha.getDataFim(), EstadoCampanha.DRAFT, List.of(regra));
+    }
+
 }

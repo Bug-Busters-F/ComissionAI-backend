@@ -17,9 +17,16 @@ public record AlterarEstadoCampanhaRequest(
         String aceitoPor,
 
         @Schema(description = "Motivo ou justificativa do aceite", example = "Aprovado em comitê")
-        String motivoAceite
+        String motivoAceite,
+
+        @Schema(description = "Versão vigente esperada ao publicar uma revisão")
+        Integer versaoEsperada
 ) {
     public AlterarEstadoCampanhaRequest(EstadoCampanha estado) {
-        this(estado, null, null, null);
+        this(estado, null, null, null, null);
+    }
+
+    public AlterarEstadoCampanhaRequest(EstadoCampanha estado, java.util.UUID simulacaoAceitaId, String aceitoPor, String motivoAceite) {
+        this(estado, simulacaoAceitaId, aceitoPor, motivoAceite, null);
     }
 }

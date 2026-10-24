@@ -578,8 +578,11 @@ public class ReferenciaPublicoService {
             Campanha campanha = campanhaRepository.findById(request.campanhaId())
                     .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada com ID: " + request.campanhaId()));
 
+            var versao = campanha.getVersaoProposta() != null ? campanha.getVersaoProposta() : campanha.getVersaoVigente();
             List<Regra> regras = (regraRepository != null)
-                    ? regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanha.getId())
+                    ? (versao != null
+                        ? regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId())
+                        : regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanha.getId()))
                     : List.of();
 
             if (regras.isEmpty() && campanha.getRegras() != null) {

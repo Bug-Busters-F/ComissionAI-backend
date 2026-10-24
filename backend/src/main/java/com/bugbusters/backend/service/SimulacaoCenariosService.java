@@ -78,6 +78,7 @@ public class SimulacaoCenariosService {
     private final SimulacaoRepository simulacaoRepository;
     private final SimulacaoVendaRepository simulacaoVendaRepository;
     private final CampanhaSimulacaoValidator campanhaSimulacaoValidator;
+    private final CampanhaService campanhaService;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -88,7 +89,8 @@ public class SimulacaoCenariosService {
             ReferenciaPublicoService referenciaPublicoService,
             SimulacaoRepository simulacaoRepository,
             SimulacaoVendaRepository simulacaoVendaRepository,
-            CampanhaSimulacaoValidator campanhaSimulacaoValidator) {
+            CampanhaSimulacaoValidator campanhaSimulacaoValidator,
+            CampanhaService campanhaService) {
         this.saleRepository = saleRepository;
         this.baseComissRepository = baseComissRepository;
         this.campanhaRepository = campanhaRepository;
@@ -98,6 +100,7 @@ public class SimulacaoCenariosService {
         this.campanhaSimulacaoValidator = campanhaSimulacaoValidator != null 
                 ? campanhaSimulacaoValidator 
                 : new CampanhaSimulacaoValidator(simulacaoRepository, null);
+        this.campanhaService = campanhaService;
         this.objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
     }
 
@@ -108,7 +111,7 @@ public class SimulacaoCenariosService {
             ReferenciaPublicoService referenciaPublicoService,
             SimulacaoRepository simulacaoRepository,
             SimulacaoVendaRepository simulacaoVendaRepository) {
-        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, simulacaoRepository, simulacaoVendaRepository, null);
+        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, simulacaoRepository, simulacaoVendaRepository, null, null);
     }
 
     public SimulacaoCenariosService(
@@ -116,7 +119,7 @@ public class SimulacaoCenariosService {
             BaseComissRepository baseComissRepository,
             CampanhaRepository campanhaRepository,
             ReferenciaPublicoService referenciaPublicoService) {
-        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, null, null, null);
+        this(saleRepository, baseComissRepository, campanhaRepository, referenciaPublicoService, null, null, null, null);
     }
 
     public record ResultadoSimulacaoInterna(
@@ -154,6 +157,10 @@ public class SimulacaoCenariosService {
         simulacao.setExecutadoEm(OffsetDateTime.now());
         simulacao.setCompetencia(resp.competencia());
         simulacao.setCampanha(resultado.campanha());
+        if (resultado.campanha() != null) {
+            simulacao.setCampanhaVersao(resultado.campanha().getVersaoProposta() != null
+                    ? resultado.campanha().getVersaoProposta() : resultado.campanha().getVersaoVigente());
+        }
         simulacao.setTituloCampanha(resp.tituloCampanha());
         simulacao.setDataInicioCampanha(resp.dataInicioCampanha());
         simulacao.setDataFimCampanha(resp.dataFimCampanha());
@@ -368,7 +375,20 @@ public class SimulacaoCenariosService {
         if (campanha == null && request != null && request.campanhaId() != null && campanhaRepository != null) {
             campanha = campanhaRepository.findById(request.campanhaId())
                     .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada com ID: " + request.campanhaId()));
-            simulacao.setCampanha(campanha);
+        }
+
+        if (request != null && request.campanhaId() != null && campanha != null &&
+                !Objects.equals(request.campanhaId(), campanha.getId())) {
+            throw new BusinessException("A simulação pertence a outra campanha.");
+        }
+        if (simulacao.getStatusAceite() == StatusAceiteSimulacao.INVALIDADA || simulacao.getStatusAceite() == StatusAceiteSimulacao.REJEITADA) {
+            throw new BusinessException("A simulação foi invalidada ou rejeitada. Execute uma nova simulação.");
+        }
+        if (campanha != null && campanhaService != null) {
+            if (simulacao.getCampanhaVersao() == null && simulacao.getCampanha() == null) {
+                simulacao.setCampanhaVersao(campanha.versaoParaRevisao());
+            }
+            campanhaService.validarAceiteSimulacao(campanha, simulacao, request != null ? request.versaoEsperada() : null);
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
@@ -378,7 +398,10 @@ public class SimulacaoCenariosService {
             List<Simulacao> aceitesAnteriores = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
                     campanha.getId(), StatusAceiteSimulacao.ACEITA);
             for (Simulacao anterior : aceitesAnteriores) {
-                if (!anterior.getId().equals(simulacao.getId())) {
+                // Uma revisão publicada é histórico auditável. Só substitui aceite da mesma proposta.
+                if (!anterior.getId().equals(simulacao.getId())
+                        && Objects.equals(anterior.getCampanhaVersao() != null ? anterior.getCampanhaVersao().getId() : null,
+                                          simulacao.getCampanhaVersao() != null ? simulacao.getCampanhaVersao().getId() : null)) {
                     anterior.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
                     anterior.setInvalidadoEm(agora);
                     anterior.setMotivoInvalidacao("Substituída por novo aceite da simulação (Protocolo: " + simulacao.getProtocolo() + ")");
@@ -389,6 +412,7 @@ public class SimulacaoCenariosService {
             }
         }
 
+        if (campanha != null) simulacao.setCampanha(campanha);
         simulacao.setStatusAceite(StatusAceiteSimulacao.ACEITA);
         simulacao.setAceitoEm(agora);
         simulacao.setAceitoPor(request != null && request.aceitoPor() != null && !request.aceitoPor().isBlank() ? request.aceitoPor() : "gestor");
@@ -400,6 +424,7 @@ public class SimulacaoCenariosService {
 
         if (campanha != null) {
             campanha.setSimulacaoAceita(salva);
+            // O aceite não publica. A ativação exige a confirmação final após a revisão.
             campanhaRepository.save(campanha);
         }
 
@@ -407,7 +432,7 @@ public class SimulacaoCenariosService {
                 salva.getId(),
                 salva.getProtocolo(),
                 campanha != null ? campanha.getId() : null,
-                campanha != null ? campanha.getTitulo() : "Proposta em Elaboração",
+                campanha != null ? campanha.tituloParaRevisao() : "Proposta em Elaboração",
                 salva.getStatusAceite(),
                 salva.getAceitoEm(),
                 salva.getAceitoPor(),
@@ -621,10 +646,10 @@ public class SimulacaoCenariosService {
         LocalDate dataFimCampanha = request.dataFim();
 
         if (dataInicioCampanha == null && campanha != null) {
-            dataInicioCampanha = campanha.getDataInicio();
+            dataInicioCampanha = campanha.inicioParaRevisao();
         }
         if (dataFimCampanha == null && campanha != null) {
-            dataFimCampanha = campanha.getDataFim();
+            dataFimCampanha = campanha.fimParaRevisao();
         }
 
         // Fallback para vigência: se não informado, adota o mês completo da competência (30 dias)
@@ -737,7 +762,7 @@ public class SimulacaoCenariosService {
                 todasVendasSimuladas.size(),
                 cenario100.totalVendas(),
                 campanha != null ? campanha.getId() : null,
-                campanha != null ? campanha.getTitulo() : "Simulação de Regras Avulsas",
+                campanha != null ? campanha.tituloParaRevisao() : "Simulação de Regras Avulsas",
                 dataInicioCampanha,
                 dataFimCampanha,
                 diasInclusivos,
@@ -1127,7 +1152,7 @@ public class SimulacaoCenariosService {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(LOCALE_PT_BR, "Simulação consolidada para a competência %s. ", competencia));
         if (campanha != null) {
-            sb.append(String.format(LOCALE_PT_BR, "Campanha vinculada: '%s' (ID %d). ", campanha.getTitulo(), campanha.getId()));
+            sb.append(String.format(LOCALE_PT_BR, "Campanha vinculada: '%s' (ID %d). ", campanha.tituloParaRevisao(), campanha.getId()));
         } else {
             sb.append("Regras avulsas sem campanha previamente vinculada. ");
         }
@@ -1189,7 +1214,7 @@ public class SimulacaoCenariosService {
                 0,
                 BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
                 campanha != null ? campanha.getId() : null,
-                campanha != null ? campanha.getTitulo() : "Sem Campanha",
+                campanha != null ? campanha.tituloParaRevisao() : "Sem Campanha",
                 dataInicio,
                 dataFim,
                 diasInclusivos,

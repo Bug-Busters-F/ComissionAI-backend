@@ -30,6 +30,9 @@ class ControllerRoutesTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
+
+    @Autowired
     private com.bugbusters.backend.importbase.ImportService importService;
 
     @org.springframework.beans.factory.annotation.Value("${ai.service.url:http://localhost:8000}")
@@ -72,14 +75,7 @@ class ControllerRoutesTest {
 
     @org.junit.jupiter.api.AfterEach
     void tearDown() {
-        for (com.bugbusters.backend.model.Campanha c : campanhaRepository.findAll()) {
-            c.setSimulacaoAceita(null);
-            campanhaRepository.saveAndFlush(c);
-        }
-        simulacaoVendaRepository.deleteAllInBatch();
-        simulacaoRepository.deleteAllInBatch();
-        regraRepository.deleteAllInBatch();
-        campanhaRepository.deleteAllInBatch();
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
     }
 
     @BeforeEach

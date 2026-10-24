@@ -82,6 +82,9 @@ class CalculoMotorAvancadoIntegrationTest {
 
     private MockMvc mockMvc;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
+
     private Brand brand;
     private Store store;
     private Position position;
@@ -95,8 +98,7 @@ class CalculoMotorAvancadoIntegrationTest {
         logCalculoRepository.deleteAllInBatch();
         resultadoCalculoRepository.deleteAllInBatch();
         saleRepository.deleteAllInBatch();
-        regraRepository.deleteAllInBatch();
-        campanhaRepository.deleteAllInBatch();
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
         baseComissRepository.deleteAllInBatch();
         registrationRepository.deleteAllInBatch();
         storeRepository.deleteAllInBatch();

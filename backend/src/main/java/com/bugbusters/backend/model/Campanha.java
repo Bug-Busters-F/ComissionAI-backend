@@ -37,6 +37,18 @@ public class Campanha {
     @JoinColumn(name = "simulacao_aceita_id")
     private Simulacao simulacaoAceita;
 
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "versao_vigente_id")
+    private CampanhaVersao versaoVigente;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "versao_proposta_id")
+    private CampanhaVersao versaoProposta;
+
+    @Version
+    @Column(name = "versao_controle", nullable = false)
+    private Long versaoControle = 0L;
+
     @Column(name = "removido_em")
     private OffsetDateTime removidoEm;
 
@@ -124,4 +136,29 @@ public class Campanha {
 
     public Simulacao getSimulacaoAceita() { return simulacaoAceita; }
     public void setSimulacaoAceita(Simulacao simulacaoAceita) { this.simulacaoAceita = simulacaoAceita; }
+    public CampanhaVersao getVersaoVigente() { return versaoVigente; }
+    public void setVersaoVigente(CampanhaVersao versaoVigente) { this.versaoVigente = versaoVigente; }
+    public CampanhaVersao getVersaoProposta() { return versaoProposta; }
+    public void setVersaoProposta(CampanhaVersao versaoProposta) { this.versaoProposta = versaoProposta; }
+    public Long getVersaoControle() { return versaoControle; }
+
+    public CampanhaVersao versaoParaRevisao() {
+        return versaoProposta != null ? versaoProposta : versaoVigente;
+    }
+
+    public String tituloParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getTitulo() : titulo;
+    }
+
+    public String textoParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getTextoOriginal() : textoOriginal;
+    }
+
+    public LocalDate inicioParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getDataInicio() : dataInicio;
+    }
+
+    public LocalDate fimParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getDataFim() : dataFim;
+    }
 }

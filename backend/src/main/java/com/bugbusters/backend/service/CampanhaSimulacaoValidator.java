@@ -54,7 +54,7 @@ public class CampanhaSimulacaoValidator {
             throw new BusinessException(String.format(
                     "Ativação bloqueada: A campanha ID %d ('%s') não possui nenhuma simulação aceita. " +
                     "Execute uma simulação sem impedimentos e registre o aceite formal antes da ativação.",
-                    campanha.getId(), campanha.getTitulo()));
+                    campanha.getId(), campanha.tituloParaRevisao()));
         }
 
         if (simulacaoAceita.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
@@ -97,14 +97,14 @@ public class CampanhaSimulacaoValidator {
         }
 
         Simulacao simulacaoAceita = resolverSimulacaoAceita(campanha);
-        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
-        String hashCampanhaAtual = calcularHashPropostaCampanha(campanha.getDataInicio(), campanha.getDataFim(), regrasAtuais,
+        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
+        String hashCampanhaAtual = calcularHashPropostaCampanha(campanha.inicioParaRevisao(), campanha.fimParaRevisao(), regrasAtuais,
                 simulacaoAceita != null ? simulacaoAceita.getCompetencia() : "COMPETENCIA_PADRAO");
 
         if (simulacaoAceita == null) {
             return new ConferenciaSimulacaoResponse(
                     campanha.getId(),
-                    campanha.getTitulo(),
+                    campanha.tituloParaRevisao(),
                     campanha.getEstado(),
                     false,
                     null,
@@ -137,7 +137,7 @@ public class CampanhaSimulacaoValidator {
 
         return new ConferenciaSimulacaoResponse(
                 campanha.getId(),
-                campanha.getTitulo(),
+                campanha.tituloParaRevisao(),
                 campanha.getEstado(),
                 apta,
                 simulacaoAceita.getStatusAceite(),
@@ -163,18 +163,28 @@ public class CampanhaSimulacaoValidator {
             return divergencias;
         }
 
-        // 1. Período
-        if (!Objects.equals(campanha.getDataInicio(), simulacao.getDataInicioCampanha())) {
-            divergencias.add(String.format("Data de início atual (%s) difere da data simulada (%s).",
-                    campanha.getDataInicio(), simulacao.getDataInicioCampanha()));
+        if (simulacao.getCampanha() != null && !Objects.equals(campanha.getId(), simulacao.getCampanha().getId())) {
+            divergencias.add("A simulação pertence a outra campanha.");
         }
-        if (!Objects.equals(campanha.getDataFim(), simulacao.getDataFimCampanha())) {
+        if (!pertenceAVersaoAtual(campanha, simulacao)) {
+            divergencias.add("A simulação não pertence à versão atual da proposta.");
+        }
+        if (simulacao.getHashProposta() == null || simulacao.getHashProposta().isBlank()) {
+            divergencias.add("A simulação não possui assinatura da proposta.");
+        }
+
+        // 1. Período
+        if (!Objects.equals(campanha.inicioParaRevisao(), simulacao.getDataInicioCampanha())) {
+            divergencias.add(String.format("Data de início atual (%s) difere da data simulada (%s).",
+                    campanha.inicioParaRevisao(), simulacao.getDataInicioCampanha()));
+        }
+        if (!Objects.equals(campanha.fimParaRevisao(), simulacao.getDataFimCampanha())) {
             divergencias.add(String.format("Data de fim atual (%s) difere da data simulada (%s).",
-                    campanha.getDataFim(), simulacao.getDataFimCampanha()));
+                    campanha.fimParaRevisao(), simulacao.getDataFimCampanha()));
         }
 
         // 2. Regras simuladas vs regras salvas
-        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
+        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
         List<RegraItemRequest> regrasSimuladas = extrairRegrasSimuladas(simulacao);
 
         if (regrasAtuais.size() != regrasSimuladas.size()) {
@@ -183,7 +193,7 @@ public class CampanhaSimulacaoValidator {
         }
 
         // Comparação de hash canônico
-        String hashCampanha = calcularHashPropostaCampanha(campanha.getDataInicio(), campanha.getDataFim(), regrasAtuais, simulacao.getCompetencia());
+        String hashCampanha = calcularHashPropostaCampanha(campanha.inicioParaRevisao(), campanha.fimParaRevisao(), regrasAtuais, simulacao.getCompetencia());
         String hashSimulado = simulacao.getHashProposta();
 
         if (hashSimulado != null && !hashSimulado.equalsIgnoreCase(hashCampanha)) {
@@ -240,40 +250,21 @@ public class CampanhaSimulacaoValidator {
     }
 
     private Simulacao resolverSimulacaoAceita(Campanha campanha) {
-        if (campanha.getSimulacaoAceita() != null) {
+        if (campanha.getSimulacaoAceita() != null && pertenceAVersaoAtual(campanha, campanha.getSimulacaoAceita())) {
             return campanha.getSimulacaoAceita();
         }
-        if (simulacaoRepository != null && campanha.getId() != null) {
-            Simulacao sim = simulacaoRepository.findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(
-                    campanha.getId(), StatusAceiteSimulacao.ACEITA).orElse(null);
-            if (sim != null) {
-                return sim;
-            }
-        }
+        if (simulacaoRepository == null || campanha.getId() == null) return null;
+        // Uma consulta de conferência nunca concede aceite nem associa simulações de outras campanhas.
+        return simulacaoRepository.findAllByCampanhaIdAndStatusAceite(campanha.getId(), StatusAceiteSimulacao.ACEITA)
+                .stream().filter(s -> pertenceAVersaoAtual(campanha, s))
+                .max(Comparator.comparing(Simulacao::getAceitoEm, Comparator.nullsFirst(Comparator.naturalOrder())))
+                .orElse(null);
+    }
 
-        // Vínculo inteligente por fingerprint (hashProposta):
-        // Se a campanha ainda não tiver simulação diretamente vinculada, busca simulações recentes sem impedimentos
-        // que correspondam exatamente às regras e vigência desta proposta.
-        if (simulacaoRepository != null && campanha.getId() != null) {
-            List<Regra> regrasAtuais = carregarRegrasAtuais(campanha.getId());
-            List<Simulacao> candidatas = simulacaoRepository.findTop10ByQtdVendasComImpedimentoOrderByExecutadoEmDesc(0);
-            for (Simulacao cand : candidatas) {
-                String hashCampanha = calcularHashPropostaCampanha(campanha.getDataInicio(), campanha.getDataFim(), regrasAtuais, cand.getCompetencia());
-                if (cand.getHashProposta() != null && cand.getHashProposta().equalsIgnoreCase(hashCampanha)) {
-                    cand.setCampanha(campanha);
-                    if (cand.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
-                        cand.setStatusAceite(StatusAceiteSimulacao.ACEITA);
-                        cand.setAceitoEm(OffsetDateTime.now());
-                        cand.setAceitoPor("sistema@comissionai.com");
-                        cand.setMotivoAceite("Aceite formal vinculado automaticamente por correspondência de proposta à campanha ID " + campanha.getId());
-                    }
-                    Simulacao salva = simulacaoRepository.save(cand);
-                    campanha.setSimulacaoAceita(salva);
-                    return salva;
-                }
-            }
-        }
-        return null;
+    private boolean pertenceAVersaoAtual(Campanha campanha, Simulacao simulacao) {
+        var versao = campanha.versaoParaRevisao();
+        return versao == null ? simulacao.getCampanhaVersao() == null
+                : simulacao.getCampanhaVersao() != null && Objects.equals(versao.getId(), simulacao.getCampanhaVersao().getId());
     }
 
     private List<Regra> carregarRegrasAtuais(Long campanhaId) {
@@ -281,6 +272,14 @@ public class CampanhaSimulacaoValidator {
             return List.of();
         }
         return regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanhaId);
+    }
+
+    private List<Regra> carregarRegrasAtuais(Campanha campanha) {
+        if (campanha == null || regraRepository == null) return List.of();
+        var versao = campanha.getVersaoProposta() != null ? campanha.getVersaoProposta() : campanha.getVersaoVigente();
+        return versao != null
+                ? regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId())
+                : carregarRegrasAtuais(campanha.getId());
     }
 
     private List<RegraItemRequest> extrairRegrasSimuladas(Simulacao simulacao) {
