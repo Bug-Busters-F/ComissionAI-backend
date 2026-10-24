@@ -102,9 +102,12 @@ class CampanhaMultiplasRegrasTest {
                 {"titulo":"Campanha N regras","textoOriginal":"revisada","dataInicio":"2026-10-01","dataFim":"2026-10-31",
                  "regras":[{"codLoja":75,"taxa":0.0350}]}
                 """;
-        // Edição substitui regras e, para segurança, invalida aceite e retorna para DRAFT
+        // A proposta contém regras DRAFT, enquanto a versão publicada continua ATIVA.
         mockMvc.perform(put("/api/v1/campanhas/" + id).contentType(MediaType.APPLICATION_JSON).content(nova))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado", is("ATIVA")))
+                .andExpect(jsonPath("$.versaoVigente", is(1)))
+                .andExpect(jsonPath("$.versaoProposta", is(2)))
                 .andExpect(jsonPath("$.regras", hasSize(1)))
                 .andExpect(jsonPath("$.regras[0].taxa", is(0.035)))
                 .andExpect(jsonPath("$.regras[0].status", is("DRAFT")));
@@ -122,12 +125,22 @@ class CampanhaMultiplasRegrasTest {
                 .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite da revisão\"}"))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/campanhas/" + id + "/ativar"))
+        mockMvc.perform(post("/api/v1/campanhas/" + id + "/ativar")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":1}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.regras[0].status", is("ATIVA")));
 
         mockMvc.perform(get("/api/v1/campanhas/" + id))
                 .andExpect(jsonPath("$.regras", hasSize(1)));
+    }
+
+    @Test
+    void naoDeveAtivarRegraPeloStatusEnviadoDentroDeUmRascunho() throws Exception {
+        mockMvc.perform(post("/api/v1/campanhas").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"titulo\":\"Rascunho\",\"textoOriginal\":\"3%\",\"estado\":\"DRAFT\",\"regras\":[{\"taxa\":0.03,\"status\":\"ATIVA\"}]}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.estado", is("DRAFT")))
+                .andExpect(jsonPath("$.regras[0].status", is("DRAFT")));
     }
 
     @Test

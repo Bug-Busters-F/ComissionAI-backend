@@ -87,7 +87,7 @@ class CampanhaServiceTest {
         assertThat(response.estado()).isEqualTo(EstadoCampanha.DRAFT);
         assertThat(response.regras()).hasSize(1);
         assertThat(response.regras().get(0).status()).isEqualTo(StatusRegra.DRAFT);
-        verify(campanhaRepository).save(any(Campanha.class));
+        verify(campanhaRepository, times(2)).save(any(Campanha.class));
         verify(regraRepository).saveAll(anyList());
     }
 
@@ -101,7 +101,7 @@ class CampanhaServiceTest {
 
         when(campanhaRepository.findAllByEstadoAndRemovidoEmIsNullOrderByCriadoEmDesc(EstadoCampanha.ATIVA))
                 .thenReturn(List.of(campanhaAtiva));
-        when(regraRepository.findAllByCampanhaIdInAndRemovidoEmIsNull(List.of(11L)))
+        when(regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(11L))
                 .thenReturn(List.of(regra));
 
         List<CampanhaResponse> resultado = campanhaService.listarAtivas();

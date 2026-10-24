@@ -1,6 +1,7 @@
 package com.bugbusters.backend.controller;
 
 import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.AtivarCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
@@ -72,8 +73,9 @@ public class CampanhaController {
     @ApiResponse(responseCode = "400", description = "Ativação bloqueada por falta de simulação aceita ou divergência na proposta", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping("/{id}/ativar")
-    public ResponseEntity<CampanhaResponse> ativarCampanha(@PathVariable Long id) {
-        return ResponseEntity.ok(campanhaService.ativarCampanha(id));
+    public ResponseEntity<CampanhaResponse> ativarCampanha(@PathVariable Long id,
+            @RequestBody(required = false) AtivarCampanhaRequest request) {
+        return ResponseEntity.ok(campanhaService.ativarCampanha(id, request != null ? request.versaoEsperada() : null));
     }
 
     @Operation(

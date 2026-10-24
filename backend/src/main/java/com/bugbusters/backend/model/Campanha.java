@@ -141,4 +141,24 @@ public class Campanha {
     public CampanhaVersao getVersaoProposta() { return versaoProposta; }
     public void setVersaoProposta(CampanhaVersao versaoProposta) { this.versaoProposta = versaoProposta; }
     public Long getVersaoControle() { return versaoControle; }
+
+    public CampanhaVersao versaoParaRevisao() {
+        return versaoProposta != null ? versaoProposta : versaoVigente;
+    }
+
+    public String tituloParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getTitulo() : titulo;
+    }
+
+    public String textoParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getTextoOriginal() : textoOriginal;
+    }
+
+    public LocalDate inicioParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getDataInicio() : dataInicio;
+    }
+
+    public LocalDate fimParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getDataFim() : dataFim;
+    }
 }

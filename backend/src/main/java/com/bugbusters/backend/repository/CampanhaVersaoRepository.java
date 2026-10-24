@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface CampanhaVersaoRepository extends JpaRepository<CampanhaVersao, Long> {
     Optional<CampanhaVersao> findFirstByCampanhaIdAndStatus(Long campanhaId, StatusVersaoCampanha status);
     List<CampanhaVersao> findAllByCampanhaIdOrderByNumeroDesc(Long campanhaId);
+    Optional<CampanhaVersao> findFirstByCampanhaIdOrderByNumeroDesc(Long campanhaId);
 }

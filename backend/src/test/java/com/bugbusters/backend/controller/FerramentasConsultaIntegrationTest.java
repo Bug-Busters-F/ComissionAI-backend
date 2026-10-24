@@ -36,7 +36,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @ActiveProfiles("test")
-@TestPropertySource(properties = "ai.service.url=http://localhost:8000")
+@TestPropertySource(properties = {
+        "ai.service.url=http://localhost:8000",
+        "spring.datasource.url=jdbc:h2:mem:ferramentas-consulta;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+})
+@org.springframework.transaction.annotation.Transactional
 class FerramentasConsultaIntegrationTest {
 
     @Autowired

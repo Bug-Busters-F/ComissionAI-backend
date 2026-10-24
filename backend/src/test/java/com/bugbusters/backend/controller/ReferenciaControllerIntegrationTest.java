@@ -72,6 +72,9 @@ class ReferenciaControllerIntegrationTest {
     private SaleRepository saleRepository;
 
     private MockMvc mockMvc;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
     private Brand brand;
     private Store store;
     private Position position;
@@ -83,8 +86,7 @@ class ReferenciaControllerIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
 
         saleRepository.deleteAllInBatch();
-        regraRepository.deleteAllInBatch();
-        campanhaRepository.deleteAllInBatch();
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
         baseComissRepository.deleteAllInBatch();
         registrationRepository.deleteAllInBatch();
         storeRepository.deleteAllInBatch();

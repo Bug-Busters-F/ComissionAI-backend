@@ -15,11 +15,10 @@ public record AceiteSimulacaoRequest(
         @Schema(description = "Identificador opcional da campanha a ser vinculada a esta simulação", example = "1")
         Long campanhaId,
 
-        @Schema(description = "Número da versão publicada que o usuário espera substituir. Obrigatório ao publicar revisão de campanha ativa.", example = "1")
+        @Schema(description = "Número opcional da versão vigente esperada ao registrar o aceite. O aceite não publica a campanha.", example = "1")
         Integer versaoEsperada
 ) {
     public AceiteSimulacaoRequest(String aceitoPor, String motivo) {
         this(aceitoPor, motivo, null, null);
     }
 }
-

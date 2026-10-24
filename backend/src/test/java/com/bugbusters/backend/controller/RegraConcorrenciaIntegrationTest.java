@@ -42,6 +42,9 @@ class RegraConcorrenciaIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
+
+    @Autowired
     private RegraRepository regraRepository;
 
     @Autowired
@@ -56,8 +59,7 @@ class RegraConcorrenciaIntegrationTest {
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
 
-        regraRepository.deleteAll();
-        campanhaRepository.deleteAll();
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
 
         campanhaExistente = new Campanha("Campanha Primavera 2026", "Texto original", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 11, 30));
         campanhaExistente = campanhaRepository.save(campanhaExistente);
