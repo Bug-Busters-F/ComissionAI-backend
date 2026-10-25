@@ -52,6 +52,21 @@ class HistoricoPostgresMigrationTest {
         }
         return (UUID) values.get("id");
     }
+    @Test void atualizaV25ParaV26PreservandoFechamentoEHistorico() throws Exception {
+        String schema=schema(); flyway(schema,"25").migrate();
+        UUID id=UUID.randomUUID();
+        try (var c=connection(schema); var s=c.createStatement()) {
+            s.execute("INSERT INTO tb_fechamento_competencia(id,competencia,protocolo,status) VALUES ('"+id+"','2040-01','"+UUID.randomUUID()+"','CONCLUIDO')");
+            s.execute("INSERT INTO tb_campanha(id,titulo,texto_original,data_inicio,data_fim,estado) VALUES (980,'Antes da execução','Texto','2040-01-01','2040-01-31','DRAFT')");
+        }
+        var all=flyway(schema,"26"); assertThat(all.migrate().migrationsExecuted).isEqualTo(1); all.validate();
+        try (var c=connection(schema)) {
+            assertThat(scalar(c,"SELECT status FROM tb_fechamento_competencia WHERE id='"+id+"'")).isEqualTo("CONCLUIDO");
+            assertThat(scalar(c,"SELECT titulo FROM tb_campanha WHERE id=980")).isEqualTo("Antes da execução");
+            assertThat(scalar(c,"SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='tb_execucao_calculo' AND column_name IN ('tentativa','referencia_dados','referencia_regras','itens_processados')")).isEqualTo("4");
+        }
+    }
+
     @Test void atualizaV24ParaV25PreservandoHistoricoEProgresso() throws Exception {
         String schema = schema(); flyway(schema,"24").migrate();
         try (var c=connection(schema); var s=c.createStatement()) {

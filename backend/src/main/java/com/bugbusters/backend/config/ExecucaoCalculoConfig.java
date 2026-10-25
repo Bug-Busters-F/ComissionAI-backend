@@ -10,7 +10,8 @@ public class ExecucaoCalculoConfig {
     TaskExecutor execucaoCalculoExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2); executor.setMaxPoolSize(4); executor.setQueueCapacity(50);
-        executor.setThreadNamePrefix("calculo-competencia-"); executor.initialize();
+        executor.setThreadNamePrefix("calculo-competencia-");
+        executor.setWaitForTasksToCompleteOnShutdown(true); executor.setAwaitTerminationSeconds(30);
         return executor;
     }
 }

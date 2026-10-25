@@ -22,6 +22,9 @@ public class ExecucaoCalculo {
     @Column(name = "falha", columnDefinition = "TEXT") private String falha;
     @Column(name = "resultado", columnDefinition = "TEXT") private String resultado;
 
+    @Column(nullable = false) private UUID tentativa = UUID.randomUUID();
+    public UUID getTentativa(){return tentativa;} public void setTentativa(UUID v){tentativa=v;}
+
     public UUID getId(){return id;} public String getChaveIdempotencia(){return chaveIdempotencia;} public void setChaveIdempotencia(String v){chaveIdempotencia=v;}
     public String getCompetencia(){return competencia;} public void setCompetencia(String v){competencia=v;} public boolean isRecalcular(){return recalcular;} public void setRecalcular(boolean v){recalcular=v;}
     public StatusExecucaoCalculo getStatus(){return status;} public void setStatus(StatusExecucaoCalculo v){status=v;} public int getTotalItens(){return totalItens;} public void setTotalItens(int v){totalItens=v;}

@@ -12,6 +12,10 @@ CREATE TABLE tb_execucao_calculo (
     iniciado_em TIMESTAMP WITH TIME ZONE,
     concluido_em TIMESTAMP WITH TIME ZONE,
     falha TEXT,
+    tentativa UUID NOT NULL,
     resultado TEXT
 );
 CREATE INDEX idx_execucao_calculo_competencia_status ON tb_execucao_calculo(competencia, status);
+
+CREATE UNIQUE INDEX uk_execucao_calculo_ativa ON tb_execucao_calculo(competencia)
+    WHERE status IN ('SOLICITADA', 'PROCESSANDO');
