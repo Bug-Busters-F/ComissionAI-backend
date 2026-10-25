@@ -94,8 +94,19 @@ public record RegraItemRequest(
         BigDecimal bonusPercentual,
         @Schema(description = "Bônus em valor fixo (R$) adicionado por venda elegível (opcional)", example = "50.00")
         @Positive(message = "O bônus de valor fixo deve ser maior que zero")
-        BigDecimal bonusValorFixo
+        BigDecimal bonusValorFixo,
+        RastreabilidadeRegraDTO rastreabilidade
 ) {
+    public RegraItemRequest(String blocoId, String trechoOrigem, String nome, String canal, Integer codMarca,
+            String descrMarca, Integer codLoja, Integer codCargo, String descriCargo, String matricula,
+            BigDecimal valorMinimo, Boolean minInclusivo, BigDecimal valorMaximo, Boolean maxInclusivo,
+            TipoOperacaoBase tipoOperacao, BigDecimal valorAjuste, String tipoBaseReferencia,
+            BigDecimal taxaBaseConsultada, String descricaoReferencia, BigDecimal taxa, String explicacao,
+            String pythonEquivalente, List<String> pendencias, Boolean completa, StatusRegra status,
+            BigDecimal bonusPercentual, BigDecimal bonusValorFixo) {
+        this(blocoId, trechoOrigem, nome, canal, codMarca, descrMarca, codLoja, codCargo, descriCargo, matricula, valorMinimo, minInclusivo, valorMaximo, maxInclusivo, tipoOperacao, valorAjuste, tipoBaseReferencia, taxaBaseConsultada, descricaoReferencia, taxa, explicacao, pythonEquivalente, pendencias, completa, status, bonusPercentual, bonusValorFixo, null);
+    }
+
     /** Item sem bônus (contrato anterior ao bônus). */
     public RegraItemRequest(String blocoId, String trechoOrigem, String nome, String canal, Integer codMarca,
                             String descrMarca, Integer codLoja, Integer codCargo, String descriCargo, String matricula,

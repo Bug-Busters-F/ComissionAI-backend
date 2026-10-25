@@ -203,7 +203,11 @@ public class LogCalculoImutavel {
 
     public String getOrigemExecucao() { return origemExecucao; }
 
+    public void setOrigemExecucao(String origemExecucao) { this.origemExecucao = origemExecucao; }
+
     public String getUsuarioExecutor() { return usuarioExecutor; }
+
+    public void setUsuarioExecutor(String usuarioExecutor) { this.usuarioExecutor = usuarioExecutor; }
 
     public String getTipoVenda() { return tipoVenda; }
 

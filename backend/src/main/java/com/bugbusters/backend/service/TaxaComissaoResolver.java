@@ -358,8 +358,10 @@ public class TaxaComissaoResolver {
             default -> "=";
         };
 
-        String versaoRegra = String.format("REGRA#%d - %s [%s: Base %s %s %s = %s]",
-                regra.getId(), regra.getNome(), operacao, taxaBase,
+        Integer versaoNumero = extrairNumeroVersaoCampanha(regra);
+        String prefixoVersao = versaoNumero != null ? String.format("v%d - ", versaoNumero) : "";
+        String versaoRegra = String.format("%sREGRA#%d - %s [%s: Base %s %s %s = %s]",
+                prefixoVersao, regra.getId(), regra.getNome(), operacao, taxaBase,
                 sinalOperacao, valorAjuste, taxaCalculada);
 
         return sucessoPorRegra(regra, taxaCalculada, versaoRegra);
@@ -494,10 +496,22 @@ public class TaxaComissaoResolver {
         return peso;
     }
 
-    /** Sucesso por regra de negócio, levando o bônus da regra vencedora (nunca somado entre regras). */
+    /** Sucesso por regra de negócio, levando o bônus da regra vencedora (nunca somado entre regras) e versão da campanha. */
     private ResolucaoTaxaResult sucessoPorRegra(Regra regra, BigDecimal taxa, String versaoRegra) {
+        Integer versaoNumero = extrairNumeroVersaoCampanha(regra);
         return ResolucaoTaxaResult.sucesso(taxa, regra.getId(), "REGRA_NEGOCIO", versaoRegra, null,
-                regra.getBonusPercentual(), regra.getBonusValorFixo());
+                regra.getBonusPercentual(), regra.getBonusValorFixo(), versaoNumero);
+    }
+
+    private Integer extrairNumeroVersaoCampanha(Regra regra) {
+        if (regra == null) return null;
+        if (regra.getCampanhaVersao() != null) {
+            return regra.getCampanhaVersao().getNumero();
+        }
+        if (regra.getCampanha() != null && regra.getCampanha().getVersaoVigente() != null) {
+            return regra.getCampanha().getVersaoVigente().getNumero();
+        }
+        return null;
     }
 
     /** Exclui o registro técnico usado como referência para a taxa base. */

@@ -16,17 +16,23 @@ public record ResolucaoTaxaResult(
     String versaoOuReferenciaRegra,
     String parametrosSnapshot,
     BigDecimal bonusPercentual,
-    BigDecimal bonusValorFixo
+    BigDecimal bonusValorFixo,
+    Integer versaoCampanhaNumero
 ) {
     public ResolucaoTaxaResult(boolean sucesso, BigDecimal taxa, Long idRegra, String origemTaxa, String motivoImpedimento,
+                               String versaoOuReferenciaRegra, String parametrosSnapshot, BigDecimal bonusPercentual, BigDecimal bonusValorFixo) {
+        this(sucesso, taxa, idRegra, origemTaxa, motivoImpedimento, versaoOuReferenciaRegra, parametrosSnapshot, bonusPercentual, bonusValorFixo, null);
+    }
+
+    public ResolucaoTaxaResult(boolean sucesso, BigDecimal taxa, Long idRegra, String origemTaxa, String motivoImpedimento,
                                String versaoOuReferenciaRegra, String parametrosSnapshot) {
-        this(sucesso, taxa, idRegra, origemTaxa, motivoImpedimento, versaoOuReferenciaRegra, parametrosSnapshot, null, null);
+        this(sucesso, taxa, idRegra, origemTaxa, motivoImpedimento, versaoOuReferenciaRegra, parametrosSnapshot, null, null, null);
     }
 
     public ResolucaoTaxaResult(boolean sucesso, BigDecimal taxa, Long idRegra, String origemTaxa, String motivoImpedimento) {
         this(sucesso, taxa, idRegra, origemTaxa, motivoImpedimento,
                 idRegra != null ? "REGRA#" + idRegra : (origemTaxa != null ? origemTaxa : "PADRAO"),
-                null);
+                null, null, null, null);
     }
 
     public static ResolucaoTaxaResult sucesso(BigDecimal taxa, Long idRegra, String origemTaxa) {
@@ -40,10 +46,17 @@ public record ResolucaoTaxaResult(
     public static ResolucaoTaxaResult sucesso(BigDecimal taxa, Long idRegra, String origemTaxa, String versaoOuReferenciaRegra,
                                               String parametrosSnapshot, BigDecimal bonusPercentual, BigDecimal bonusValorFixo) {
         return new ResolucaoTaxaResult(true, taxa, idRegra, origemTaxa, null, versaoOuReferenciaRegra, parametrosSnapshot,
-                bonusPercentual, bonusValorFixo);
+                bonusPercentual, bonusValorFixo, null);
+    }
+
+    public static ResolucaoTaxaResult sucesso(BigDecimal taxa, Long idRegra, String origemTaxa, String versaoOuReferenciaRegra,
+                                              String parametrosSnapshot, BigDecimal bonusPercentual, BigDecimal bonusValorFixo,
+                                              Integer versaoCampanhaNumero) {
+        return new ResolucaoTaxaResult(true, taxa, idRegra, origemTaxa, null, versaoOuReferenciaRegra, parametrosSnapshot,
+                bonusPercentual, bonusValorFixo, versaoCampanhaNumero);
     }
 
     public static ResolucaoTaxaResult impedido(String motivo) {
-        return new ResolucaoTaxaResult(false, null, null, null, motivo, null, null);
+        return new ResolucaoTaxaResult(false, null, null, null, motivo, null, null, null, null, null);
     }
 }
