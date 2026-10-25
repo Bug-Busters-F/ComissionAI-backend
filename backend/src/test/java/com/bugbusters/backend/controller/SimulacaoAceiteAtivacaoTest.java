@@ -499,6 +499,7 @@ class SimulacaoAceiteAtivacaoTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":99}"))
                 .andExpect(status().isConflict());
         mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar")
+                        .header("X-Campanha-Revisao", campanha.getVersaoControle())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":1}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.versaoVigente").value(2))
                 .andExpect(jsonPath("$.versaoProposta").doesNotExist());

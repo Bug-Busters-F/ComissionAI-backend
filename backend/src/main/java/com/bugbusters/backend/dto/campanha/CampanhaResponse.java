@@ -29,7 +29,10 @@ public record CampanhaResponse(
         Integer versaoVigente,
         Integer versaoProposta,
         Integer ultimaEtapa,
-        Integer etapaMaisAvancada
+        Integer etapaMaisAvancada,
+        Long revisaoControle,
+        Integer versaoOrigem,
+        String motivoBloqueioEdicao
 ) {
     public CampanhaResponse(
             Long id,
@@ -43,7 +46,7 @@ public record CampanhaResponse(
             OffsetDateTime criadoEm,
             OffsetDateTime atualizadoEm
     ) {
-        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null, null, null, 1, 1);
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null, null, null, 1, 1, null, null, null);
     }
 
     public record RegraVinculadaDTO(

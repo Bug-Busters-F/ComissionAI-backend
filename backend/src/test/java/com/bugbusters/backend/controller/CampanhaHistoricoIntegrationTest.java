@@ -57,7 +57,7 @@ class CampanhaHistoricoIntegrationTest {
             .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString()).path("id").asLong();
     }
     private void editar(long id, ObjectNode p) throws Exception {
-        mvc.perform(put("/api/v1/campanhas/"+id).contentType(MediaType.APPLICATION_JSON).content(p.toString())).andExpect(status().isOk());
+        mvc.perform(put("/api/v1/campanhas/"+id).header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong()).contentType(MediaType.APPLICATION_JSON).content(p.toString())).andExpect(status().isOk());
     }
     private JsonNode consultar(String path) throws Exception {
         return json.readTree(mvc.perform(get(path)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
@@ -72,7 +72,7 @@ class CampanhaHistoricoIntegrationTest {
         mvc.perform(post("/api/v1/simulacoes/"+sim.path("id").asText()+"/aceite").contentType(MediaType.APPLICATION_JSON).content(aceite.toString()))
             .andExpect(status().isOk());
         ObjectNode ativacao = json.createObjectNode(); if (esperada != null) ativacao.put("versaoEsperada",esperada);
-        mvc.perform(post("/api/v1/campanhas/"+id+"/ativar").contentType(MediaType.APPLICATION_JSON).content(ativacao.toString()))
+        mvc.perform(post("/api/v1/campanhas/"+id+"/ativar").header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong()).contentType(MediaType.APPLICATION_JSON).content(ativacao.toString()))
             .andExpect(status().isOk());
         return sim;
     }
@@ -81,7 +81,7 @@ class CampanhaHistoricoIntegrationTest {
         long id = criar(payload("Rascunho",regra("one",16,"0.035")));
         assertThat(consultar("/api/v1/campanhas/"+id+"/versoes")).isEmpty();
         mvc.perform(get("/api/v1/campanhas/"+id+"/versoes/1")).andExpect(status().isNotFound());
-        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta")).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta").header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong())).andExpect(status().isNoContent());
         assertThat(consultar("/api/v1/campanhas/"+id+"/versoes")).isEmpty();
     }
 
@@ -98,7 +98,7 @@ class CampanhaHistoricoIntegrationTest {
         assertThat(r.path("rastreabilidade").path("pendenciasCampanha").get(0).path("codigo").asText()).isEqualTo("AVISO_GERAL");
         editar(id,payload("Proposta",regra("one",13,"0.06")));
         assertThat(consultar(path)).isEqualTo(antes);
-        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta")).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta").header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong())).andExpect(status().isNoContent());
         assertThat(consultar(path)).isEqualTo(antes);
         assertThat(consultar("/api/v1/campanhas/"+id).path("versaoVigente").asInt()).isEqualTo(1);
     }
@@ -107,7 +107,7 @@ class CampanhaHistoricoIntegrationTest {
         long id = criar(payload("Inicial",regra("one",16,"0.035")));
         JsonNode sim1 = publicar(id,null);
         editar(id,payload("Cancelada",regra("one",16,"0.04")));
-        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta")).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta").header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong())).andExpect(status().isNoContent());
         editar(id,payload("Publicada",regra("one",16,"0.05")));
         JsonNode sim3 = publicar(id,1);
         JsonNode historico = consultar("/api/v1/campanhas/"+id+"/versoes");
@@ -145,7 +145,7 @@ class CampanhaHistoricoIntegrationTest {
         long id = criar(payload("Inicial",regra("one",16,"0.035"))); publicar(id,null);
         JsonNode antes = consultar("/api/v1/campanhas/"+id+"/versoes/1");
         ObjectNode invalid = payload("Duplicada",regra("one",16,"0.035"),regra(" one ",13,"0.04"));
-        mvc.perform(put("/api/v1/campanhas/"+id).contentType(MediaType.APPLICATION_JSON).content(invalid.toString()))
+        mvc.perform(put("/api/v1/campanhas/"+id).header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong()).contentType(MediaType.APPLICATION_JSON).content(invalid.toString()))
             .andExpect(status().isBadRequest());
         assertThat(consultar("/api/v1/campanhas/"+id+"/versoes/1")).isEqualTo(antes);
         assertThat(consultar("/api/v1/campanhas/"+id).path("versaoProposta").isNull()).isTrue();
@@ -172,5 +172,60 @@ class CampanhaHistoricoIntegrationTest {
         mvc.perform(get("/api/v1/campanhas/"+id+"/versoes/comparacao?versaoBase=1")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/campanhas/"+id+"/versoes/comparacao?versaoBase=abc&versaoComparada=1")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/campanhas/"+id+"/versoes/abc")).andExpect(status().isBadRequest());
+    }
+
+    @Test void iniciaEdicaoIsoladaComOrigemEExigeNovaSimulacao() throws Exception {
+        long id = criar(payload("Original", regra("one",16,"0.035")));
+        publicar(id,null);
+        var vigente = consultar("/api/v1/campanhas/"+id+"/versoes/1");
+        var antes = consultar("/api/v1/campanhas/"+id);
+        mvc.perform(post("/api/v1/campanhas/"+id+"/proposta"))
+            .andExpect(status().isConflict());
+        mvc.perform(post("/api/v1/campanhas/"+id+"/proposta")
+                .header("X-Campanha-Revisao",antes.path("revisaoControle").asLong()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.versaoOrigem").value(1))
+            .andExpect(jsonPath("$.versaoProposta").value(2)).andExpect(jsonPath("$.estado").value("ATIVA"))
+            .andExpect(jsonPath("$.ultimaEtapa").value(2)).andExpect(jsonPath("$.etapaMaisAvancada").value(2))
+            .andExpect(jsonPath("$.simulacaoAceitaId").isEmpty());
+        assertThat(consultar("/api/v1/campanhas/"+id+"/versoes/1")).isEqualTo(vigente);
+        var atual = consultar("/api/v1/campanhas/"+id);
+        editar(id,payload("Proposta sem publicar",regra("one",13,"0.04")));
+        var lista = consultar("/api/v1/campanhas");
+        var listada = java.util.stream.StreamSupport.stream(lista.spliterator(),false).filter(c -> c.path("id").asLong()==id).findFirst().orElseThrow();
+        assertThat(listada.path("titulo").asText()).isEqualTo("Original");
+        assertThat(listada.path("simulacaoAceitaId")).isEqualTo(vigente.path("simulacaoAceitaId"));
+        assertThat(listada.path("regras").get(0).path("codLoja").asInt()).isEqualTo(16);
+        atual = consultar("/api/v1/campanhas/"+id);
+        assertThat(atual.path("regras").get(0).path("id")).isNotEqualTo(vigente.path("regras").get(0).path("id"));
+        assertThat(atual.path("regras").get(0).path("matricula").asText()).isEqualTo("001234");
+        assertThat(consultar("/api/v1/campanhas/"+id+"/conferencia-simulacao").path("aptaParaAtivacao").asBoolean()).isFalse();
+        mvc.perform(patch("/api/v1/campanhas/"+id+"/progresso").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"ultimaEtapa\":2,\"etapaMaisAvancada\":2,\"versaoProposta\":2}"))
+            .andExpect(status().isOk());
+        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta")
+            .header("X-Campanha-Revisao",atual.path("revisaoControle").asLong())).andExpect(status().isNoContent());
+        assertThat(consultar("/api/v1/campanhas/"+id+"/versoes/1")).isEqualTo(vigente);
+        var finalState = consultar("/api/v1/campanhas/"+id);
+        assertThat(finalState.path("versaoProposta").isNull()).isTrue();
+        assertThat(finalState.path("statusAceite").asText()).isEqualTo("ACEITA");
+    }
+
+    @Test void rejeitaGravacaoECancelamentoComRevisaoAntigaSemPerderProposta() throws Exception {
+        long id = criar(payload("Original", regra("one",16,"0.035")));
+        publicar(id,null);
+        long stale = consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong();
+        editar(id,payload("Alteração A",regra("one",16,"0.04")));
+        var atual = consultar("/api/v1/campanhas/"+id);
+        mvc.perform(put("/api/v1/campanhas/"+id).header("X-Campanha-Revisao",stale)
+            .contentType(MediaType.APPLICATION_JSON).content(payload("Alteração B",regra("one",16,"0.05")).toString()))
+            .andExpect(status().isConflict());
+        mvc.perform(delete("/api/v1/campanhas/"+id+"/proposta").header("X-Campanha-Revisao",stale))
+            .andExpect(status().isConflict());
+        assertThat(consultar("/api/v1/campanhas/"+id)).isEqualTo(atual);
+        publicar(id,1);
+        var revisada = consultar("/api/v1/campanhas/"+id);
+        assertThat(revisada.path("versaoVigente").asInt()).isEqualTo(2);
+        assertThat(revisada.path("titulo").asText()).isEqualTo("Alteração A");
+        assertThat(consultar("/api/v1/campanhas/"+id+"/versoes/1").path("titulo").asText()).isEqualTo("Original");
     }
 }

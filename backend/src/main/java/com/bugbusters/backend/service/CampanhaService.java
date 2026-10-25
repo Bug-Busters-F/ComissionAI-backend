@@ -120,7 +120,7 @@ public class CampanhaService {
 
         vincularAceiteExistente(campanhaSalva, request.simulacaoAceitaId());
 
-        campanhaRepository.save(campanhaSalva);
+        campanhaRepository.saveAndFlush(campanhaSalva);
         return mapearParaResponse(campanhaSalva, regrasSalvas);
     }
 
@@ -140,7 +140,8 @@ public class CampanhaService {
         }
 
         return campanhas.stream()
-                .map(campanha -> mapearParaResponse(campanha, regrasDaVersaoExibida(campanha)))
+                .map(campanha -> campanha.getVersaoVigente() == null ? mapearParaResponse(campanha, regrasDaVersaoExibida(campanha)) :
+                        mapearParaResponse(campanha, regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(campanha.getVersaoVigente().getId()), campanha.getVersaoVigente()))
                 .toList();
     }
 
@@ -221,15 +222,23 @@ public class CampanhaService {
 
     @Transactional
     public CampanhaResponse atualizarCampanha(Long id, CampanhaRequest request) {
+        return atualizarCampanha(id, request, null, false);
+    }
+
+    @Transactional
+    public CampanhaResponse atualizarCampanha(Long id, CampanhaRequest request, Long revisao, boolean exigirRevisao) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
 
+        validarEstadoEditavel(campanha);
         PeriodoCalculado periodo = calcularEValidarPeriodo(request.dataInicio(), request.dataFim());
 
         if (fechamentoService != null) {
             fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(),
                     campanha.inicioParaRevisao(), campanha.fimParaRevisao(), periodo.inicio(), periodo.fim());
         }
+
+        validarRevisaoEdicao(campanha, revisao, exigirRevisao);
 
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
@@ -283,7 +292,7 @@ public class CampanhaService {
             campanha.setEstado(EstadoCampanha.DRAFT);
         }
         campanha.setAtualizadoEm(OffsetDateTime.now());
-        campanhaRepository.save(campanha);
+        campanhaRepository.saveAndFlush(campanha);
         return mapearParaResponse(campanha, regrasSalvas);
     }
 
@@ -489,6 +498,10 @@ public class CampanhaService {
     }
 
     private CampanhaResponse mapearParaResponse(Campanha c, List<Regra> regras) {
+        return mapearParaResponse(c, regras, c.versaoParaRevisao());
+    }
+
+    private CampanhaResponse mapearParaResponse(Campanha c, List<Regra> regras, CampanhaVersao exibida) {
         List<RegraVinculadaDTO> regrasDTO = (regras != null) ? regras.stream().map(r -> new RegraVinculadaDTO(
                 r.getId(),
                 r.getBlocoId(),
@@ -523,26 +536,32 @@ public class CampanhaService {
                 RastreabilidadeRegraService.ler(r)
         )).toList() : List.of();
 
+        Simulacao aceiteExibido = exibida != null && exibida.getStatus() == StatusVersaoCampanha.PUBLICADA
+                ? exibida.getSimulacaoAceita() : aceiteDaVersaoExibida(c) ? c.getSimulacaoAceita() : null;
         boolean possuiIncompletas = regrasDTO.stream()
                 .anyMatch(r -> Boolean.FALSE.equals(r.completa()) || r.taxa() == null);
 
         return new CampanhaResponse(
                 c.getId(),
-                c.tituloParaRevisao(),
-                c.textoParaRevisao(),
+                exibida != null ? exibida.getTitulo() : c.getTitulo(),
+                exibida != null ? exibida.getTextoOriginal() : c.getTextoOriginal(),
                 c.getEstado(),
-                c.inicioParaRevisao(),
-                c.fimParaRevisao(),
+                exibida != null ? exibida.getDataInicio() : c.getDataInicio(),
+                exibida != null ? exibida.getDataFim() : c.getDataFim(),
                 regrasDTO,
                 possuiIncompletas,
                 c.getCriadoEm(),
                 c.getAtualizadoEm(),
-                c.getSimulacaoAceita() != null ? c.getSimulacaoAceita().getId() : null,
-                c.getSimulacaoAceita() != null ? c.getSimulacaoAceita().getStatusAceite() : null,
+                aceiteExibido != null ? aceiteExibido.getId() : null,
+                aceiteExibido != null ? aceiteExibido.getStatusAceite() : null,
                 c.getVersaoVigente() != null ? c.getVersaoVigente().getNumero() : null,
                 c.getVersaoProposta() != null ? c.getVersaoProposta().getNumero() : null,
                 c.versaoParaRevisao() != null ? c.versaoParaRevisao().getUltimaEtapa() : 1,
-                c.versaoParaRevisao() != null ? c.versaoParaRevisao().getEtapaMaisAvancada() : 1
+                c.versaoParaRevisao() != null ? c.versaoParaRevisao().getEtapaMaisAvancada() : 1,
+                c.getVersaoControle(),
+                c.getVersaoProposta() != null && c.getVersaoProposta().getVersaoAnterior() != null
+                        ? c.getVersaoProposta().getVersaoAnterior().getNumero() : null,
+                motivoBloqueioEdicao(c)
         );
     }
 
@@ -553,7 +572,8 @@ public class CampanhaService {
         Campanha c = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada."));
         CampanhaVersao v = c.getVersaoProposta();
-        if (c.getEstado() != EstadoCampanha.DRAFT || v == null) throw new BusinessException("Somente rascunhos podem registrar progresso.");
+        if (v == null) throw new BusinessException("Inicie uma proposta antes de registrar progresso.");
+        validarEstadoEditavel(c);
         if (!Objects.equals(v.getNumero(), request.versaoProposta())) throw new ResourceConflictException("A proposta mudou. Atualize a campanha antes de registrar o progresso.");
         int etapa = request.ultimaEtapa();
         if (etapa < 1 || etapa > 4 || request.etapaMaisAvancada() < etapa || request.etapaMaisAvancada() > 4) throw new BusinessException("Progresso inválido.");
@@ -576,6 +596,10 @@ public class CampanhaService {
         if (campanhaVersaoRepository == null) return;
         if (campanha.getVersaoVigente() != null && versaoEsperada == null) {
             throw new ResourceConflictException("Informe versaoEsperada para publicar uma revisão da campanha.");
+        }
+        if (campanha.getVersaoProposta() != null && campanha.getVersaoVigente() != null &&
+                !Objects.equals(campanha.getVersaoProposta().getVersaoAnterior() != null ? campanha.getVersaoProposta().getVersaoAnterior().getId() : null, campanha.getVersaoVigente().getId())) {
+            throw new ResourceConflictException("A versão de origem da proposta não é mais vigente. Reabra a edição antes de publicar.");
         }
         validarAceiteSimulacao(campanha, simulacao, versaoEsperada);
         if (simulacao.getStatusAceite() != StatusAceiteSimulacao.ACEITA || simulacao.getQtdVendasComImpedimento() > 0) {
@@ -658,8 +682,12 @@ public class CampanhaService {
     }
 
     @Transactional
-    public void cancelarProposta(Long id) {
+    public void cancelarProposta(Long id) { cancelarProposta(id, null, false); }
+
+    @Transactional
+    public void cancelarProposta(Long id, Long revisao, boolean exigirRevisao) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id).orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
+        validarRevisaoEdicao(campanha, revisao, exigirRevisao);
         CampanhaVersao proposta = campanha.getVersaoProposta();
         if (proposta == null) return;
         invalidarAceiteCampanha(campanha, "Simulação invalidada pelo cancelamento da proposta.");
@@ -673,7 +701,8 @@ public class CampanhaService {
                     .max(Comparator.comparing(Simulacao::getAceitoEm, Comparator.nullsFirst(Comparator.naturalOrder())))
                     .orElse(null));
         }
-        campanhaVersaoRepository.save(proposta); campanhaRepository.save(campanha);
+        campanha.setAtualizadoEm(OffsetDateTime.now());
+        campanhaVersaoRepository.save(proposta); campanhaRepository.saveAndFlush(campanha);
     }
 
     private CampanhaVersao criarVersao(Campanha c, int numero, com.bugbusters.backend.model.StatusVersaoCampanha status, PeriodoCalculado p, CampanhaRequest r) {
@@ -684,10 +713,94 @@ public class CampanhaService {
         int numero = campanhaVersaoRepository.findFirstByCampanhaIdOrderByNumeroDesc(c.getId())
                 .map(v -> v.getNumero() + 1).orElse(1);
         CampanhaVersao v = new CampanhaVersao(); v.setCampanha(c); v.setNumero(numero); v.setStatus(StatusVersaoCampanha.PROPOSTA);
+        v.setVersaoAnterior(base);
+        // Published rules are already available for direct editing; no new interpretation is required to open them.
+        if (base != null) { v.setUltimaEtapa(2); v.setEtapaMaisAvancada(2); }
         v.setTitulo(base != null ? base.getTitulo() : c.getTitulo());
         v.setTextoOriginal(base != null ? base.getTextoOriginal() : c.getTextoOriginal());
         v.setDataInicio(base != null ? base.getDataInicio() : c.getDataInicio());
         v.setDataFim(base != null ? base.getDataFim() : c.getDataFim()); return v;
+    }
+
+
+    private boolean aceiteDaVersaoExibida(Campanha c) {
+        return c.getSimulacaoAceita() != null && (c.getVersaoProposta() == null ||
+                Objects.equals(c.getSimulacaoAceita().getCampanhaVersao(), c.getVersaoProposta()));
+    }
+
+    private void validarEstadoEditavel(Campanha c) {
+        if ((c.getEstado() != EstadoCampanha.DRAFT && c.getVersaoVigente() == null) ||
+                (c.getEstado() != EstadoCampanha.DRAFT && c.getEstado() != EstadoCampanha.ATIVA && c.getEstado() != EstadoCampanha.INATIVA))
+            throw new BusinessException("Esta campanha está encerrada e disponível somente para consulta.");
+    }
+
+    private void validarRevisaoEdicao(Campanha c, Long revisao, boolean exigir) {
+        if ((exigir && c.getVersaoVigente() != null && revisao == null) ||
+                (revisao != null && !Objects.equals(revisao, c.getVersaoControle())))
+            throw new ResourceConflictException("A campanha ou a proposta foi alterada. Recarregue antes de confirmar; suas alterações não foram aplicadas.");
+    }
+
+    private String motivoBloqueioEdicao(Campanha c) {
+        if (c.getEstado() == EstadoCampanha.CONCLUIDA || c.getEstado() == EstadoCampanha.CANCELADA)
+            return "Campanha encerrada. O histórico permanece disponível para consulta.";
+        if (fechamentoService == null) return null;
+        java.util.SortedSet<java.time.YearMonth> meses = new java.util.TreeSet<>();
+        LocalDate[] datas = {c.getDataInicio(), c.getDataFim(), c.inicioParaRevisao(), c.fimParaRevisao()};
+        for (int i = 0; i < datas.length; i += 2) {
+            if (datas[i] == null || datas[i + 1] == null) continue;
+            for (var mes = java.time.YearMonth.from(datas[i]); !mes.isAfter(java.time.YearMonth.from(datas[i + 1])); mes = mes.plusMonths(1)) meses.add(mes);
+        }
+        for (var mes : meses) {
+            var status = fechamentoService.consultarStatusCompetencia(mes.toString());
+            if (status != null && status.bloqueada()) return "A competência " + mes + " possui fechamento concluído ou em andamento. Edição e publicação bloqueadas.";
+        }
+        return null;
+    }
+
+    @Transactional
+    public CampanhaResponse iniciarProposta(Long id, Long revisao) {
+        Campanha c = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada."));
+        validarRevisaoEdicao(c, revisao, true);
+        validarEstadoEditavel(c);
+        if (fechamentoService != null) fechamentoService.validarPeriodosDisponiveis(c.getDataInicio(), c.getDataFim(), c.inicioParaRevisao(), c.fimParaRevisao());
+        if (c.getVersaoProposta() != null || c.getVersaoVigente() == null) return mapearParaResponse(c, regrasDaVersaoExibida(c));
+        var base = c.getVersaoVigente();
+        var proposta = campanhaVersaoRepository.save(copiarComoProposta(c, base));
+        c.setVersaoProposta(proposta);
+        List<Regra> copias = new ArrayList<>();
+        for (Regra regra : regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(base.getId())) {
+            var r = mapearRegraHistorica(regra);
+            var item = new RegraItemRequest(r.blocoId() != null && !r.blocoId().isBlank() ? r.blocoId() : r.identificadorLogico() != null ? r.identificadorLogico() : "persisted-" + r.id(), r.trechoOrigem(), r.nome(), r.canal(), r.codMarca(), r.descrMarca(),
+                    r.codLoja(), r.codCargo(), r.descriCargo(), r.matricula(), r.valorMinimo(), r.minInclusivo(), r.valorMaximo(), r.maxInclusivo(),
+                    r.tipoOperacao(), r.valorAjuste(), r.tipoBaseReferencia(), r.taxaBaseConsultada(), r.descricaoReferencia(), r.taxa(),
+                    r.explicacao(), r.pythonEquivalente(), List.of(), r.completa(), StatusRegra.DRAFT,
+                    r.bonusPercentual(), r.bonusValorFixo(), r.rastreabilidade());
+            Regra copia = converterParaEntidade(item, c, new PeriodoCalculado(base.getDataInicio(), base.getDataFim()), EstadoCampanha.DRAFT, copias.size() + 1);
+            copia.setPendencias(regra.getPendencias());
+            copia.setCampanhaVersao(proposta); copias.add(copia);
+        }
+        regraRepository.saveAll(copias);
+        c.setAtualizadoEm(OffsetDateTime.now()); campanhaRepository.saveAndFlush(c);
+        return mapearParaResponse(c, copias);
+    }
+
+    @Transactional
+    public CampanhaResponse alterarEstadoComRevisao(Long id, AlterarEstadoCampanhaRequest request, Long revisao) {
+        if (request.estado() == EstadoCampanha.ATIVA) {
+            Campanha c = campanhaRepository.findByIdAndRemovidoEmIsNull(id).orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada."));
+            if (fechamentoService != null) fechamentoService.validarPeriodosDisponiveis(c.getDataInicio(), c.getDataFim(), c.inicioParaRevisao(), c.fimParaRevisao());
+            validarRevisaoEdicao(c, revisao, true);
+        }
+        return alterarEstado(id, request);
+    }
+
+    @Transactional
+    public CampanhaResponse ativarRevisao(Long id, Integer vigente, Long revisao) {
+        Campanha c = campanhaRepository.findByIdAndRemovidoEmIsNull(id).orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada."));
+        if (fechamentoService != null) fechamentoService.validarPeriodosDisponiveis(c.getDataInicio(), c.getDataFim(), c.inicioParaRevisao(), c.fimParaRevisao());
+        validarRevisaoEdicao(c, revisao, true);
+        return ativarCampanha(id, vigente);
     }
 
     private void garantirCampanhaExiste(Long campanhaId) {

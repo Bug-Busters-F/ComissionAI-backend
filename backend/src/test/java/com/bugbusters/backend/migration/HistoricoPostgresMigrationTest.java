@@ -52,6 +52,20 @@ class HistoricoPostgresMigrationTest {
         }
         return (UUID) values.get("id");
     }
+    @Test void registraOrigemDePropostaExistenteSemAlterarPublicacao() throws Exception {
+        String schema=schema(); flyway(schema,"26").migrate();
+        try (var c=connection(schema); var s=c.createStatement()) {
+            s.execute("INSERT INTO tb_campanha(id,titulo,texto_original,data_inicio,data_fim,estado) VALUES (990,'Vigente','Texto','2040-01-01','2040-01-31','ATIVA')");
+            s.execute("INSERT INTO tb_campanha_versao(id,campanha_id,numero,status,titulo,texto_original,data_inicio,data_fim) VALUES (991,990,1,'PUBLICADA','Vigente','Texto','2040-01-01','2040-01-31'), (992,990,2,'PROPOSTA','Proposta','Texto editado','2040-01-01','2040-01-31')");
+            s.execute("UPDATE tb_campanha SET versao_vigente_id=991,versao_proposta_id=992 WHERE id=990");
+        }
+        var all=flyway(schema,"27"); assertThat(all.migrate().migrationsExecuted).isEqualTo(1); all.validate();
+        try (var c=connection(schema)) {
+            assertThat(scalar(c,"SELECT versao_anterior_id FROM tb_campanha_versao WHERE id=992")).isEqualTo("991");
+            assertThat(scalar(c,"SELECT titulo FROM tb_campanha_versao WHERE id=991")).isEqualTo("Vigente");
+        }
+    }
+
     @Test void atualizaV25ParaV26PreservandoFechamentoEHistorico() throws Exception {
         String schema=schema(); flyway(schema,"25").migrate();
         UUID id=UUID.randomUUID();
