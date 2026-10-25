@@ -131,6 +131,12 @@ public class CampanhaController {
         return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request));
     }
 
+    @PatchMapping("/{id}/progresso")
+    public ResponseEntity<com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO> atualizarProgresso(
+            @PathVariable Long id, @Valid @RequestBody com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO request) {
+        return ResponseEntity.ok(campanhaService.atualizarProgresso(id, request));
+    }
+
     @Operation(summary = "Cancelar proposta de alteração sem afetar a versão vigente")
     @DeleteMapping("/{id}/proposta")
     public ResponseEntity<Void> cancelarProposta(@PathVariable Long id) {

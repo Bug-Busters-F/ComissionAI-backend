@@ -7,6 +7,13 @@ import java.time.OffsetDateTime;
 @Entity
 @Table(name = "tb_campanha_versao", uniqueConstraints = @UniqueConstraint(name = "uk_campanha_versao_numero", columnNames = {"campanha_id", "numero"}))
 public class CampanhaVersao {
+    @Column(name = "ultima_etapa", nullable = false) private Integer ultimaEtapa = 1;
+    @Column(name = "etapa_mais_avancada", nullable = false) private Integer etapaMaisAvancada = 1;
+    public Integer getUltimaEtapa() { return ultimaEtapa; }
+    public void setUltimaEtapa(Integer value) { ultimaEtapa = value; }
+    public Integer getEtapaMaisAvancada() { return etapaMaisAvancada; }
+    public void setEtapaMaisAvancada(Integer value) { etapaMaisAvancada = value; }
+
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "campanha_id", nullable = false) private Campanha campanha;
     @Column(nullable = false) private Integer numero;
