@@ -10,6 +10,11 @@ import java.time.OffsetDateTime;
 @Entity
 @Table(name = "tb_regra")
 public class Regra {
+    @Column(name = "rastreabilidade_json", columnDefinition = "TEXT")
+    private String rastreabilidadeJson;
+    public String getRastreabilidadeJson() { return rastreabilidadeJson; }
+    public void setRastreabilidadeJson(String value) { rastreabilidadeJson = value; }
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

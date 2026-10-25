@@ -14,5 +14,8 @@ public enum OrigemCampo {
     BASE_DADOS,
 
     @Schema(description = "Atribuído por regra ou valor padrão do sistema quando omitido na instrução")
+    EDICAO_MANUAL,
+    OPERACAO_CALCULADA,
+    BASE_COMISSAO,
     PADRAO_SISTEMA
 }

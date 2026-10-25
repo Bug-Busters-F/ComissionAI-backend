@@ -92,6 +92,14 @@ class CampanhaMultiplasRegrasTest {
                 .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite inicial\"}"))
                 .andExpect(status().isOk());
 
+        // Navegar na revisão não substitui regras nem invalida o aceite formal.
+        mockMvc.perform(patch("/api/v1/campanhas/" + id + "/progresso").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ultimaEtapa\":4,\"etapaMaisAvancada\":4,\"versaoProposta\":1}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/campanhas/" + id + "/conferencia-simulacao"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.aptaParaAtivacao", is(true)))
+                .andExpect(jsonPath("$.statusAceite", is("ACEITA")));
+
         mockMvc.perform(patch("/api/v1/campanhas/" + id + "/estado").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"estado\":\"ATIVA\"}"))
                 .andExpect(status().isOk())

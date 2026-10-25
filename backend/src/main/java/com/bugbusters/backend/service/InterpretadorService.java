@@ -504,7 +504,16 @@ public class InterpretadorService {
 
         String[] artefatos = gerarArtefatos(candidata, request.camposEditados());
         String novaExplicacao = artefatos[0];
-        String novoPython = artefatos[1];
+        // Código de leitura gerado dos mesmos campos e arredondamento do motor.
+        String novoPython = artefatoService.gerarPythonEquivalente(candidata);
+        Map<String, OrigemCampo> origens = new java.util.LinkedHashMap<>(p.origensPorCampo());
+        request.camposEditados().forEach(campo -> origens.put(campo, OrigemCampo.EDICAO_MANUAL));
+        if (operacao != null && operacao.tipoOperacao() != TipoOperacaoBase.DEFINIR_TAXA) origens.put("taxa", OrigemCampo.OPERACAO_CALCULADA);
+        List<ReferenciaConsultadaDTO> referencias = new java.util.ArrayList<>(p.referenciasConsultadas().stream()
+                .filter(ref -> !"BASE_COMISS".equals(ref.tipo())).toList());
+        if (operacao != null && operacao.referenciaBase() != null && operacao.referenciaBase().taxaBaseConsultada() != null) {
+            referencias.add(new ReferenciaConsultadaDTO("BASE_COMISS", String.valueOf(ymRef), operacao.referenciaBase().descricao()));
+        }
 
         return new AtualizarArtefatosResponse(
                 p.blocoId(),
@@ -512,7 +521,7 @@ public class InterpretadorService {
                 novaExplicacao,
                 novoPython,
                 pendencias,
-                completa
+                completa, operacao, origens, referencias
         );
     }
 
