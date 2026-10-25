@@ -33,6 +33,19 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
         }
 
+        @ExceptionHandler({org.springframework.web.bind.MissingServletRequestParameterException.class,
+                org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
+        public ResponseEntity<ApiErrorResponse> handleInvalidParameter(Exception ex, HttpServletRequest request) {
+                String campo = ex instanceof org.springframework.web.bind.MissingServletRequestParameterException missing
+                        ? missing.getParameterName()
+                        : ((org.springframework.web.method.annotation.MethodArgumentTypeMismatchException) ex).getName();
+                ApiErrorResponse error = new ApiErrorResponse(
+                        OffsetDateTime.now(), HttpStatus.BAD_REQUEST.value(), "Bad Request",
+                        "Parâmetro obrigatório ausente ou em formato inválido.", request.getRequestURI(),
+                        List.of(new CampoInvalidoDTO(campo, "Informe um valor válido para este parâmetro.")));
+                return ResponseEntity.badRequest().body(error);
+        }
+
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ApiErrorResponse> handleValidationException(
                         MethodArgumentNotValidException ex, HttpServletRequest request) {

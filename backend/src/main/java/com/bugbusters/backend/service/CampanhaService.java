@@ -63,6 +63,7 @@ public class CampanhaService {
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
         }
+        validarIdentificadores(request.regras());
         validarFaixas(request.regras());
 
         boolean possuiIncompleta = request.regras().stream().anyMatch(this::isRegraIncompleta);
@@ -208,6 +209,7 @@ public class CampanhaService {
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
         }
+        validarIdentificadores(request.regras());
         validarFaixas(request.regras());
 
         if (request.estado() == EstadoCampanha.ATIVA) {
@@ -331,6 +333,9 @@ public class CampanhaService {
         r.setBonusValorFixo(item.bonusValorFixo());
 
         r.setBlocoId(item.blocoId());
+        // blocoId é estável entre reinterpretações; para regras sem bloco, cria uma chave permanente.
+        r.setIdentificadorLogico(item.blocoId() != null && !item.blocoId().isBlank()
+                ? item.blocoId().trim() : UUID.randomUUID().toString());
         r.setTrechoOrigem(item.trechoOrigem());
         r.setExplicacao(item.explicacao());
         r.setPythonEquivalente(item.pythonEquivalente());
@@ -559,6 +564,10 @@ public class CampanhaService {
         }
         proposta.setStatus(com.bugbusters.backend.model.StatusVersaoCampanha.PUBLICADA);
         proposta.setPublicadoEm(agora);
+        proposta.setVersaoAnterior(anterior);
+        proposta.setPublicadoPor(simulacao.getAceitoPor() != null && !simulacao.getAceitoPor().isBlank()
+                ? simulacao.getAceitoPor() : "aplicacao");
+        proposta.setSimulacaoAceita(simulacao);
         for (Regra r : regras) { r.setStatus(StatusRegra.ATIVA); r.setAtualizadoEm(agora); }
         regraRepository.saveAll(regras);
         campanha.setSimulacaoAceita(simulacao);
@@ -569,6 +578,49 @@ public class CampanhaService {
         campanha.setEstado(EstadoCampanha.ATIVA); campanha.setAtualizadoEm(agora);
         campanhaVersaoRepository.save(proposta);
         campanhaRepository.saveAndFlush(campanha); // @Version garante compare-and-swap no commit
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.bugbusters.backend.dto.campanha.VersaoCampanhaResumoResponse> listarHistorico(Long campanhaId) {
+        garantirCampanhaExiste(campanhaId);
+        return campanhaVersaoRepository.findAllByCampanhaIdOrderByNumeroDesc(campanhaId).stream()
+                .filter(v -> v.getStatus() == StatusVersaoCampanha.PUBLICADA)
+                .map(v -> new com.bugbusters.backend.dto.campanha.VersaoCampanhaResumoResponse(
+                        v.getNumero(), v.getVersaoAnterior() != null ? v.getVersaoAnterior().getNumero() : null,
+                        v.getPublicadoPor(), v.getPublicadoEm(),
+                        v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getId() : null,
+                        v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getProtocolo() : null))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse buscarVersaoPublicada(Long campanhaId, Integer numero) {
+        CampanhaVersao v = obterVersaoPublicada(campanhaId, numero);
+        List<com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse.RegraHistoricaDTO> regras =
+                regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(v.getId()).stream()
+                        .map(this::mapearRegraHistorica).toList();
+        return new com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse(
+                campanhaId, v.getNumero(), v.getVersaoAnterior() != null ? v.getVersaoAnterior().getNumero() : null,
+                v.getTitulo(), v.getTextoOriginal(), v.getDataInicio(), v.getDataFim(), v.getPublicadoPor(), v.getPublicadoEm(),
+                v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getId() : null,
+                v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getProtocolo() : null, regras);
+    }
+
+    @Transactional(readOnly = true)
+    public com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse compararVersoes(Long campanhaId, Integer versaoBase, Integer versaoComparada) {
+        CampanhaVersao base = obterVersaoPublicada(campanhaId, versaoBase);
+        CampanhaVersao atual = obterVersaoPublicada(campanhaId, versaoComparada);
+        List<com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoCampoDTO> campanha = new ArrayList<>();
+        adicionarAlteracao(campanha, "titulo", base.getTitulo(), atual.getTitulo());
+        adicionarAlteracao(campanha, "textoOriginal", base.getTextoOriginal(), atual.getTextoOriginal());
+        adicionarAlteracao(campanha, "dataInicio", base.getDataInicio(), atual.getDataInicio());
+        adicionarAlteracao(campanha, "dataFim", base.getDataFim(), atual.getDataFim());
+        Map<String, Regra> regrasBase = indexarRegras(base.getId());
+        Map<String, Regra> regrasAtuais = indexarRegras(atual.getId());
+        Set<String> chaves = new TreeSet<>(); chaves.addAll(regrasBase.keySet()); chaves.addAll(regrasAtuais.keySet());
+        List<com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO> regras = new ArrayList<>();
+        for (String chave : chaves) regras.add(compararRegra(chave, regrasBase.get(chave), regrasAtuais.get(chave)));
+        return new com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse(campanhaId, versaoBase, versaoComparada, campanha, regras);
     }
 
     @Transactional
@@ -603,6 +655,92 @@ public class CampanhaService {
         v.setDataInicio(base != null ? base.getDataInicio() : c.getDataInicio());
         v.setDataFim(base != null ? base.getDataFim() : c.getDataFim()); return v;
     }
+
+    private void garantirCampanhaExiste(Long campanhaId) {
+        if (!campanhaRepository.existsById(campanhaId)) {
+            throw new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada.");
+        }
+    }
+
+    private CampanhaVersao obterVersaoPublicada(Long campanhaId, Integer numero) {
+        garantirCampanhaExiste(campanhaId);
+        CampanhaVersao v = campanhaVersaoRepository.findByCampanhaIdAndNumero(campanhaId, numero)
+                .orElseThrow(() -> new ResourceNotFoundException("Versão " + numero + " não encontrada para a campanha " + campanhaId + "."));
+        if (v.getStatus() != StatusVersaoCampanha.PUBLICADA) {
+            throw new ResourceNotFoundException("A versão " + numero + " não foi publicada e não pertence ao histórico.");
+        }
+        return v;
+    }
+
+    private com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse.RegraHistoricaDTO mapearRegraHistorica(Regra r) {
+        return new com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse.RegraHistoricaDTO(
+                r.getId(), r.getIdentificadorLogico(), r.getBlocoId(), r.getTrechoOrigem(), r.getNome(), r.getCanal(),
+                r.getCodMarca(), r.getDescrMarca(), r.getCodLoja(), r.getCodCargo(), r.getDescriCargo(), r.getMatricula(),
+                r.getValorMinimo(), r.getMinInclusivo(), r.getValorMaximo(), r.getMaxInclusivo(), r.getTipoOperacao(),
+                r.getValorAjuste(), r.getTipoBaseReferencia(), r.getTaxaBaseConsultada(), r.getDescricaoReferencia(),
+                r.getTaxa(), r.getExplicacao(), r.getPythonEquivalente(), r.getPendencias(), r.getCompleta(),
+                r.getBonusPercentual(), r.getBonusValorFixo(), RastreabilidadeRegraService.ler(r));
+    }
+
+    private void validarIdentificadores(List<RegraItemRequest> regras) {
+        Set<String> blocos = new HashSet<>();
+        for (RegraItemRequest regra : regras) {
+            if (regra.blocoId() != null && !regra.blocoId().isBlank() && !blocos.add(regra.blocoId().trim())) {
+                throw new BusinessException("Cada regra deve ter um identificador de bloco distinto para preservar o histórico.");
+            }
+        }
+    }
+
+    private Map<String, Regra> indexarRegras(Long versaoId) {
+        return regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versaoId).stream()
+                .collect(java.util.stream.Collectors.toMap(Regra::getIdentificadorLogico, r -> r, (a, b) -> {
+                    throw new BusinessException("Esta versão contém identificadores de regra duplicados e não pode ser comparada sem correção.");
+                }, LinkedHashMap::new));
+    }
+
+    private com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO compararRegra(String chave, Regra anterior, Regra atual) {
+        if (anterior == null) return new com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO(
+                chave, com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.TipoAlteracao.ADICIONADA, List.of());
+        if (atual == null) return new com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO(
+                chave, com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.TipoAlteracao.REMOVIDA, List.of());
+        List<com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoCampoDTO> alteracoes = new ArrayList<>();
+        adicionarAlteracao(alteracoes, "blocoId", anterior.getBlocoId(), atual.getBlocoId());
+        adicionarAlteracao(alteracoes, "trechoOrigem", anterior.getTrechoOrigem(), atual.getTrechoOrigem());
+        adicionarAlteracao(alteracoes, "nome", anterior.getNome(), atual.getNome());
+        adicionarAlteracao(alteracoes, "canal", anterior.getCanal(), atual.getCanal());
+        adicionarAlteracao(alteracoes, "codMarca", anterior.getCodMarca(), atual.getCodMarca());
+        adicionarAlteracao(alteracoes, "descrMarca", anterior.getDescrMarca(), atual.getDescrMarca());
+        adicionarAlteracao(alteracoes, "codLoja", anterior.getCodLoja(), atual.getCodLoja());
+        adicionarAlteracao(alteracoes, "codCargo", anterior.getCodCargo(), atual.getCodCargo());
+        adicionarAlteracao(alteracoes, "descriCargo", anterior.getDescriCargo(), atual.getDescriCargo());
+        adicionarAlteracao(alteracoes, "matricula", anterior.getMatricula(), atual.getMatricula());
+        adicionarAlteracao(alteracoes, "valorMinimo", anterior.getValorMinimo(), atual.getValorMinimo());
+        adicionarAlteracao(alteracoes, "minInclusivo", anterior.getMinInclusivo(), atual.getMinInclusivo());
+        adicionarAlteracao(alteracoes, "valorMaximo", anterior.getValorMaximo(), atual.getValorMaximo());
+        adicionarAlteracao(alteracoes, "maxInclusivo", anterior.getMaxInclusivo(), atual.getMaxInclusivo());
+        adicionarAlteracao(alteracoes, "tipoOperacao", anterior.getTipoOperacao(), atual.getTipoOperacao());
+        adicionarAlteracao(alteracoes, "valorAjuste", anterior.getValorAjuste(), atual.getValorAjuste());
+        adicionarAlteracao(alteracoes, "tipoBaseReferencia", anterior.getTipoBaseReferencia(), atual.getTipoBaseReferencia());
+        adicionarAlteracao(alteracoes, "taxaBaseConsultada", anterior.getTaxaBaseConsultada(), atual.getTaxaBaseConsultada());
+        adicionarAlteracao(alteracoes, "descricaoReferencia", anterior.getDescricaoReferencia(), atual.getDescricaoReferencia());
+        adicionarAlteracao(alteracoes, "taxa", anterior.getTaxa(), atual.getTaxa());
+        adicionarAlteracao(alteracoes, "explicacao", anterior.getExplicacao(), atual.getExplicacao());
+        adicionarAlteracao(alteracoes, "pythonEquivalente", anterior.getPythonEquivalente(), atual.getPythonEquivalente());
+        adicionarAlteracao(alteracoes, "pendencias", anterior.getPendencias(), atual.getPendencias());
+        adicionarAlteracao(alteracoes, "bonusPercentual", anterior.getBonusPercentual(), atual.getBonusPercentual());
+        adicionarAlteracao(alteracoes, "bonusValorFixo", anterior.getBonusValorFixo(), atual.getBonusValorFixo());
+        adicionarAlteracao(alteracoes, "completa", anterior.getCompleta(), atual.getCompleta());
+        adicionarAlteracao(alteracoes, "rastreabilidade", RastreabilidadeRegraService.ler(anterior), RastreabilidadeRegraService.ler(atual));
+        return new com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO(chave,
+                alteracoes.isEmpty() ? com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.TipoAlteracao.SEM_ALTERACAO
+                        : com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.TipoAlteracao.ALTERADA, alteracoes);
+    }
+
+    private void adicionarAlteracao(List<com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoCampoDTO> destino,
+                                    String campo, Object anterior, Object atual) {
+        if (!Objects.equals(anterior, atual)) destino.add(new com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoCampoDTO(campo, anterior, atual));
+    }
+
     private List<Regra> regrasDaVersaoExibida(Campanha c) {
         CampanhaVersao v = c.versaoParaRevisao();
         return v != null ? regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(v.getId()) : regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(c.getId());
