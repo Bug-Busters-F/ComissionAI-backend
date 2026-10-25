@@ -87,7 +87,8 @@ class CampanhaServiceTest {
         assertThat(response.estado()).isEqualTo(EstadoCampanha.DRAFT);
         assertThat(response.regras()).hasSize(1);
         assertThat(response.regras().get(0).status()).isEqualTo(StatusRegra.DRAFT);
-        verify(campanhaRepository, times(2)).save(any(Campanha.class));
+        verify(campanhaRepository).save(any(Campanha.class));
+        verify(campanhaRepository).saveAndFlush(any(Campanha.class));
         verify(regraRepository).saveAll(anyList());
     }
 

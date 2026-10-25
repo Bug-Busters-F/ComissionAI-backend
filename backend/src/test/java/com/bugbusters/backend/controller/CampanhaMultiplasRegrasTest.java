@@ -111,7 +111,7 @@ class CampanhaMultiplasRegrasTest {
                  "regras":[{"codLoja":75,"taxa":0.0350}]}
                 """;
         // A proposta contém regras DRAFT, enquanto a versão publicada continua ATIVA.
-        mockMvc.perform(put("/api/v1/campanhas/" + id).contentType(MediaType.APPLICATION_JSON).content(nova))
+        mockMvc.perform(put("/api/v1/campanhas/" + id).header("X-Campanha-Revisao", new JsonMapper().readTree(mockMvc.perform(get("/api/v1/campanhas/"+id)).andReturn().getResponse().getContentAsString()).path("revisaoControle").asLong()).contentType(MediaType.APPLICATION_JSON).content(nova))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado", is("ATIVA")))
                 .andExpect(jsonPath("$.versaoVigente", is(1)))
@@ -133,7 +133,7 @@ class CampanhaMultiplasRegrasTest {
                 .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite da revisão\"}"))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/campanhas/" + id + "/ativar")
+        mockMvc.perform(post("/api/v1/campanhas/" + id + "/ativar").header("X-Campanha-Revisao", new JsonMapper().readTree(mockMvc.perform(get("/api/v1/campanhas/"+id)).andReturn().getResponse().getContentAsString()).path("revisaoControle").asLong())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":1}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.regras[0].status", is("ATIVA")));

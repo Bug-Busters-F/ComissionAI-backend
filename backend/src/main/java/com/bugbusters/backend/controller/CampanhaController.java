@@ -61,8 +61,9 @@ public class CampanhaController {
     @PatchMapping("/{id}/estado")
     public ResponseEntity<CampanhaResponse> alterarEstado(
             @PathVariable Long id,
-            @Valid @RequestBody AlterarEstadoCampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.alterarEstado(id, request));
+            @Valid @RequestBody AlterarEstadoCampanhaRequest request,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.alterarEstadoComRevisao(id, request, revisao));
     }
 
     @Operation(
@@ -77,8 +78,9 @@ public class CampanhaController {
     @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping("/{id}/ativar")
     public ResponseEntity<CampanhaResponse> ativarCampanha(@PathVariable Long id,
-            @RequestBody(required = false) AtivarCampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.ativarCampanha(id, request != null ? request.versaoEsperada() : null));
+            @RequestBody(required = false) AtivarCampanhaRequest request,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.ativarRevisao(id, request != null ? request.versaoEsperada() : null, revisao));
     }
 
     @Operation(
@@ -127,8 +129,9 @@ public class CampanhaController {
 
     @Operation(summary = "Atualizar campanha e coleção de regras vinculadas", description = "Atualiza dados da campanha e substitui transacionalmente a coleção de regras.")
     @PutMapping("/{id}")
-    public ResponseEntity<CampanhaResponse> atualizarCampanha(@PathVariable Long id, @Valid @RequestBody CampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request));
+    public ResponseEntity<CampanhaResponse> atualizarCampanha(@PathVariable Long id, @Valid @RequestBody CampanhaRequest request,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request, revisao, true));
     }
 
     @PatchMapping("/{id}/progresso")
@@ -137,10 +140,17 @@ public class CampanhaController {
         return ResponseEntity.ok(campanhaService.atualizarProgresso(id, request));
     }
 
+    @PostMapping("/{id}/proposta")
+    public ResponseEntity<CampanhaResponse> iniciarProposta(@PathVariable Long id,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.iniciarProposta(id, revisao));
+    }
+
     @Operation(summary = "Cancelar proposta de alteração sem afetar a versão vigente")
     @DeleteMapping("/{id}/proposta")
-    public ResponseEntity<Void> cancelarProposta(@PathVariable Long id) {
-        campanhaService.cancelarProposta(id);
+    public ResponseEntity<Void> cancelarProposta(@PathVariable Long id,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        campanhaService.cancelarProposta(id, revisao, true);
         return ResponseEntity.noContent().build();
     }
 
