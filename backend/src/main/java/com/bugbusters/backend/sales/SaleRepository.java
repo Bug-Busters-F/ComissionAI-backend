@@ -19,6 +19,16 @@ import jakarta.persistence.LockModeType;
 
 @Repository
 public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificationExecutor<Sale> {
+    @org.springframework.data.jpa.repository.Query("""
+        select s from Sale s
+        left join fetch s.brand left join fetch s.store
+        left join fetch s.registration r left join fetch r.position left join fetch r.store
+        where s.saleDate between :inicio and :fim
+        order by s.saleDate, s.id
+        """)
+    java.util.List<Sale> referencias(@org.springframework.data.repository.query.Param("inicio") java.time.LocalDate inicio,
+                                    @org.springframework.data.repository.query.Param("fim") java.time.LocalDate fim);
+
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
 

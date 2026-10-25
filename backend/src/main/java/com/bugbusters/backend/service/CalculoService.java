@@ -387,6 +387,11 @@ public class CalculoService {
         return processarCompetencia(competenciaStr, recalcular, null, null);
     }
 
+    @Transactional
+    public CalculoCompetenciaResponseDTO calcularPorCompetenciaComProgresso(String competencia, boolean recalcular, java.util.function.IntConsumer progresso) {
+        return processarCompetencia(competencia, recalcular, null, null, progresso);
+    }
+
     /**
      * Processa a apuração oficial do fechamento final da competência (BACK-11).
      * Força o recálculo com a versão vigente mais recente para todas as vendas do período,
@@ -403,6 +408,11 @@ public class CalculoService {
             UUID fechamentoId,
             String executadoPor
     ) {
+        return processarCompetencia(competenciaStr, recalcular, fechamentoId, executadoPor, null);
+    }
+
+    private CalculoCompetenciaResponseDTO processarCompetencia(String competenciaStr, boolean recalcular,
+            UUID fechamentoId, String executadoPor, java.util.function.IntConsumer progresso) {
         if (competenciaStr == null || competenciaStr.isBlank()) {
             throw new BusinessException("A competência é obrigatória para o cálculo em lote.");
         }
@@ -462,6 +472,7 @@ public class CalculoService {
         List<LogCalculoImutavel> logsParaSalvar = new ArrayList<>();
 
         for (Sale vendaPersistida : vendas) {
+            try {
             Sale sale = recalcular ? bloquearVenda(vendaPersistida) : vendaPersistida;
             UUID idVenda = sale.getId();
             String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
@@ -565,6 +576,9 @@ public class CalculoService {
             sucessos.add(toItem(resultado));
             totalVendasCalculadas = totalVendasCalculadas.add(resultado.getValorVenda());
             totalComissoesCalculadas = totalComissoesCalculadas.add(resultado.getValorComissao());
+            } finally {
+                if (progresso != null) progresso.accept(sucessos.size() + impedimentos.size());
+            }
         }
 
         // Persistência em blocos
