@@ -274,92 +274,50 @@ public class ArtefatoExplicativoService {
             sb.append(".");
         }
 
+        if (proposta.bonusPercentual() != null) sb.append(" Bônus percentual por venda: ").append(formatarTaxa(proposta.bonusPercentual())).append(".");
+        if (proposta.bonusValorFixo() != null) sb.append(" Bônus fixo por venda: R$ ").append(proposta.bonusValorFixo().toPlainString()).append(".");
         return sb.toString();
     }
 
     /**
      * Gera o código Python equivalente para simulação e execução determinística da regra.
      */
-    public String gerarPythonEquivalente(PropostaRegraDTO proposta) {
-        if (proposta == null) {
-            return "# Proposta de regra vazia";
-        }
-
-        BigDecimal taxaEfetiva = proposta.taxaFinal() != null ? proposta.taxaFinal() : calcularTaxaEfetiva(proposta.operacaoBase());
-        String taxaStr = (taxaEfetiva != null) ? taxaEfetiva.toPlainString() : "0.0000";
-
-        StringBuilder py = new StringBuilder();
-        py.append("def calcular_comissao(venda: dict) -> float | None:\n");
-        py.append("    \"\"\"\n");
-        py.append("    Função determinística equivalente para cálculo de comissão da proposta.\n");
-        py.append("    Bloco ID: ").append(proposta.blocoId() != null ? proposta.blocoId() : "N/A").append("\n");
-        py.append("    \"\"\"\n");
-
-        // 1. Checagem de vigência
-        PeriodoVigenciaDTO vig = proposta.vigencia();
+    public String gerarPythonEquivalente(PropostaRegraDTO p) {
+        if (p == null || p.taxaFinal() == null) return null;
+        StringBuilder py = new StringBuilder("# Python equivalente desta regra; exibido para conferência, não executado pelo sistema.\nfrom decimal import Decimal, ROUND_HALF_UP\n\ndef calcular_comissao(venda):\n");
+        PeriodoVigenciaDTO vig = p.vigencia();
         if (vig != null && vig.dataInicio() != null && vig.dataFim() != null) {
-            py.append("    # Validação de vigência temporal\n");
-            py.append("    data_venda = str(venda.get('data_venda', ''))\n");
-            py.append("    if not ('").append(vig.dataInicio()).append("' <= data_venda <= '").append(vig.dataFim()).append("'):\n");
-            py.append("        return None\n\n");
+            py.append("    data_venda = str(venda.get('data_venda', ''))[:10]\n    if not ('").append(vig.dataInicio()).append("' <= data_venda <= '").append(vig.dataFim()).append("'):\n        return None\n");
         }
-
-        // 2. Filtros de público
-        FiltrosRegraDTO f = proposta.filtros();
+        FiltrosRegraDTO f = p.filtros();
         if (f != null) {
-            py.append("    # Filtros de público-alvo\n");
-            if (f.canal() != null && !f.canal().isBlank()) {
-                py.append("    if venda.get('canal') != '").append(f.canal().toUpperCase()).append("':\n");
-                py.append("        return None\n");
-            }
-            if (f.codMarca() != null) {
-                py.append("    if venda.get('cod_marca') != ").append(f.codMarca()).append(":\n");
-                py.append("        return None\n");
-            }
-            if (f.codLoja() != null) {
-                py.append("    if venda.get('cod_loja') != ").append(f.codLoja()).append(":\n");
-                py.append("        return None\n");
-            }
-            if (f.codCargo() != null) {
-                py.append("    if venda.get('cod_cargo') != ").append(f.codCargo()).append(":\n");
-                py.append("        return None\n");
-            }
-            if (f.matricula() != null && !f.matricula().isBlank()) {
-                py.append("    if venda.get('matricula') != '").append(f.matricula()).append("':\n");
-                py.append("        return None\n");
-            }
-            py.append("\n");
+            filtroPython(py, "canal", f.canal() == null ? null : f.canal().toUpperCase());
+            filtroPython(py, "cod_marca", f.codMarca());
+            if (f.codMarca() == null) filtroPython(py, "descr_marca", f.descrMarca());
+            filtroPython(py, "cod_loja", f.codLoja());
+            filtroPython(py, "cod_cargo", f.codCargo());
+            if (f.codCargo() == null) filtroPython(py, "descri_cargo", f.descriCargo());
+            filtroPython(py, "matricula", f.matricula());
         }
-
-        // 3. Faixa de valor monetário
-        FaixaValorDTO faixa = proposta.condicaoValor();
-        py.append("    # Validação do valor da venda\n");
-        py.append("    valor = venda.get('valor_venda')\n");
-        py.append("    if valor is None or float(valor) <= 0:\n");
-        py.append("        return None\n");
-        py.append("    valor_float = float(valor)\n\n");
-
-        if (faixa != null && faixa.possuiFaixa()) {
-            py.append("    # Faixa de elegibilidade monetária\n");
-            if (faixa.valorMinimo() != null) {
-                String op = Boolean.TRUE.equals(faixa.minInclusivo()) ? "<" : "<=";
-                py.append("    if valor_float ").append(op).append(" ").append(faixa.valorMinimo()).append(":\n");
-                py.append("        return None\n");
-            }
-            if (faixa.valorMaximo() != null) {
-                String op = Boolean.TRUE.equals(faixa.maxInclusivo()) ? ">" : ">=";
-                py.append("    if valor_float ").append(op).append(" ").append(faixa.valorMaximo()).append(":\n");
-                py.append("        return None\n");
-            }
-            py.append("\n");
+        py.append("    valor = Decimal(str(venda['valor_venda']))\n    if valor <= 0:\n        return None\n");
+        FaixaValorDTO faixa = p.condicaoValor();
+        if (faixa != null) {
+            if (faixa.valorMinimo() != null) py.append("    if valor ").append(Boolean.TRUE.equals(faixa.minInclusivo()) ? "<" : "<=").append(" Decimal('").append(faixa.valorMinimo().toPlainString()).append("'):\n        return None\n");
+            if (faixa.valorMaximo() != null) py.append("    if valor ").append(Boolean.TRUE.equals(faixa.maxInclusivo()) ? ">" : ">=").append(" Decimal('").append(faixa.valorMaximo().toPlainString()).append("'):\n        return None\n");
         }
+        py.append("    centavo = Decimal('0.01')\n    taxa_aplicada = Decimal('").append(p.taxaFinal().toPlainString()).append("')\n    comissao = (valor * taxa_aplicada).quantize(centavo, rounding=ROUND_HALF_UP)\n");
+        if (p.bonusPercentual() != null) py.append("    comissao += (valor * Decimal('").append(p.bonusPercentual().toPlainString()).append("')).quantize(centavo, rounding=ROUND_HALF_UP)\n");
+        if (p.bonusValorFixo() != null) py.append("    comissao += Decimal('").append(p.bonusValorFixo().toPlainString()).append("').quantize(centavo, rounding=ROUND_HALF_UP)\n");
+        return py.append("    return comissao\n").toString();
+    }
 
-        // 4. Cálculo final
-        py.append("    # Aplicação da taxa com precisão bancária (HALF_UP, 2 casas)\n");
-        py.append("    taxa_aplicada = ").append(taxaStr).append("\n");
-        py.append("    return round(valor_float * taxa_aplicada, 2)\n");
-
-        return py.toString();
+    private void filtroPython(StringBuilder py, String chave, Object valor) {
+        if (valor == null || valor.toString().isBlank()) return;
+        // JSON strings are valid Python literals for these scalar string values and escape newlines/quotes.
+        String literal;
+        try { literal = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(valor); }
+        catch (Exception e) { throw new IllegalArgumentException("Filtro inválido", e); }
+        py.append("    if venda.get('").append(chave).append("') != ").append(literal).append(":\n        return None\n");
     }
 
     private String formatarTaxa(BigDecimal taxa) {

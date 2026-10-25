@@ -23,7 +23,10 @@ public record AtualizarArtefatosResponse(
         List<PendenciaPropostaDTO> pendencias,
 
         @Schema(description = "Indica se a proposta está completa após a edição", example = "true")
-        Boolean completa
+        Boolean completa,
+        OperacaoBaseDTO operacaoBase,
+        java.util.Map<String, OrigemCampo> origensPorCampo,
+        List<ReferenciaConsultadaDTO> referenciasConsultadas
 ) {
     public AtualizarArtefatosResponse {
         if (pendencias == null) {

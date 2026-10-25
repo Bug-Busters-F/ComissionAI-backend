@@ -344,6 +344,7 @@ public class CampanhaService {
         // Sincronização estrita de vigência com a campanha
         r.setDataInicio(periodo.inicio());
         r.setDataFim(periodo.fim());
+        RastreabilidadeRegraService.aplicar(r, item.rastreabilidade());
 
         if (Boolean.FALSE.equals(r.getCompleta()) || r.getTaxa() == null) {
             r.setStatus(StatusRegra.DRAFT);
@@ -483,7 +484,8 @@ public class CampanhaService {
                 r.getDataFim(),
                 r.getStatus(),
                 r.getBonusPercentual(),
-                r.getBonusValorFixo()
+                r.getBonusValorFixo(),
+                RastreabilidadeRegraService.ler(r)
         )).toList() : List.of();
 
         boolean possuiIncompletas = regrasDTO.stream()
@@ -503,8 +505,30 @@ public class CampanhaService {
                 c.getSimulacaoAceita() != null ? c.getSimulacaoAceita().getId() : null,
                 c.getSimulacaoAceita() != null ? c.getSimulacaoAceita().getStatusAceite() : null,
                 c.getVersaoVigente() != null ? c.getVersaoVigente().getNumero() : null,
-                c.getVersaoProposta() != null ? c.getVersaoProposta().getNumero() : null
+                c.getVersaoProposta() != null ? c.getVersaoProposta().getNumero() : null,
+                c.versaoParaRevisao() != null ? c.versaoParaRevisao().getUltimaEtapa() : 1,
+                c.versaoParaRevisao() != null ? c.versaoParaRevisao().getEtapaMaisAvancada() : 1
         );
+    }
+
+    /** Progresso não altera os dados de negócio nem invalida a simulação aceita. */
+    @Transactional
+    public com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO atualizarProgresso(Long id,
+            com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO request) {
+        Campanha c = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada."));
+        CampanhaVersao v = c.getVersaoProposta();
+        if (c.getEstado() != EstadoCampanha.DRAFT || v == null) throw new BusinessException("Somente rascunhos podem registrar progresso.");
+        if (!Objects.equals(v.getNumero(), request.versaoProposta())) throw new ResourceConflictException("A proposta mudou. Atualize a campanha antes de registrar o progresso.");
+        int etapa = request.ultimaEtapa();
+        if (etapa < 1 || etapa > 4 || request.etapaMaisAvancada() < etapa || request.etapaMaisAvancada() > 4) throw new BusinessException("Progresso inválido.");
+        if (etapa >= 3 && regrasDaVersaoExibida(c).stream().anyMatch(r -> !Boolean.TRUE.equals(r.getCompleta()) || r.getTaxa() == null)) throw new BusinessException("Corrija as regras antes de avançar à simulação.");
+        if (etapa == 4 && !conferirSimulacao(id).aptaParaAtivacao()) throw new BusinessException("A conferência exige uma simulação aceita da proposta atual.");
+        // Apenas a última etapa efetivamente visitada pode aumentar o histórico.
+        v.setUltimaEtapa(etapa);
+        v.setEtapaMaisAvancada(Math.max(v.getEtapaMaisAvancada(), etapa));
+        campanhaVersaoRepository.save(v);
+        return new com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO(etapa, v.getEtapaMaisAvancada(), v.getNumero());
     }
 
     /** Publica exatamente a proposta usada pela simulação, em uma única transação. */
