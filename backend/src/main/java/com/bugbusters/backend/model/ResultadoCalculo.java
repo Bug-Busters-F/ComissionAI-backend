@@ -62,6 +62,12 @@ public class ResultadoCalculo {
     @Column(name = "calculado_em", nullable = false)
     private OffsetDateTime calculadoEm;
 
+    @Column(name = "versao_campanha_numero")
+    private Integer versaoCampanhaNumero;
+
+    @Column(name = "fechamento_id")
+    private UUID fechamentoId;
+
     public ResultadoCalculo() {}
 
     @PrePersist
@@ -237,5 +243,21 @@ public class ResultadoCalculo {
 
     public void setValorBonusFixo(BigDecimal valorBonusFixo) {
         this.valorBonusFixo = valorBonusFixo != null ? valorBonusFixo : BigDecimal.ZERO;
+    }
+
+    public Integer getVersaoCampanhaNumero() {
+        return versaoCampanhaNumero;
+    }
+
+    public void setVersaoCampanhaNumero(Integer versaoCampanhaNumero) {
+        this.versaoCampanhaNumero = versaoCampanhaNumero;
+    }
+
+    public UUID getFechamentoId() {
+        return fechamentoId;
+    }
+
+    public void setFechamentoId(UUID fechamentoId) {
+        this.fechamentoId = fechamentoId;
     }
 }

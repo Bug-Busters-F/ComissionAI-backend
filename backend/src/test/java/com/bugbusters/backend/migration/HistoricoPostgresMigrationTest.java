@@ -52,6 +52,23 @@ class HistoricoPostgresMigrationTest {
         }
         return (UUID) values.get("id");
     }
+    @Test void atualizaV24ParaV25PreservandoHistoricoEProgresso() throws Exception {
+        String schema = schema(); flyway(schema,"24").migrate();
+        try (var c=connection(schema); var s=c.createStatement()) {
+            s.execute("INSERT INTO tb_campanha(id,titulo,texto_original,data_inicio,data_fim,estado) VALUES (950,'Publicada','Texto preservado','2040-01-01','2040-01-31','ATIVA')");
+            s.execute("INSERT INTO tb_campanha_versao(id,campanha_id,numero,status,titulo,texto_original,data_inicio,data_fim,ultima_etapa,etapa_mais_avancada,publicado_por) VALUES (951,950,1,'PUBLICADA','Versão histórica','Texto','2040-01-01','2040-01-31',1,4,'Autor anterior')");
+            s.execute("INSERT INTO tb_regra(id,campanha_id,campanha_versao_id,nome,taxa,data_inicio,data_fim,status,identificador_logico,python_equivalente,rastreabilidade_json) VALUES (952,950,951,'Preservada',0.05,'2040-01-01','2040-01-31','ATIVA','one','codigo_anterior','{\"camposManuais\":[\"taxaPercentual\"]}')");
+        }
+        var all=flyway(schema,"25"); assertThat(all.migrate().migrationsExecuted).isEqualTo(1); all.validate();
+        try (var c=connection(schema)) {
+            assertThat(scalar(c,"SELECT python_equivalente FROM tb_regra WHERE id=952")).isEqualTo("codigo_anterior");
+            assertThat(scalar(c,"SELECT rastreabilidade_json FROM tb_regra WHERE id=952")).contains("taxaPercentual");
+            assertThat(scalar(c,"SELECT publicado_por FROM tb_campanha_versao WHERE id=951")).isEqualTo("Autor anterior");
+            assertThat(scalar(c,"SELECT etapa_mais_avancada FROM tb_campanha_versao WHERE id=951")).isEqualTo("4");
+            assertThat(scalar(c,"SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='tb_resultado_calculo' AND column_name IN ('fechamento_id','versao_campanha_numero')")).isEqualTo("2");
+        }
+    }
+
     @Test void instalaTodasAsMigracoesSemVersoesDuplicadas() throws Exception {
         String schema = schema(); var all = flyway(schema,"24");
         all.migrate(); all.validate();
