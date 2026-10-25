@@ -10,6 +10,11 @@ import java.time.OffsetDateTime;
 @Entity
 @Table(name = "tb_regra")
 public class Regra {
+    @Column(name = "rastreabilidade_json", columnDefinition = "TEXT")
+    private String rastreabilidadeJson;
+    public String getRastreabilidadeJson() { return rastreabilidadeJson; }
+    public void setRastreabilidadeJson(String value) { rastreabilidadeJson = value; }
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,6 +27,9 @@ public class Regra {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "campanha_versao_id")
     private CampanhaVersao campanhaVersao;
+
+    @Column(name = "identificador_logico", length = 150)
+    private String identificadorLogico;
 
     @Column(nullable = false)
     private String nome;
@@ -179,6 +187,8 @@ public class Regra {
     public void setCampanha(Campanha campanha) { this.campanha = campanha; }
     public CampanhaVersao getCampanhaVersao() { return campanhaVersao; }
     public void setCampanhaVersao(CampanhaVersao campanhaVersao) { this.campanhaVersao = campanhaVersao; }
+    public String getIdentificadorLogico() { return identificadorLogico; }
+    public void setIdentificadorLogico(String identificadorLogico) { this.identificadorLogico = identificadorLogico; }
 
     public String getNome() { return nome; }
     public void setNome(String nome) { this.nome = nome; }

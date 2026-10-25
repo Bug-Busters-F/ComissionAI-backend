@@ -4,6 +4,9 @@ import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.AtivarCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
+import com.bugbusters.backend.dto.campanha.VersaoCampanhaResumoResponse;
+import com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse;
+import com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse;
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
 import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.service.CampanhaService;
@@ -100,10 +103,38 @@ public class CampanhaController {
         return ResponseEntity.ok(campanhaService.buscarPorId(id));
     }
 
+    @Operation(summary = "Listar histórico de versões publicadas da campanha")
+    @GetMapping("/{id}/versoes")
+    public ResponseEntity<List<VersaoCampanhaResumoResponse>> listarHistorico(@PathVariable Long id) {
+        return ResponseEntity.ok(campanhaService.listarHistorico(id));
+    }
+
+    @Operation(summary = "Consultar conteúdo imutável de uma versão publicada")
+    @GetMapping("/{id}/versoes/{numero}")
+    public ResponseEntity<VersaoCampanhaDetalheResponse> buscarVersao(
+            @PathVariable Long id, @PathVariable Integer numero) {
+        return ResponseEntity.ok(campanhaService.buscarVersaoPublicada(id, numero));
+    }
+
+    @Operation(summary = "Comparar campos e regras entre duas versões publicadas")
+    @GetMapping("/{id}/versoes/comparacao")
+    public ResponseEntity<ComparacaoVersaoResponse> compararVersoes(
+            @PathVariable Long id,
+            @RequestParam Integer versaoBase,
+            @RequestParam Integer versaoComparada) {
+        return ResponseEntity.ok(campanhaService.compararVersoes(id, versaoBase, versaoComparada));
+    }
+
     @Operation(summary = "Atualizar campanha e coleção de regras vinculadas", description = "Atualiza dados da campanha e substitui transacionalmente a coleção de regras.")
     @PutMapping("/{id}")
     public ResponseEntity<CampanhaResponse> atualizarCampanha(@PathVariable Long id, @Valid @RequestBody CampanhaRequest request) {
         return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request));
+    }
+
+    @PatchMapping("/{id}/progresso")
+    public ResponseEntity<com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO> atualizarProgresso(
+            @PathVariable Long id, @Valid @RequestBody com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO request) {
+        return ResponseEntity.ok(campanhaService.atualizarProgresso(id, request));
     }
 
     @Operation(summary = "Cancelar proposta de alteração sem afetar a versão vigente")
