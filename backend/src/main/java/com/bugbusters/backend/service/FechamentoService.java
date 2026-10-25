@@ -11,11 +11,13 @@ import com.bugbusters.backend.repository.FechamentoCompetenciaRepository;
 import com.bugbusters.backend.service.lock.TravaCompetencia;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -42,109 +44,73 @@ public class FechamentoService {
     private final FechamentoCompetenciaRepository fechamentoCompetenciaRepository;
     private final CalculoService calculoService;
     private final TravaCompetencia travaCompetencia;
+    private final TransactionTemplate transacaoIsolada;
 
-    @Autowired
-    public FechamentoService(FechamentoCompetenciaRepository fechamentoCompetenciaRepository,
-                             CalculoService calculoService,
-                             @Autowired(required = false) TravaCompetencia travaCompetencia) {
-        this.fechamentoCompetenciaRepository = fechamentoCompetenciaRepository;
+    public FechamentoService(FechamentoCompetenciaRepository repository, CalculoService calculoService,
+                             TravaCompetencia travaCompetencia, PlatformTransactionManager transactionManager) {
+        this.fechamentoCompetenciaRepository = repository;
         this.calculoService = calculoService;
         this.travaCompetencia = travaCompetencia;
+        this.transacaoIsolada = new TransactionTemplate(transactionManager);
+        this.transacaoIsolada.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    public FechamentoService(FechamentoCompetenciaRepository fechamentoCompetenciaRepository,
-                             CalculoService calculoService) {
-        this(fechamentoCompetenciaRepository, calculoService, null);
-    }
-
-    /**
-     * Executa o fechamento final e formal de uma competência mensal.
-     */
-    @Transactional
+    /** Persist the processing marker before calculating; rollback calculations independently from audit status. */
     public FechamentoResponseDTO executarFechamento(FechamentoRequestDTO request) {
-        if (request == null || request.competencia() == null || request.competencia().isBlank()) {
-            throw new BusinessException("A competência é obrigatória para o fechamento final.");
-        }
-
-        YearMonth ym;
+        String competencia;
         try {
-            ym = YearMonth.parse(request.competencia());
+            if (request == null || request.competencia() == null || !request.competencia().matches("\\d{4}-(0[1-9]|1[0-2])"))
+                throw new IllegalArgumentException();
+            competencia = YearMonth.parse(request.competencia()).toString();
         } catch (Exception e) {
-            throw new BusinessException("Formato de competência inválido: '" + request.competencia() + "'. Utilize YYYY-MM.");
+            throw new BusinessException("A competência é obrigatória e deve estar no formato YYYY-MM.");
         }
-        String competencia = ym.toString();
-
-        if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, StatusFechamento.CONCLUIDO)) {
-            throw new BusinessException("A competência " + competencia + " já possui fechamento final concluído e está bloqueada para novas apurações.");
-        }
-
-        if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, StatusFechamento.PROCESSANDO)) {
-            throw new BusinessException("A competência " + competencia + " já possui um processo de fechamento em andamento.");
-        }
-
-        UUID protocolo = UUID.randomUUID();
-        String executadoPor = (request.executadoPor() != null && !request.executadoPor().isBlank())
-                ? request.executadoPor() : "SISTEMA";
-
-        FechamentoCompetencia fechamento = new FechamentoCompetencia(
-                competencia,
-                protocolo,
-                executadoPor,
-                request.motivo()
-        );
-        fechamento = fechamentoCompetenciaRepository.saveAndFlush(fechamento);
-
-        if (travaCompetencia != null) {
+        FechamentoCompetencia iniciado = transacaoIsolada.execute(status -> {
             travaCompetencia.adquirirTrava(competencia);
-        }
-
+            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, StatusFechamento.CONCLUIDO))
+                throw new BusinessException("A competência " + competencia + " já possui fechamento final concluído e está bloqueada para novas apurações.");
+            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, StatusFechamento.PROCESSANDO))
+                throw new BusinessException("A competência " + competencia + " já possui um processo de fechamento em andamento.");
+            String autor = request.executadoPor() != null && !request.executadoPor().isBlank() ? request.executadoPor() : "SISTEMA";
+            return fechamentoCompetenciaRepository.saveAndFlush(new FechamentoCompetencia(competencia, UUID.randomUUID(), autor, request.motivo()));
+        });
         try {
-            CalculoCompetenciaResponseDTO apuracao = calculoService.processarCompetenciaFechamento(
-                    competencia,
-                    fechamento.getId(),
-                    executadoPor
-            );
-
-            fechamento.setTotalVendasProcessadas(apuracao.totalVendasProcessadas());
-            fechamento.setTotalCalculados(apuracao.totalCalculados());
-            fechamento.setTotalImpedimentos(apuracao.totalImpedimentos());
-            fechamento.setValorTotalVendas(apuracao.valorTotalVendas());
-            fechamento.setValorTotalComissao(apuracao.valorTotalComissao());
-            fechamento.setStatus(StatusFechamento.CONCLUIDO);
-            fechamento.setConcluidoEm(OffsetDateTime.now());
-            fechamentoCompetenciaRepository.save(fechamento);
-
-            log.info("Fechamento final da competência {} concluído com sucesso. Protocolo: {}", competencia, protocolo);
-
-            return new FechamentoResponseDTO(
-                    fechamento.getId(),
-                    fechamento.getProtocolo(),
-                    fechamento.getCompetencia(),
-                    fechamento.getStatus(),
-                    fechamento.getTipo(),
-                    fechamento.getTotalVendasProcessadas(),
-                    fechamento.getTotalCalculados(),
-                    fechamento.getTotalImpedimentos(),
-                    fechamento.getValorTotalVendas(),
-                    fechamento.getValorTotalComissao(),
-                    fechamento.getExecutadoPor(),
-                    fechamento.getIniciadoEm(),
-                    fechamento.getConcluidoEm(),
-                    fechamento.getMotivo(),
-                    "Fechamento final da competência concluído com sucesso.",
-                    apuracao.resultados(),
-                    apuracao.impedimentos()
-            );
+            return transacaoIsolada.execute(status -> {
+                travaCompetencia.adquirirTrava(competencia);
+                FechamentoCompetencia fechamento = fechamentoCompetenciaRepository.findById(iniciado.getId()).orElseThrow();
+                if (fechamento.getStatus() != StatusFechamento.PROCESSANDO)
+                    throw new BusinessException("Esta execução de fechamento não está em processamento.");
+                CalculoCompetenciaResponseDTO apuracao = calculoService.processarCompetenciaFechamento(
+                        competencia, fechamento.getId(), fechamento.getExecutadoPor());
+                fechamento.setTotalVendasProcessadas(apuracao.totalVendasProcessadas());
+                fechamento.setTotalCalculados(apuracao.totalCalculados());
+                fechamento.setTotalImpedimentos(apuracao.totalImpedimentos());
+                fechamento.setValorTotalVendas(apuracao.valorTotalVendas());
+                fechamento.setValorTotalComissao(apuracao.valorTotalComissao());
+                fechamento.setStatus(StatusFechamento.CONCLUIDO);
+                fechamento.setConcluidoEm(OffsetDateTime.now());
+                fechamentoCompetenciaRepository.save(fechamento);
+                return new FechamentoResponseDTO(fechamento.getId(), fechamento.getProtocolo(), competencia,
+                        fechamento.getStatus(), fechamento.getTipo(), fechamento.getTotalVendasProcessadas(),
+                        fechamento.getTotalCalculados(), fechamento.getTotalImpedimentos(), fechamento.getValorTotalVendas(),
+                        fechamento.getValorTotalComissao(), fechamento.getExecutadoPor(), fechamento.getIniciadoEm(),
+                        fechamento.getConcluidoEm(), fechamento.getMotivo(), "Fechamento final da competência concluído com sucesso.",
+                        apuracao.resultados(), apuracao.impedimentos());
+            });
         } catch (Exception ex) {
-            log.error("Erro durante o processamento do fechamento final da competência {}: {}", competencia, ex.getMessage(), ex);
-            fechamento.setStatus(StatusFechamento.FALHOU);
-            fechamento.setMotivoFalha(ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
-            fechamento.setConcluidoEm(OffsetDateTime.now());
-            fechamentoCompetenciaRepository.save(fechamento);
-
-            if (ex instanceof BusinessException be) {
-                throw be;
-            }
+            log.error("Falha no fechamento {} da competência {}", iniciado.getProtocolo(), competencia, ex);
+            // This transaction starts only after the calculation transaction rolled back, including partial results/logs.
+            transacaoIsolada.executeWithoutResult(status -> {
+                travaCompetencia.adquirirTrava(competencia);
+                FechamentoCompetencia fechamento = fechamentoCompetenciaRepository.findById(iniciado.getId()).orElseThrow();
+                if (fechamento.getStatus() == StatusFechamento.PROCESSANDO) {
+                    fechamento.setStatus(StatusFechamento.FALHOU);
+                    fechamento.setMotivoFalha(ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
+                    fechamento.setConcluidoEm(OffsetDateTime.now());
+                    fechamentoCompetenciaRepository.save(fechamento);
+                }
+            });
+            if (ex instanceof BusinessException be) throw be;
             throw new BusinessException("Falha no fechamento final da competência: " + ex.getMessage());
         }
     }
@@ -247,53 +213,27 @@ public class FechamentoService {
      * Valida se um intervalo de datas colide com alguma competência bloqueada por fechamento final.
      * Lança BusinessException caso haja colisão.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public void validarPeriodoDisponivel(LocalDate inicio, LocalDate fim) {
-        if (inicio == null || fim == null) {
-            return;
-        }
-
-        YearMonth atual = YearMonth.from(inicio);
-        YearMonth limite = YearMonth.from(fim);
-
-        while (!atual.isAfter(limite)) {
-            String comp = atual.toString();
-            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(comp, StatusFechamento.CONCLUIDO)) {
-                throw new BusinessException(String.format(
-                        "Operação bloqueada: a competência %s está com fechamento final concluído e lacrada contra alterações ou publicações de regras.",
-                        comp
-                ));
-            }
-            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(comp, StatusFechamento.PROCESSANDO)) {
-                throw new BusinessException(String.format(
-                        "Operação bloqueada: a competência %s está em processo de fechamento final.",
-                        comp
-                ));
-            }
-            atual = atual.plusMonths(1);
-        }
+        validarPeriodosDisponiveis(inicio, fim);
     }
 
-    /**
-     * Verifica se o intervalo possui alguma competência bloqueada.
-     */
-    @Transactional(readOnly = true)
-    public boolean isPeriodoBloqueado(LocalDate inicio, LocalDate fim) {
-        if (inicio == null || fim == null) {
-            return false;
+    /** Acquire the union of affected months in one stable order and keep locks until the mutation commits. */
+    @Transactional
+    public void validarPeriodosDisponiveis(LocalDate... limites) {
+        var competencias = new java.util.TreeSet<String>();
+        for (int i = 0; i + 1 < limites.length; i += 2) {
+            if (limites[i] == null || limites[i + 1] == null) continue;
+            YearMonth mes = YearMonth.from(limites[i]);
+            YearMonth ultimo = YearMonth.from(limites[i + 1]);
+            while (!mes.isAfter(ultimo)) { competencias.add(mes.toString()); mes = mes.plusMonths(1); }
         }
-
-        YearMonth atual = YearMonth.from(inicio);
-        YearMonth limite = YearMonth.from(fim);
-
-        while (!atual.isAfter(limite)) {
-            String comp = atual.toString();
-            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(comp, StatusFechamento.CONCLUIDO)
-                    || fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(comp, StatusFechamento.PROCESSANDO)) {
-                return true;
-            }
-            atual = atual.plusMonths(1);
+        for (String competencia : competencias) travaCompetencia.adquirirTrava(competencia);
+        for (String competencia : competencias) {
+            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, StatusFechamento.CONCLUIDO))
+                throw new BusinessException("Operação bloqueada: a competência " + competencia + " está com fechamento final concluído e não permite alterações ou publicações de regras.");
+            if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, StatusFechamento.PROCESSANDO))
+                throw new BusinessException("Operação bloqueada: a competência " + competencia + " está em processo de fechamento final.");
         }
-        return false;
     }
 }

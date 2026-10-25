@@ -49,7 +49,7 @@ import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = "ai.service.url=http://localhost:8000")
+@SpringBootTest(properties = {"ai.service.url=http://localhost:8000", "spring.datasource.url=jdbc:h2:mem:fechamento_final;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"})
 @ActiveProfiles("test")
 class FechamentoApuracaoFinalIntegrationTest {
 
@@ -92,21 +92,21 @@ class FechamentoApuracaoFinalIntegrationTest {
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
-        fechamentoCompetenciaRepository.deleteAll();
+        cleanupJdbc.update("DELETE FROM tb_log_calculo_imutavel");
         resultadoCalculoRepository.deleteAll();
-        regraRepository.deleteAll();
-        campanhaVersaoRepository.deleteAll();
-        campanhaRepository.deleteAll();
+        fechamentoCompetenciaRepository.deleteAll();
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
         saleRepository.deleteAll();
         baseComissRepository.deleteAll();
     }
 
     @Test
     @DisplayName("Cenário Completo BACK-11: Apuração com versão vigente retroativa, fechamento final e bloqueio de mutações")
-    @Transactional
     void deveExecutarFechamentoComVersaoVigenteEBloquearMutacoes() throws Exception {
         String competencia = "2026-10";
         LocalDate inicioMes = LocalDate.of(2026, 10, 1);

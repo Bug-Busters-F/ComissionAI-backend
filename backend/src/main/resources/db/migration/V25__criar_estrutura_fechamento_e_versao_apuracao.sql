@@ -1,5 +1,5 @@
 -- =============================================================================
--- V23: Estruturas de Fechamento de Apuração Final e Vínculo à Versão Vigente (BACK-11)
+-- V25: Estruturas de Fechamento de Apuração Final e Vínculo à Versão Vigente (BACK-11)
 -- =============================================================================
 -- Permite persistir o fechamento final da competência com data, protocolo e totais.
 -- Registra a versão da campanha vigente aplicada aos resultados de cálculo.
@@ -32,3 +32,7 @@ ALTER TABLE tb_resultado_calculo ADD COLUMN IF NOT EXISTS fechamento_id UUID REF
 CREATE INDEX IF NOT EXISTS idx_fechamento_competencia_status ON tb_fechamento_competencia(competencia, status);
 CREATE INDEX IF NOT EXISTS idx_resultado_fechamento ON tb_resultado_calculo(fechamento_id);
 CREATE INDEX IF NOT EXISTS idx_resultado_versao_campanha ON tb_resultado_calculo(versao_campanha_numero);
+
+-- A failed attempt remains auditable; at most one active or completed closing can reserve a month.
+CREATE UNIQUE INDEX uk_fechamento_competencia_reservada ON tb_fechamento_competencia(competencia)
+    WHERE status IN ('PROCESSANDO', 'CONCLUIDO');

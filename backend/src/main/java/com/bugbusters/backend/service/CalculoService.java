@@ -191,6 +191,9 @@ public class CalculoService {
         Sale sale = saleRepository.findById(idVenda)
                 .orElseThrow(() -> new BusinessException("Venda não encontrada com o ID: " + idVenda));
 
+        if (sale.getSaleDate() != null && travaCompetencia != null)
+            travaCompetencia.adquirirTrava(YearMonth.from(sale.getSaleDate()).toString());
+
         // 1. Verifica se já foi calculada (Idempotência)
         Optional<ResultadoCalculo> existenteOpt = resultadoCalculoRepository.findByIdVenda(idVenda);
         if (existenteOpt.isPresent()) {
@@ -219,14 +222,7 @@ public class CalculoService {
             );
         }
 
-        // Validação de bloqueio por fechamento final concluído na competência da venda
-        if (sale.getSaleDate() != null) {
-            YearMonth ym = YearMonth.from(sale.getSaleDate());
-            if (fechamentoCompetenciaRepository != null
-                    && fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(ym.toString(), com.bugbusters.backend.model.StatusFechamento.CONCLUIDO)) {
-                throw new BusinessException("A competência da venda (" + ym + ") possui fechamento final concluído e está bloqueada para novas apurações.");
-            }
-        }
+        validarNovoCalculoPermitido(sale.getSaleDate());
 
         // 2. Validação rigorosa de cobertura de taxa base ANTES de qualquer cálculo ou escrita
         if (coberturaBaseService != null) {
@@ -426,27 +422,20 @@ public class CalculoService {
             throw new BusinessException("Formato de competência inválido: '" + competenciaStr + "'. Utilize YYYY-MM ou YYYY-MM-DD.");
         }
 
-        // Se a competência já está com fechamento final concluído e for um cálculo avulso/rotineiro
-        if (fechamentoId == null && fechamentoCompetenciaRepository != null
-                && fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(ym.toString(), com.bugbusters.backend.model.StatusFechamento.CONCLUIDO)) {
-            if (recalcular) {
-                throw new BusinessException("A competência " + ym + " já possui fechamento final concluído e está bloqueada para recálculo.");
-            }
-        }
+        if (travaCompetencia != null) travaCompetencia.adquirirTrava(ym.toString());
+        boolean historicoFechado = fechamentoId == null && fechamentoCompetenciaRepository != null &&
+                fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(ym.toString(), com.bugbusters.backend.model.StatusFechamento.CONCLUIDO);
+        boolean emFechamento = fechamentoId == null && fechamentoCompetenciaRepository != null &&
+                fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(ym.toString(), com.bugbusters.backend.model.StatusFechamento.PROCESSANDO);
+        if (historicoFechado && recalcular)
+            throw new BusinessException("A competência " + ym + " já possui fechamento final concluído e está bloqueada para recálculo.");
+        if (emFechamento) throw new BusinessException("A competência " + ym + " está em processo de fechamento final.");
 
         LocalDate inicio = ym.atDay(1);
         LocalDate fim = ym.atEndOfMonth();
-
         List<Sale> vendas = saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(inicio, fim);
-
-        // Validação centralizada de cobertura por marca, cargo e competência ANTES dos cálculos e escritas
-        if (coberturaBaseService != null && !vendas.isEmpty()) {
+        if (!historicoFechado && coberturaBaseService != null && !vendas.isEmpty())
             coberturaBaseService.validarCobertura(vendas, ym);
-        }
-
-        if (travaCompetencia != null) {
-            travaCompetencia.adquirirTrava(ym.toString());
-        }
 
         List<CalculoItemResponseDTO> sucessos = new ArrayList<>();
         List<CalculoImpedimentoDTO> impedimentos = new ArrayList<>();
@@ -454,7 +443,7 @@ public class CalculoService {
         BigDecimal totalComissoesCalculadas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
         // Otimização BACK-14: Pré-carregar contexto da competência (regras e bases) e resultados existentes
-        TaxaComissaoResolver.ContextoCompetencia contexto = taxaComissaoResolver != null
+        TaxaComissaoResolver.ContextoCompetencia contexto = !historicoFechado && taxaComissaoResolver != null
                 ? taxaComissaoResolver.carregarContexto(inicio, fim)
                 : null;
 
@@ -493,6 +482,9 @@ public class CalculoService {
                 totalComissoesCalculadas = totalComissoesCalculadas.add(existente.getValorComissao());
                 continue;
             }
+
+            if (historicoFechado)
+                throw new BusinessException("A competência " + ym + " possui fechamento final concluído. Não é permitido calcular novas vendas nesse período.");
 
             ResolucaoTaxaResult resolucao = null;
             if (taxaComissaoResolver != null) {
@@ -772,12 +764,26 @@ public class CalculoService {
 
     private record ComissaoCalculada(BigDecimal total, BigDecimal bonusPercentual, BigDecimal bonusFixo) {}
 
+    private void validarNovoCalculoPermitido(LocalDate data) {
+        if (data == null || fechamentoCompetenciaRepository == null) return;
+        String competencia = YearMonth.from(data).toString();
+        if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, com.bugbusters.backend.model.StatusFechamento.CONCLUIDO))
+            throw new BusinessException("A competência da venda (" + competencia + ") possui fechamento final concluído e está bloqueada para novas apurações.");
+        if (fechamentoCompetenciaRepository.existsByCompetenciaAndStatus(competencia, com.bugbusters.backend.model.StatusFechamento.PROCESSANDO))
+            throw new BusinessException("A competência da venda (" + competencia + ") está em processo de fechamento final e não permite novas apurações.");
+    }
+
     /**
      * Processa o cálculo de comissão garantindo proteção contra cálculo duplicado (idempotência).
      * Mantido para compatibilidade integral com chamadas avulsas e contratos legados.
      */
     @Transactional
     public CalculoComissaoResponse calcularComissao(CalculoComissaoRequest request) {
+        Sale persistida = request.idVenda() != null && saleRepository != null ? saleRepository.findById(request.idVenda()).orElse(null) : null;
+        var competenciasAfetadas = new java.util.TreeSet<String>();
+        if (request.dataVenda() != null) competenciasAfetadas.add(YearMonth.from(request.dataVenda()).toString());
+        if (persistida != null && persistida.getSaleDate() != null) competenciasAfetadas.add(YearMonth.from(persistida.getSaleDate()).toString());
+        if (travaCompetencia != null) for (String competencia : competenciasAfetadas) travaCompetencia.adquirirTrava(competencia);
         // 1. Verifica se já existe cálculo pelo UUID da venda (se informado) ou pela chave de negócio
         Optional<ResultadoCalculo> existenteOpt = Optional.empty();
         if (request.idVenda() != null && resultadoCalculoRepository != null) {
@@ -789,6 +795,9 @@ public class CalculoService {
             return tratarResultadoExistente(request, existente);
         }
 
+        validarNovoCalculoPermitido(request.dataVenda());
+        if (persistida != null) validarNovoCalculoPermitido(persistida.getSaleDate());
+
         // Validação de cobertura ANTES de qualquer escrita em tb_resultado_calculo ou log imutável
         if (coberturaBaseService != null) {
             coberturaBaseService.validarCoberturaAvulsa(
@@ -797,11 +806,7 @@ public class CalculoService {
         }
 
         // 2. Localiza venda persistida ou constrói venda com vínculos necessários (BACK-14)
-        Sale sale = null;
-        if (request.idVenda() != null && saleRepository != null) {
-            sale = saleRepository.findById(request.idVenda()).orElse(null);
-        }
-
+        Sale sale = persistida;
         if (sale == null) {
             sale = new Sale();
             sale.setId(request.idVenda());

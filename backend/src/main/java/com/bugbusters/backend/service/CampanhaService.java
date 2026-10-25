@@ -177,7 +177,8 @@ public class CampanhaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
 
         if (fechamentoService != null) {
-            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(),
+                    campanha.inicioParaRevisao(), campanha.fimParaRevisao());
         }
 
         vincularAceiteExistente(campanha, simulacaoAceitaId);
@@ -226,8 +227,8 @@ public class CampanhaService {
         PeriodoCalculado periodo = calcularEValidarPeriodo(request.dataInicio(), request.dataFim());
 
         if (fechamentoService != null) {
-            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
-            fechamentoService.validarPeriodoDisponivel(periodo.inicio(), periodo.fim());
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(),
+                    campanha.inicioParaRevisao(), campanha.fimParaRevisao(), periodo.inicio(), periodo.fim());
         }
 
         if (request.regras() == null || request.regras().isEmpty()) {
@@ -292,7 +293,8 @@ public class CampanhaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
 
         if (fechamentoService != null) {
-            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(),
+                    campanha.inicioParaRevisao(), campanha.fimParaRevisao());
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
@@ -568,7 +570,8 @@ public class CampanhaService {
     @Transactional
     public void publicarVersaoAceita(Campanha campanha, Simulacao simulacao, Integer versaoEsperada) {
         if (fechamentoService != null) {
-            fechamentoService.validarPeriodoDisponivel(campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(),
+                    campanha.inicioParaRevisao(), campanha.fimParaRevisao());
         }
         if (campanhaVersaoRepository == null) return;
         if (campanha.getVersaoVigente() != null && versaoEsperada == null) {

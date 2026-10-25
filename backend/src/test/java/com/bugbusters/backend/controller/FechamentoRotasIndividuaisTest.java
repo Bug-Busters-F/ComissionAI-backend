@@ -50,9 +50,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Bateria exaustiva de testes de rotas individuais para a funcionalidade BACK-11:
  * Fechamento Final de Competência, Apuração Retroativa da Versão Vigente e Bloqueios de Mutações.
  */
-@SpringBootTest(properties = "ai.service.url=http://localhost:8000")
+@SpringBootTest(properties = {"ai.service.url=http://localhost:8000", "spring.datasource.url=jdbc:h2:mem:fechamento_rotas;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"})
 @ActiveProfiles("test")
-@Transactional
 class FechamentoRotasIndividuaisTest {
 
     @Autowired
@@ -102,16 +101,16 @@ class FechamentoRotasIndividuaisTest {
     private Store store;
     private Registration registration;
 
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
 
-        logCalculoRepository.deleteAll();
+        cleanupJdbc.update("DELETE FROM tb_log_calculo_imutavel");
         resultadoCalculoRepository.deleteAll();
         fechamentoCompetenciaRepository.deleteAll();
-        regraRepository.deleteAll();
-        campanhaVersaoRepository.deleteAll();
-        campanhaRepository.deleteAll();
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
         saleRepository.deleteAll();
         registrationRepository.deleteAll();
         baseComissRepository.deleteAll();

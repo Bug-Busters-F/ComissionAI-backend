@@ -52,7 +52,9 @@ class FechamentoServiceTest {
 
     @BeforeEach
     void setUp() {
-        fechamentoService = new FechamentoService(fechamentoCompetenciaRepository, calculoService, travaCompetencia);
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        lenient().when(transactions.getTransaction(any())).thenAnswer(invocation -> new org.springframework.transaction.support.SimpleTransactionStatus());
+        fechamentoService = new FechamentoService(fechamentoCompetenciaRepository, calculoService, travaCompetencia, transactions);
     }
 
     @Test
@@ -67,6 +69,7 @@ class FechamentoServiceTest {
         FechamentoCompetencia fechamentoMock = new FechamentoCompetencia(competencia, UUID.randomUUID(), request.executadoPor(), request.motivo());
         fechamentoMock.setId(UUID.randomUUID());
         when(fechamentoCompetenciaRepository.saveAndFlush(any(FechamentoCompetencia.class))).thenReturn(fechamentoMock);
+        when(fechamentoCompetenciaRepository.findById(fechamentoMock.getId())).thenReturn(Optional.of(fechamentoMock));
 
         CalculoItemResponseDTO itemCalculado = new CalculoItemResponseDTO(
                 UUID.randomUUID(), UUID.randomUUID(), "MAT01", 10, 1, 100,
@@ -94,7 +97,7 @@ class FechamentoServiceTest {
         assertThat(response.resultados()).hasSize(1);
         assertThat(response.resultados().get(0).versaoCampanhaNumero()).isEqualTo(2);
 
-        verify(travaCompetencia).adquirirTrava(competencia);
+        verify(travaCompetencia, times(2)).adquirirTrava(competencia);
         verify(fechamentoCompetenciaRepository).save(any(FechamentoCompetencia.class));
     }
 
@@ -141,6 +144,7 @@ class FechamentoServiceTest {
         FechamentoCompetencia fechamentoMock = new FechamentoCompetencia(competencia, UUID.randomUUID(), request.executadoPor(), request.motivo());
         fechamentoMock.setId(UUID.randomUUID());
         when(fechamentoCompetenciaRepository.saveAndFlush(any(FechamentoCompetencia.class))).thenReturn(fechamentoMock);
+        when(fechamentoCompetenciaRepository.findById(fechamentoMock.getId())).thenReturn(Optional.of(fechamentoMock));
 
         when(calculoService.processarCompetenciaFechamento(any(), any(), any()))
                 .thenThrow(new BusinessException("Falha na resolução de regras da versão"));
@@ -156,6 +160,17 @@ class FechamentoServiceTest {
         assertThat(salvo.getStatus()).isEqualTo(StatusFechamento.FALHOU);
         assertThat(salvo.getMotivoFalha()).contains("Falha na resolução de regras da versão");
         assertThat(salvo.getConcluidoEm()).isNotNull();
+    }
+
+    @Test void travaTodosOsMesesEmOrdemSemRepetirCompetenciasDePeriodosSobrepostos() {
+        fechamentoService.validarPeriodosDisponiveis(LocalDate.of(2040,3,1),LocalDate.of(2040,4,30),
+                LocalDate.of(2040,1,1),LocalDate.of(2040,3,31));
+        var order = inOrder(travaCompetencia);
+        order.verify(travaCompetencia).adquirirTrava("2040-01");
+        order.verify(travaCompetencia).adquirirTrava("2040-02");
+        order.verify(travaCompetencia).adquirirTrava("2040-03");
+        order.verify(travaCompetencia).adquirirTrava("2040-04");
+        order.verifyNoMoreInteractions();
     }
 
     @Test
