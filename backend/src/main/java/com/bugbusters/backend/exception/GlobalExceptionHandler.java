@@ -33,6 +33,19 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
         }
 
+        @ExceptionHandler({org.springframework.web.bind.MissingServletRequestParameterException.class,
+                org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
+        public ResponseEntity<ApiErrorResponse> handleInvalidParameter(Exception ex, HttpServletRequest request) {
+                String campo = ex instanceof org.springframework.web.bind.MissingServletRequestParameterException missing
+                        ? missing.getParameterName()
+                        : ((org.springframework.web.method.annotation.MethodArgumentTypeMismatchException) ex).getName();
+                ApiErrorResponse error = new ApiErrorResponse(
+                        OffsetDateTime.now(), HttpStatus.BAD_REQUEST.value(), "Bad Request",
+                        "Parâmetro obrigatório ausente ou em formato inválido.", request.getRequestURI(),
+                        List.of(new CampoInvalidoDTO(campo, "Informe um valor válido para este parâmetro.")));
+                return ResponseEntity.badRequest().body(error);
+        }
+
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ApiErrorResponse> handleValidationException(
                         MethodArgumentNotValidException ex, HttpServletRequest request) {
@@ -79,9 +92,46 @@ public class GlobalExceptionHandler {
                                 "Conflict",
                                 ex.getMessage(),
                                 request.getRequestURI(),
-                                List.of());
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
 
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+        }
+
+        @ExceptionHandler({jakarta.persistence.OptimisticLockException.class,
+                org.springframework.orm.ObjectOptimisticLockingFailureException.class})
+        public ResponseEntity<ApiErrorResponse> handleOptimisticLock(Exception ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(), HttpStatus.CONFLICT.value(), "Conflict",
+                                "A campanha foi alterada por outro usuário. Atualize os dados antes de publicar.",
+                                request.getRequestURI(), List.of());
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+        }
+
+        @ExceptionHandler(AusenciaCoberturaException.class)
+        public ResponseEntity<ApiErrorResponse> handleAusenciaCobertura(
+                        AusenciaCoberturaException ex, HttpServletRequest request) {
+
+                List<CampoInvalidoDTO> validacoes = ex.getReferenciasFaltantes().stream()
+                                .map(ref -> new CampoInvalidoDTO(
+                                                "marca:" + (ref.codMarca() != null ? ref.codMarca() : "null")
+                                                                + "/cargo:" + (ref.codCargo() != null ? ref.codCargo() : "null"),
+                                                String.format("Marca '%s' (%s) e Cargo '%s' (%s) sem taxa base para a competência %s",
+                                                                ref.descrMarca() != null ? ref.descrMarca() : "-",
+                                                                ref.codMarca() != null ? ref.codMarca() : "-",
+                                                                ref.descriCargo() != null ? ref.descriCargo() : "-",
+                                                                ref.codCargo() != null ? ref.codCargo() : "-",
+                                                                ref.competencia())))
+                                .toList();
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                "Bad Request",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                validacoes);
+
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
         }
 
         @ExceptionHandler(BusinessException.class)
@@ -135,16 +185,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleGenericException(
             Exception ex, HttpServletRequest request) {
 
-                ApiErrorResponse error = new ApiErrorResponse(
-                                OffsetDateTime.now(),
-                                HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                                "Internal Server Error",
-                                "Ocorreu um erro interno no servidor.",
-                                request.getRequestURI(),
-                                List.of());
+        ApiErrorResponse error = new ApiErrorResponse(
+                OffsetDateTime.now(),
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "Internal Server Error",
+                ex.getMessage() != null ? ex.getMessage() : "Ocorreu um erro interno no servidor.",
+                request.getRequestURI(),
+                List.of());
 
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
-        }
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+    }
+
 
         @ExceptionHandler(AiServiceUnavailableException.class)
         public ResponseEntity<ApiErrorResponse> handleAiUnavailable(AiServiceUnavailableException ex,
@@ -171,5 +222,18 @@ public class GlobalExceptionHandler {
                                 null);
 
                 return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(error);
+        }
+
+        @ExceptionHandler(AiInvalidResponseException.class)
+        public ResponseEntity<ApiErrorResponse> handleAiInvalidResponse(AiInvalidResponseException ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_GATEWAY.value(),
+                                "Resposta Inválida do Serviço de IA",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                null);
+
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error);
         }
 }

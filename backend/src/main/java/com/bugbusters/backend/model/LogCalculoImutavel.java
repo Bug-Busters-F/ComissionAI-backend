@@ -51,6 +51,12 @@ public class LogCalculoImutavel {
     @Column(name = "valor_comissao", nullable = false, precision = 15, scale = 2, updatable = false)
     private BigDecimal valorComissao;
 
+    @Column(name = "valor_bonus_percentual", nullable = false, precision = 15, scale = 2, updatable = false)
+    private BigDecimal valorBonusPercentual = BigDecimal.ZERO;
+
+    @Column(name = "valor_bonus_fixo", nullable = false, precision = 15, scale = 2, updatable = false)
+    private BigDecimal valorBonusFixo = BigDecimal.ZERO;
+
     @Column(name = "id_regra", nullable = false, updatable = false)
     private Long idRegra;
 
@@ -197,7 +203,11 @@ public class LogCalculoImutavel {
 
     public String getOrigemExecucao() { return origemExecucao; }
 
+    public void setOrigemExecucao(String origemExecucao) { this.origemExecucao = origemExecucao; }
+
     public String getUsuarioExecutor() { return usuarioExecutor; }
+
+    public void setUsuarioExecutor(String usuarioExecutor) { this.usuarioExecutor = usuarioExecutor; }
 
     public String getTipoVenda() { return tipoVenda; }
 
@@ -208,4 +218,20 @@ public class LogCalculoImutavel {
     public String getParametrosAplicados() { return parametrosAplicados; }
 
     public OffsetDateTime getExecutadoEm() { return executadoEm; }
+
+    public BigDecimal getValorBonusPercentual() {
+        return valorBonusPercentual;
+    }
+
+    public void setValorBonusPercentual(BigDecimal valorBonusPercentual) {
+        this.valorBonusPercentual = valorBonusPercentual != null ? valorBonusPercentual : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getValorBonusFixo() {
+        return valorBonusFixo;
+    }
+
+    public void setValorBonusFixo(BigDecimal valorBonusFixo) {
+        this.valorBonusFixo = valorBonusFixo != null ? valorBonusFixo : BigDecimal.ZERO;
+    }
 }

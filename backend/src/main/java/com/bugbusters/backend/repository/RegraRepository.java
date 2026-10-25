@@ -14,7 +14,23 @@ import com.bugbusters.backend.model.Regra;
 
 @Repository
 public interface RegraRepository extends JpaRepository<Regra, Long> {
-    Optional<Regra> findByCampanhaIdAndRemovidoEmIsNull(Long campanhaId);
+    /** Primeira regra não removida da campanha (compatibilidade com o contrato de uma regra). */
+    default Optional<Regra> findByCampanhaIdAndRemovidoEmIsNull(Long campanhaId) {
+        return findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanhaId).stream().findFirst();
+    }
+
+    List<Regra> findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(Long campanhaId);
+    List<Regra> findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(Long campanhaVersaoId);
+
+    List<Regra> findAllByStatusAndRemovidoEmIsNull(StatusRegra status);
+
+    List<Regra> findAllByCampanhaIdInAndRemovidoEmIsNull(List<Long> campanhaIds);
+
+    boolean existsByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
+
+    boolean existsByMatriculaIsNotNullAndRemovidoEmIsNull();
+
+    List<Regra> findTop5ByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
 
     @Query("""
         SELECT r FROM Regra r
@@ -36,6 +52,30 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
             @Param("codCargo") Integer codCargo,
             @Param("matricula") String matricula,
             @Param("canal") String canal,
+            @Param("status") StatusRegra status
+    );
+
+    @Query("""
+        SELECT r FROM Regra r
+        LEFT JOIN FETCH r.campanha c
+        WHERE r.status = :status
+          AND r.removidoEm IS NULL
+          AND (r.campanha IS NOT NULL OR r.id <> 1L)
+        ORDER BY r.id DESC
+    """)
+    List<Regra> findRegrasAtivasComCampanha(@Param("status") StatusRegra status);
+
+    @Query("""
+        SELECT r FROM Regra r
+        WHERE r.status = :status
+          AND r.removidoEm IS NULL
+          AND r.dataInicio <= :dataFim
+          AND r.dataFim >= :dataInicio
+        ORDER BY r.id DESC
+    """)
+    List<Regra> findRegrasAtivasNoPeriodo(
+            @Param("dataInicio") LocalDate dataInicio,
+            @Param("dataFim") LocalDate dataFim,
             @Param("status") StatusRegra status
     );
 }

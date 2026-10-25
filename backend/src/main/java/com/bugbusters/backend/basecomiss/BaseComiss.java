@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -17,7 +18,9 @@ import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.position.Position;
 
 @Entity
-@Table(name = "tb_basecomiss")
+@Table(name = "tb_basecomiss", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_basecomiss_brand_position_month", columnNames = {"brand_id", "position_id", "reference_month"})
+})
 public class BaseComiss {
 
     @Id
@@ -38,18 +41,31 @@ public class BaseComiss {
     @Column(nullable = false)
     private LocalDate referenceMonth;
 
+    @Column(name = "id_lote_origem", length = 100)
+    private String idLoteOrigem;
+
     protected BaseComiss() {
     }
 
+    @Deprecated
     public BaseComiss(
             Brand brand,
             Position position,
             BigDecimal percentage
     ) {
+        this(brand, position, percentage, LocalDate.now().withDayOfMonth(1));
+    }
+
+    public BaseComiss(
+            Brand brand,
+            Position position,
+            BigDecimal percentage,
+            LocalDate referenceMonth
+    ) {
         this.brand = brand;
         this.position = position;
         this.percentage = percentage;
-        this.referenceMonth = LocalDate.now().withDayOfMonth(1);
+        this.referenceMonth = referenceMonth != null ? referenceMonth.withDayOfMonth(1) : null;
     }
 
     public UUID getId() {
@@ -92,5 +108,11 @@ public class BaseComiss {
         this.referenceMonth = referenceMonth;
     }
 
-    
+    public String getIdLoteOrigem() {
+        return idLoteOrigem;
+    }
+
+    public void setIdLoteOrigem(String idLoteOrigem) {
+        this.idLoteOrigem = idLoteOrigem;
+    }
 }

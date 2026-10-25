@@ -37,9 +37,12 @@ public class RegistrationMapper {
     public RegistrationResponseDTO toResponse(Registration entity) {
         return new RegistrationResponseDTO(
                 entity.getId(),
+                entity.getRegistration(),
                 entity.getPosition(),
                 entity.getStore(),
                 entity.getAdmissDate(),
-                entity.getDemissDate());
+                entity.getDemissDate(),
+                entity.getIdLoteOrigem());
     }
+
 }

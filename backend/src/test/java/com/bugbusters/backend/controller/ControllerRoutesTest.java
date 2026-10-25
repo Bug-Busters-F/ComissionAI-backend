@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -18,14 +19,24 @@ import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "ai.service.url=http://localhost:8000")
 @ActiveProfiles("test")
+@TestPropertySource(properties = "ai.service.url=http://localhost:8000")
 class ControllerRoutesTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
 
     private MockMvc mockMvc;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
+
+    @Autowired
+    private com.bugbusters.backend.importbase.ImportService importService;
+
+    @org.springframework.beans.factory.annotation.Value("${ai.service.url:http://localhost:8000}")
+    private String aiServiceUrl;
 
     @Autowired
     private org.springframework.web.client.RestClient.Builder aiRestClientBuilder;
@@ -49,6 +60,23 @@ class ControllerRoutesTest {
 
     @Autowired
     private com.bugbusters.backend.basecomiss.BaseComissRepository baseComissRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.SimulacaoVendaRepository simulacaoVendaRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.SimulacaoRepository simulacaoRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.RegraRepository regraRepository;
+
+    @Autowired
+    private com.bugbusters.backend.repository.CampanhaRepository campanhaRepository;
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.bugbusters.backend.support.CampaignDataCleanup.clear(cleanupJdbc);
+    }
 
     @BeforeEach
     void setUp() {
@@ -82,11 +110,36 @@ class ControllerRoutesTest {
             r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
             registrationRepository.save(r);
         }
-        if (baseComissRepository.findFirstByBrandCodeAndPositionCodeOrderByReferenceMonthDesc(10, 150).isEmpty()) {
+        if (registrationRepository.findByRegistration("MATRIC-1234").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-1234");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (registrationRepository.findByRegistration("MATRIC-IDEMPOTENTE").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-IDEMPOTENTE");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (registrationRepository.findByRegistration("MATRIC-CONFLITO").isEmpty()) {
+            com.bugbusters.backend.registration.Registration r = new com.bugbusters.backend.registration.Registration();
+            r.setRegistration("MATRIC-CONFLITO");
+            r.setStore(storeRepository.findByCode(62).get());
+            r.setPosition(positionRepository.findByCode(150).get());
+            r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
+            registrationRepository.save(r);
+        }
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, java.time.LocalDate.of(2026, 10, 1)).isEmpty()) {
             com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
                     brandRepository.findByCode(10).get(),
                     positionRepository.findByCode(150).get(),
-                    new java.math.BigDecimal("0.1000")
+                    new java.math.BigDecimal("0.1000"),
+                    java.time.LocalDate.of(2026, 10, 1)
             );
             baseComissRepository.save(bc);
         }
@@ -96,12 +149,13 @@ class ControllerRoutesTest {
     // 2. Calculo Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/comissoes/calcular - Deve processar cálculo com 200 OK")
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve processar cálculo com 200 OK utilizando motor compartilhado")
     void deveCalcularComissao() throws Exception {
         String payload = """
             {
                 "id": "11111111-1111-1111-1111-111111111111",
-                "matricula": "MATRIC-1234",
+                "matricula": "MAT-00456",
+                "codMarca": 10,
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
                 "dataVenda": "2026-10-05"
@@ -113,10 +167,10 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.protocoloCalculo").isNotEmpty())
-                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
-                .andExpect(jsonPath("$.matricula").value("MATRIC-1234"))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
                 .andExpect(jsonPath("$.valorOriginal").value(1000.00))
                 .andExpect(jsonPath("$.valorComissao").value(100.00))
+                .andExpect(jsonPath("$.taxaAplicada").value(0.1000))
                 .andExpect(jsonPath("$.dataCalculo").isNotEmpty());
     }
 
@@ -125,7 +179,8 @@ class ControllerRoutesTest {
     void deveRejeitarCalculoSemIdCom400BadRequest() throws Exception {
         String payloadSemId = """
             {
-                "matricula": "MATRIC-SEM-ID",
+                "matricula": "MAT-00456",
+                "codMarca": 10,
                 "valorVenda": 1000.00,
                 "canal": "ECOMMERCE",
                 "dataVenda": "2026-10-05"
@@ -142,12 +197,34 @@ class ControllerRoutesTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/comissoes/calcular - Deve rejeitar cálculo quando vínculos essenciais forem inválidos (BACK-14)")
+    void deveRejeitarCalculoComVinculoInvalido() throws Exception {
+        String payloadInvalido = """
+            {
+                "id": "99999999-9999-9999-9999-999999999999",
+                "matricula": "MAT-INEXISTENTE",
+                "codMarca": 10,
+                "valorVenda": 1000.00,
+                "canal": "ECOMMERCE",
+                "dataVenda": "2026-10-05"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/comissoes/calcular")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadInvalido))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
     @DisplayName("POST /api/v1/comissoes/calcular - Deve retornar resultado idêntico sem duplicar logs em caso de reenvio (Idempotência)")
     void deveRetornarMesmoResultadoEmReenvioIdentico() throws Exception {
         String payload = """
             {
                 "id": "22222222-2222-2222-2222-222222222222",
-                "matricula": "MATRIC-IDEMPOTENTE",
+                "matricula": "MAT-00456",
+                "codMarca": 10,
                 "valorVenda": 2000.00,
                 "canal": "LOJA_FISICA",
                 "dataVenda": "2026-10-10"
@@ -159,7 +236,7 @@ class ControllerRoutesTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payload))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
                 .andExpect(jsonPath("$.valorComissao").value(200.00))
                 .andReturn().getResponse().getContentAsString();
 
@@ -171,7 +248,7 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.protocoloCalculo").value(protocoloOriginal))
-                .andExpect(jsonPath("$.matricula").value("MATRIC-IDEMPOTENTE"))
+                .andExpect(jsonPath("$.matricula").value("MAT-00456"))
                 .andExpect(jsonPath("$.valorComissao").value(200.00));
     }
 
@@ -181,7 +258,8 @@ class ControllerRoutesTest {
         String payloadOriginal = """
             {
                 "id": "33333333-3333-3333-3333-333333333333",
-                "matricula": "MATRIC-CONFLITO",
+                "matricula": "MAT-00456",
+                "codMarca": 10,
                 "valorVenda": 500.00,
                 "canal": "APP",
                 "dataVenda": "2026-10-12"
@@ -191,7 +269,8 @@ class ControllerRoutesTest {
         String payloadDivergente = """
             {
                 "id": "33333333-3333-3333-3333-333333333333",
-                "matricula": "MATRIC-CONFLITO",
+                "matricula": "MAT-00456",
+                "codMarca": 10,
                 "valorVenda": 750.00,
                 "canal": "APP",
                 "dataVenda": "2026-10-12"
@@ -204,7 +283,7 @@ class ControllerRoutesTest {
                 .content(payloadOriginal))
                 .andExpect(status().isOk());
 
-        // 2ª chamada com valor alterado para a mesma matrícula e data de venda -> Rejeitada
+        // 2ª chamada com valor alterado para a mesma venda -> Rejeitada
         mockMvc.perform(post("/api/v1/comissoes/calcular")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payloadDivergente))
@@ -345,7 +424,7 @@ class ControllerRoutesTest {
             }
             """;
 
-        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo("http://localhost:8000/api/v1/interpretar"))
+        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(aiServiceUrl + "/api/v1/interpretar"))
                 .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.POST))
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess(respostaSimuladaPython, MediaType.APPLICATION_JSON));
 
@@ -388,8 +467,8 @@ class ControllerRoutesTest {
     // 4. Importacao Controller
     // ==========================================
     @Test
-    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart SALES com 201 CREATED")
-    void deveRealizarUploadMultipart() throws Exception {
+    @DisplayName("Upload SALES sem dados retorna 202 e relatório final FALHOU")
+    void deveRejeitarUploadMultipartSemDados() throws Exception {
         byte[] excelBytes;
         try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
              java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
@@ -407,17 +486,26 @@ class ControllerRoutesTest {
                 excelBytes
         );
 
-        mockMvc.perform(multipart("/api/v1/imports/upload")
+        var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
-                .param("importType", "SALES"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.nomeArquivo").value("vendas_outubro.xlsx"))
-                .andExpect(jsonPath("$.tipoBase").value("SALES"))
-                .andExpect(jsonPath("$.totalLinhas").value(0));
+                .param("importType", "SALES")
+                .param("competencia", "2026-10"))
+                .andExpect(status().isAccepted())
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.reportId").isNumber())
+                .andReturn();
+        long id = ((Number) com.jayway.jsonpath.JsonPath.read(accepted.getResponse().getContentAsString(), "$.reportId")).longValue();
+        awaitImport(id);
+        mockMvc.perform(get("/api/v1/imports/{reportId}", id))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.status").value("FALHOU"))
+                .andExpect(jsonPath("$.totalLinhas").value(0))
+                .andExpect(jsonPath("$.mensagem").value("Arquivo sem linhas de dados."));
     }
 
     @Test
-    @DisplayName("POST /api/v1/imports/upload - Deve realizar upload multipart HR com 201 CREATED e persistir matricula")
+    @DisplayName("Upload HR retorna 202 e relatório final CONCLUIDO")
     void deveRealizarUploadHRComSucesso() throws Exception {
         byte[] excelBytes;
         try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
@@ -452,13 +540,49 @@ class ControllerRoutesTest {
                 excelBytes
         );
 
-        mockMvc.perform(multipart("/api/v1/imports/upload")
+        var accepted = mockMvc.perform(multipart("/api/v1/imports/upload")
                 .file(file)
                 .param("importType", "HR"))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.nomeArquivo").value("base_rh.xlsx"))
                 .andExpect(jsonPath("$.tipoBase").value("HR"))
+                .andExpect(jsonPath("$.reportId").isNumber())
+                .andReturn();
+        long id = ((Number) com.jayway.jsonpath.JsonPath.read(accepted.getResponse().getContentAsString(), "$.reportId")).longValue();
+        org.junit.jupiter.api.Assertions.assertEquals("/api/v1/imports/" + id, accepted.getResponse().getHeader("Location"));
+        awaitImport(id);
+        mockMvc.perform(get("/api/v1/imports/{reportId}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportId").value(id))
+                .andExpect(jsonPath("$.status").value("CONCLUIDO"))
                 .andExpect(jsonPath("$.totalLinhas").value(1));
+    }
+
+    @Test
+    void deveRetornar404ParaReportInexistente() throws Exception {
+        mockMvc.perform(get("/api/v1/imports/{reportId}", Long.MAX_VALUE))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void swaggerDocumentaUploadAssincronoEConsultaDeReport() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/v1/imports/{reportId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/imports/upload'].post.responses['202']").exists());
+    }
+
+    private void awaitImport(long id) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+        do {
+            var report = importService.getReport(id);
+            if (report.status() == com.bugbusters.backend.importbase.ImportStatus.CONCLUIDO
+                    || report.status() == com.bugbusters.backend.importbase.ImportStatus.FALHOU) {
+                return;
+            }
+            Thread.sleep(25);
+        } while (System.nanoTime() < deadline);
+        throw new AssertionError("Importação não finalizou: " + id);
     }
 
     // ==========================================
@@ -471,10 +595,14 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Black Friday 2026",
                 "textoOriginal": "Comissão de 5% para vendas no e-commerce em novembro",
-                "canal": "ECOMMERCE",
-                "taxa": 0.0500,
                 "dataInicio": "2026-11-01",
-                "dataFim": "2026-11-30"
+                "dataFim": "2026-11-30",
+                "regras": [
+                    {
+                        "canal": "ECOMMERCE",
+                        "taxa": 0.0500
+                    }
+                ]
             }
             """;
 
@@ -486,13 +614,11 @@ class ControllerRoutesTest {
                 .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.titulo").value("Campanha Black Friday 2026"))
                 .andExpect(jsonPath("$.estado").value("DRAFT"))
-                .andExpect(jsonPath("$.regra.canal").value("ECOMMERCE"))
-                .andExpect(jsonPath("$.regra.taxa").value(0.0500))
-                .andExpect(jsonPath("$.regra.status").value("DRAFT"));
+                .andExpect(jsonPath("$.regras", hasSize(1)))
+                .andExpect(jsonPath("$.regras[0].canal").value("ECOMMERCE"))
+                .andExpect(jsonPath("$.regras[0].taxa").value(0.0500))
+                .andExpect(jsonPath("$.regras[0].status").value("DRAFT"));
     }
-
-    
-
 
     @Test
     @DisplayName("POST /api/v1/campanhas - Deve cadastrar campanha com dimensões de público-alvo e sem canal")
@@ -501,14 +627,18 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Gerente Quiosque Marca Azul",
                 "textoOriginal": "Comissão de 0.75% para gerente quiosque da marca azul loja 30",
-                "codMarca": 30,
-                "codLoja": 30,
-                "codCargo": 150,
-                "descriCargo": "GERENTE QUIOSQUE",
-                "matricula": "MATRIC-999",
-                "taxa": 0.0075,
                 "dataInicio": "2026-11-01",
-                "dataFim": "2026-11-30"
+                "dataFim": "2026-11-30",
+                "regras": [
+                    {
+                        "codMarca": 30,
+                        "codLoja": 30,
+                        "codCargo": 150,
+                        "descriCargo": "GERENTE QUIOSQUE",
+                        "matricula": "MATRIC-999",
+                        "taxa": 0.0075
+                    }
+                ]
             }
             """;
 
@@ -517,13 +647,13 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.titulo").value("Campanha Gerente Quiosque Marca Azul"))
-                .andExpect(jsonPath("$.regra.canal").doesNotExist())
-                .andExpect(jsonPath("$.regra.codMarca").value(30))
-                .andExpect(jsonPath("$.regra.codLoja").value(30))
-                .andExpect(jsonPath("$.regra.codCargo").value(150))
-                .andExpect(jsonPath("$.regra.descriCargo").value("GERENTE QUIOSQUE"))
-                .andExpect(jsonPath("$.regra.matricula").value("MATRIC-999"))
-                .andExpect(jsonPath("$.regra.taxa").value(0.0075));
+                .andExpect(jsonPath("$.regras[0].canal").doesNotExist())
+                .andExpect(jsonPath("$.regras[0].codMarca").value(30))
+                .andExpect(jsonPath("$.regras[0].codLoja").value(30))
+                .andExpect(jsonPath("$.regras[0].codCargo").value(150))
+                .andExpect(jsonPath("$.regras[0].descriCargo").value("GERENTE QUIOSQUE"))
+                .andExpect(jsonPath("$.regras[0].matricula").value("MATRIC-999"))
+                .andExpect(jsonPath("$.regras[0].taxa").value(0.0075));
     }
 
     @Test
@@ -533,9 +663,13 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Empresa Vermelho",
                 "textoOriginal": "Comissão de 4% para a empresa vermelho",
-                "descrMarca": "  veRmelho  ",
-                "taxa": 0.0400,
-                "dataInicio": "2026-11-01"
+                "dataInicio": "2026-11-01",
+                "regras": [
+                    {
+                        "descrMarca": "  veRmelho  ",
+                        "taxa": 0.0400
+                    }
+                ]
             }
             """;
 
@@ -543,8 +677,8 @@ class ControllerRoutesTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payload))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.regra.descrMarca").value("VERMELHO"))
-                .andExpect(jsonPath("$.regra.codMarca").value(40));
+                .andExpect(jsonPath("$.regras[0].descrMarca").value("VERMELHO"))
+                .andExpect(jsonPath("$.regras[0].codMarca").value(40));
     }
 
     @Test
@@ -554,9 +688,13 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Sem Fim",
                 "textoOriginal": "Comissão de 6% no varejo físico",
-                "canal": "LOJA_FISICA",
-                "taxa": 0.0600,
-                "dataInicio": "2026-10-01"
+                "dataInicio": "2026-10-01",
+                "regras": [
+                    {
+                        "canal": "LOJA_FISICA",
+                        "taxa": 0.0600
+                    }
+                ]
             }
             """;
 
@@ -565,7 +703,9 @@ class ControllerRoutesTest {
                 .content(payload))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.dataInicio").value("2026-10-01"))
-                .andExpect(jsonPath("$.dataFim").value("2026-10-31"));
+                .andExpect(jsonPath("$.dataFim").value("2026-10-31"))
+                .andExpect(jsonPath("$.regras[0].dataInicio").value("2026-10-01"))
+                .andExpect(jsonPath("$.regras[0].dataFim").value("2026-10-31"));
     }
 
     @Test
@@ -575,8 +715,7 @@ class ControllerRoutesTest {
             {
                 "titulo": "",
                 "textoOriginal": "",
-                "canal": "",
-                "taxa": -0.05
+                "regras": []
             }
             """;
 
@@ -595,10 +734,14 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Datas Invertidas",
                 "textoOriginal": "Texto da regra",
-                "canal": "ECOMMERCE",
-                "taxa": 0.0500,
                 "dataInicio": "2026-12-01",
-                "dataFim": "2026-11-01"
+                "dataFim": "2026-11-01",
+                "regras": [
+                    {
+                        "canal": "ECOMMERCE",
+                        "taxa": 0.0500
+                    }
+                ]
             }
             """;
 
@@ -618,10 +761,14 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Ciclo Vida",
                 "textoOriginal": "Texto original",
-                "canal": "APP",
-                "taxa": 0.0400,
                 "dataInicio": "2026-09-01",
-                "dataFim": "2026-09-30"
+                "dataFim": "2026-09-30",
+                "regras": [
+                    {
+                        "canal": "APP",
+                        "taxa": 0.0400
+                    }
+                ]
             }
             """;
 
@@ -638,7 +785,7 @@ class ControllerRoutesTest {
         mockMvc.perform(get("/api/v1/campanhas/" + campanhaId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.titulo").value("Campanha Ciclo Vida"))
-                .andExpect(jsonPath("$.regra.canal").value("APP"));
+                .andExpect(jsonPath("$.regras[0].canal").value("APP"));
 
         // 3. Listar ativas
         mockMvc.perform(get("/api/v1/campanhas"))
@@ -650,10 +797,14 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Ciclo Vida Atualizada",
                 "textoOriginal": "Texto alterado",
-                "canal": "APP_PREMIUM",
-                "taxa": 0.0600,
                 "dataInicio": "2026-09-01",
-                "dataFim": "2026-10-15"
+                "dataFim": "2026-10-15",
+                "regras": [
+                    {
+                        "canal": "APP_PREMIUM",
+                        "taxa": 0.0600
+                    }
+                ]
             }
             """;
 
@@ -662,8 +813,8 @@ class ControllerRoutesTest {
                 .content(atualizarPayload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.titulo").value("Campanha Ciclo Vida Atualizada"))
-                .andExpect(jsonPath("$.regra.canal").value("APP_PREMIUM"))
-                .andExpect(jsonPath("$.regra.taxa").value(0.0600));
+                .andExpect(jsonPath("$.regras[0].canal").value("APP_PREMIUM"))
+                .andExpect(jsonPath("$.regras[0].taxa").value(0.0600));
 
         // 5. Exclusão lógica (soft delete)
         mockMvc.perform(delete("/api/v1/campanhas/" + campanhaId))
@@ -676,17 +827,21 @@ class ControllerRoutesTest {
     }
 
     @Test
-    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve transicionar estados e sincronizar status da regra vinculada")
+    @DisplayName("PATCH /api/v1/campanhas/{id}/estado - Deve transicionar estados e sincronizar status das regras")
     void deveAlterarEstadoDaCampanhaESincronizarRegra() throws Exception {
         // Criar campanha (inicia em DRAFT)
         String criarPayload = """
             {
                 "titulo": "Campanha Teste Estados",
                 "textoOriginal": "Comissão de 4.5%",
-                "canal": "ECOMMERCE",
-                "taxa": 0.0450,
                 "dataInicio": "2026-10-01",
-                "dataFim": "2026-10-31"
+                "dataFim": "2026-10-31",
+                "regras": [
+                    {
+                        "canal": "ECOMMERCE",
+                        "taxa": 0.0450
+                    }
+                ]
             }
             """;
 
@@ -695,18 +850,31 @@ class ControllerRoutesTest {
                 .content(criarPayload))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.estado").value("DRAFT"))
-                .andExpect(jsonPath("$.regra.status").value("DRAFT"))
+                .andExpect(jsonPath("$.regras[0].status").value("DRAFT"))
                 .andReturn().getResponse().getContentAsString();
 
         long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(postResponse).get("id").asLong();
 
-        // 1. Alterar para ATIVA
+        // 1. Simular e aceitar simulação para conformidade BACK-8
+        String simResponse = mockMvc.perform(post("/api/v1/simulacoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"competencia\":\"2026-10\",\"campanhaId\":%d}", campanhaId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String simId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(simResponse).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/simulacoes/" + simId + "/aceite")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aceitoPor\":\"diretoria@empresa.com\",\"motivo\":\"Aprovado no teste\"}"))
+                .andExpect(status().isOk());
+
+        // 2. Alterar para ATIVA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"estado\": \"ATIVA\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado").value("ATIVA"))
-                .andExpect(jsonPath("$.regra.status").value("ATIVA"));
+                .andExpect(jsonPath("$.regras[0].status").value("ATIVA"));
 
         // 2. Verificar filtro GET por estado
         mockMvc.perform(get("/api/v1/campanhas").param("estado", "ATIVA"))
@@ -719,7 +887,7 @@ class ControllerRoutesTest {
                 .content("{\"estado\": \"INATIVA\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado").value("INATIVA"))
-                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+                .andExpect(jsonPath("$.regras[0].status").value("INATIVA"));
 
         // 4. Alterar para CONCLUIDA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
@@ -727,7 +895,7 @@ class ControllerRoutesTest {
                 .content("{\"estado\": \"CONCLUIDA\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado").value("CONCLUIDA"))
-                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+                .andExpect(jsonPath("$.regras[0].status").value("INATIVA"));
 
         // 5. Alterar para CANCELADA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
@@ -735,7 +903,7 @@ class ControllerRoutesTest {
                 .content("{\"estado\": \"CANCELADA\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado").value("CANCELADA"))
-                .andExpect(jsonPath("$.regra.status").value("INATIVA"));
+                .andExpect(jsonPath("$.regras[0].status").value("INATIVA"));
 
         // 6. Voltar para DRAFT
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
@@ -743,7 +911,7 @@ class ControllerRoutesTest {
                 .content("{\"estado\": \"DRAFT\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado").value("DRAFT"))
-                .andExpect(jsonPath("$.regra.status").value("DRAFT"));
+                .andExpect(jsonPath("$.regras[0].status").value("DRAFT"));
     }
 
     @Test
@@ -753,10 +921,14 @@ class ControllerRoutesTest {
             {
                 "titulo": "Campanha Para Erro Estado",
                 "textoOriginal": "Texto",
-                "canal": "LOJA",
-                "taxa": 0.0500,
                 "dataInicio": "2026-10-01",
-                "dataFim": "2026-10-31"
+                "dataFim": "2026-10-31",
+                "regras": [
+                    {
+                        "canal": "LOJA",
+                        "taxa": 0.0500
+                    }
+                ]
             }
             """;
 

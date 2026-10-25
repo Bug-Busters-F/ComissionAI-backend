@@ -3,6 +3,8 @@ package com.bugbusters.backend.model;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "tb_campanha")
@@ -28,6 +30,25 @@ public class Campanha {
     @Column(nullable = false, length = 50)
     private EstadoCampanha estado = EstadoCampanha.DRAFT;
 
+    @OneToMany(mappedBy = "campanha", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Regra> regras = new ArrayList<>();
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "simulacao_aceita_id")
+    private Simulacao simulacaoAceita;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "versao_vigente_id")
+    private CampanhaVersao versaoVigente;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "versao_proposta_id")
+    private CampanhaVersao versaoProposta;
+
+    @Version
+    @Column(name = "versao_controle", nullable = false)
+    private Long versaoControle = 0L;
+
     @Column(name = "removido_em")
     private OffsetDateTime removidoEm;
 
@@ -51,6 +72,34 @@ public class Campanha {
     public void prePersist() {
         if (this.criadoEm == null) {
             this.criadoEm = OffsetDateTime.now();
+        }
+    }
+
+    // Gestão da Coleção de Regras
+    public List<Regra> getRegras() {
+        return regras;
+    }
+
+    public void setRegras(List<Regra> regras) {
+        this.regras.clear();
+        if (regras != null) {
+            for (Regra r : regras) {
+                adicionarRegra(r);
+            }
+        }
+    }
+
+    public void adicionarRegra(Regra regra) {
+        if (regra != null) {
+            this.regras.add(regra);
+            regra.setCampanha(this);
+        }
+    }
+
+    public void removerRegra(Regra regra) {
+        if (regra != null) {
+            this.regras.remove(regra);
+            regra.setCampanha(null);
         }
     }
 
@@ -84,4 +133,32 @@ public class Campanha {
     
     public OffsetDateTime getAtualizadoEm() { return atualizadoEm; }
     public void setAtualizadoEm(OffsetDateTime atualizadoEm) { this.atualizadoEm = atualizadoEm; }
+
+    public Simulacao getSimulacaoAceita() { return simulacaoAceita; }
+    public void setSimulacaoAceita(Simulacao simulacaoAceita) { this.simulacaoAceita = simulacaoAceita; }
+    public CampanhaVersao getVersaoVigente() { return versaoVigente; }
+    public void setVersaoVigente(CampanhaVersao versaoVigente) { this.versaoVigente = versaoVigente; }
+    public CampanhaVersao getVersaoProposta() { return versaoProposta; }
+    public void setVersaoProposta(CampanhaVersao versaoProposta) { this.versaoProposta = versaoProposta; }
+    public Long getVersaoControle() { return versaoControle; }
+
+    public CampanhaVersao versaoParaRevisao() {
+        return versaoProposta != null ? versaoProposta : versaoVigente;
+    }
+
+    public String tituloParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getTitulo() : titulo;
+    }
+
+    public String textoParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getTextoOriginal() : textoOriginal;
+    }
+
+    public LocalDate inicioParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getDataInicio() : dataInicio;
+    }
+
+    public LocalDate fimParaRevisao() {
+        return versaoParaRevisao() != null ? versaoParaRevisao().getDataFim() : dataFim;
+    }
 }

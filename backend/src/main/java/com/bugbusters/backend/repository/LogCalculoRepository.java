@@ -26,6 +26,31 @@ public interface LogCalculoRepository extends JpaRepository<LogCalculoImutavel, 
      */
     List<LogCalculoImutavel> findByMatricula(String matricula);
 
+    boolean existsByIdLoteOrigem(String idLoteOrigem);
+
+    List<LogCalculoImutavel> findTop5ByIdLoteOrigem(String idLoteOrigem);
+
+    boolean existsByIdVendaIn(java.util.Collection<UUID> idsVendas);
+
+    List<LogCalculoImutavel> findTop5ByIdVendaIn(java.util.Collection<UUID> idsVendas);
+
+    boolean existsByMatriculaIn(java.util.Collection<String> matriculas);
+
+    List<LogCalculoImutavel> findTop5ByMatriculaIn(java.util.Collection<String> matriculas);
+
+    @org.springframework.data.jpa.repository.Query("""
+        SELECT COUNT(l) FROM LogCalculoImutavel l
+        WHERE l.codMarca = :codMarca
+          AND l.codCargo = :codCargo
+          AND l.dataVenda BETWEEN :inicio AND :fim
+    """)
+    long countByMarcaCargoEPeriodo(
+            @org.springframework.data.repository.query.Param("codMarca") Integer codMarca,
+            @org.springframework.data.repository.query.Param("codCargo") Integer codCargo,
+            @org.springframework.data.repository.query.Param("inicio") java.time.LocalDate inicio,
+            @org.springframework.data.repository.query.Param("fim") java.time.LocalDate fim
+    );
+
     /**
      * Blindagem de repositório contra exclusão acidental de registros imutáveis (BUG-23).
      */

@@ -46,5 +46,16 @@ public record CalculoItemResponseDTO(
     String origemTaxa,
 
     @Schema(description = "Data e hora do processamento", example = "2026-09-25T14:30:00Z")
-    OffsetDateTime dataCalculo
-) {}
+    OffsetDateTime dataCalculo,
+
+    @Schema(description = "Número da versão vigente da campanha aplicada", example = "2")
+    Integer versaoCampanhaNumero
+) {
+    public CalculoItemResponseDTO(UUID protocoloCalculo, UUID idVenda, String matricula, Integer codCargo,
+                                  Integer codMarca, Integer codLoja, LocalDate dataVenda, BigDecimal valorVenda,
+                                  BigDecimal taxaAplicada, BigDecimal valorComissao, Long idRegra,
+                                  String origemTaxa, OffsetDateTime dataCalculo) {
+        this(protocoloCalculo, idVenda, matricula, codCargo, codMarca, codLoja, dataVenda, valorVenda,
+                taxaAplicada, valorComissao, idRegra, origemTaxa, dataCalculo, null);
+    }
+}

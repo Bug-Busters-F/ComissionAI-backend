@@ -1,8 +1,12 @@
 package com.bugbusters.backend.controller;
 
 import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.AtivarCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
+import com.bugbusters.backend.dto.campanha.VersaoCampanhaResumoResponse;
+import com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse;
+import com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse;
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
 import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.service.CampanhaService;
@@ -21,7 +25,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/campanhas")
-@Tag(name = "1. Campanhas e Regras", description = "Gerenciamento do ciclo de vida de campanhas e propostas de regras")
+@Tag(name = "Campanhas e Regras", description = "Gerenciamento do ciclo de vida de campanhas e propostas de regras")
 public class CampanhaController {
 
     private final CampanhaService campanhaService;
@@ -30,9 +34,9 @@ public class CampanhaController {
         this.campanhaService = campanhaService;
     }
 
-    @Operation(summary = "Cadastrar campanha com regra vinculada", description = "Salva a campanha como rascunho (DRAFT). Caso a data final seja omitida, atribui 30 dias contados da data atual.")
+    @Operation(summary = "Cadastrar campanha com coleção de regras vinculadas", description = "Salva a campanha como rascunho (DRAFT) ou estado desejado com suas regras vinculadas. Permite salvar propostas incompletas como rascunho, bloqueando ativação automática.")
     @ApiResponse(responseCode = "201", description = "Campanha criada com sucesso")
-    @ApiResponse(responseCode = "400", description = "Dados inválidos ou período incoerente", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "Dados inválidos, período incoerente ou tentativa de ativar com regras incompletas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PostMapping
     public ResponseEntity<CampanhaResponse> criarCampanha(@Valid @RequestBody CampanhaRequest request) {
         CampanhaResponse response = campanhaService.criarCampanha(request);
@@ -43,36 +47,111 @@ public class CampanhaController {
         return ResponseEntity.created(uri).body(response);
     }
 
-    @Operation(summary = "Listar campanhas", description = "Lista todas as campanhas cadastradas não removidas, com filtro opcional por estado (DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA).")
+    @Operation(summary = "Listar campanhas com coleções de regras", description = "Lista todas as campanhas cadastradas não removidas com suas respectivas coleções de regras, com filtro opcional por estado.")
     @GetMapping
     public ResponseEntity<List<CampanhaResponse>> listarCampanhas(
             @RequestParam(required = false) EstadoCampanha estado) {
         return ResponseEntity.ok(campanhaService.listar(estado));
     }
 
-    @Operation(summary = "Alterar estado da campanha", description = "Transiciona o estado da campanha para qualquer um dos valores: DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA e sincroniza a regra vinculada.")
+    @Operation(summary = "Alterar estado da campanha", description = "Transiciona o estado da campanha para qualquer um dos valores: DRAFT, ATIVA, INATIVA, CONCLUIDA, CANCELADA e sincroniza todas as regras da coleção. Bloqueia ativação se houver regras incompletas.")
     @ApiResponse(responseCode = "200", description = "Estado alterado com sucesso")
-    @ApiResponse(responseCode = "400", description = "Estado inválido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "Estado inválido ou impedimento por regras incompletas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Campanha não encontrada ou excluída", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @PatchMapping("/{id}/estado")
     public ResponseEntity<CampanhaResponse> alterarEstado(
             @PathVariable Long id,
-            @Valid @RequestBody AlterarEstadoCampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.alterarEstado(id, request.estado()));
+            @Valid @RequestBody AlterarEstadoCampanhaRequest request,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.alterarEstadoComRevisao(id, request, revisao));
     }
 
-    @Operation(summary = "Consultar detalhe da campanha por ID")
-    @ApiResponse(responseCode = "200", description = "Campanha localizada")
+    @Operation(
+            summary = "Ativar campanha com validação vinculada à simulação aceita (BACK-8)",
+            description = """
+                    Ativa a campanha garantindo estritamente que existe uma simulação aceita sem impedimentos
+                    e que nenhuma regra, taxa ou período foi alterado desde o aceite formal.
+                    """
+    )
+    @ApiResponse(responseCode = "200", description = "Campanha ativada com sucesso")
+    @ApiResponse(responseCode = "400", description = "Ativação bloqueada por falta de simulação aceita ou divergência na proposta", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/{id}/ativar")
+    public ResponseEntity<CampanhaResponse> ativarCampanha(@PathVariable Long id,
+            @RequestBody(required = false) AtivarCampanhaRequest request,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.ativarRevisao(id, request != null ? request.versaoEsperada() : null, revisao));
+    }
+
+    @Operation(
+            summary = "Conferir correspondência entre proposta atual e simulação aceita (BACK-8)",
+            description = """
+                    Verifica se a campanha está apta para ativação em produção, comparando suas regras
+                    e vigência atuais com a assinatura da simulação aceita e detalhando eventuais divergências.
+                    """
+    )
+    @ApiResponse(responseCode = "200", description = "Resultado da conferência retornado com sucesso")
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/{id}/conferencia-simulacao")
+    public ResponseEntity<com.bugbusters.backend.dto.simulacao.ConferenciaSimulacaoResponse> conferirSimulacao(@PathVariable Long id) {
+        return ResponseEntity.ok(campanhaService.conferirSimulacao(id));
+    }
+
+    @Operation(summary = "Consultar detalhe da campanha por ID com coleção de regras")
+    @ApiResponse(responseCode = "200", description = "Campanha localizada com coleção de regras")
     @ApiResponse(responseCode = "404", description = "Campanha não encontrada ou excluída", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @GetMapping("/{id}")
     public ResponseEntity<CampanhaResponse> buscarPorId(@PathVariable Long id) {
         return ResponseEntity.ok(campanhaService.buscarPorId(id));
     }
 
-    @Operation(summary = "Atualizar campanha e regra vinculada")
+    @Operation(summary = "Listar histórico de versões publicadas da campanha")
+    @GetMapping("/{id}/versoes")
+    public ResponseEntity<List<VersaoCampanhaResumoResponse>> listarHistorico(@PathVariable Long id) {
+        return ResponseEntity.ok(campanhaService.listarHistorico(id));
+    }
+
+    @Operation(summary = "Consultar conteúdo imutável de uma versão publicada")
+    @GetMapping("/{id}/versoes/{numero}")
+    public ResponseEntity<VersaoCampanhaDetalheResponse> buscarVersao(
+            @PathVariable Long id, @PathVariable Integer numero) {
+        return ResponseEntity.ok(campanhaService.buscarVersaoPublicada(id, numero));
+    }
+
+    @Operation(summary = "Comparar campos e regras entre duas versões publicadas")
+    @GetMapping("/{id}/versoes/comparacao")
+    public ResponseEntity<ComparacaoVersaoResponse> compararVersoes(
+            @PathVariable Long id,
+            @RequestParam Integer versaoBase,
+            @RequestParam Integer versaoComparada) {
+        return ResponseEntity.ok(campanhaService.compararVersoes(id, versaoBase, versaoComparada));
+    }
+
+    @Operation(summary = "Atualizar campanha e coleção de regras vinculadas", description = "Atualiza dados da campanha e substitui transacionalmente a coleção de regras.")
     @PutMapping("/{id}")
-    public ResponseEntity<CampanhaResponse> atualizarCampanha(@PathVariable Long id, @Valid @RequestBody CampanhaRequest request) {
-        return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request));
+    public ResponseEntity<CampanhaResponse> atualizarCampanha(@PathVariable Long id, @Valid @RequestBody CampanhaRequest request,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.atualizarCampanha(id, request, revisao, true));
+    }
+
+    @PatchMapping("/{id}/progresso")
+    public ResponseEntity<com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO> atualizarProgresso(
+            @PathVariable Long id, @Valid @RequestBody com.bugbusters.backend.dto.campanha.ProgressoCampanhaDTO request) {
+        return ResponseEntity.ok(campanhaService.atualizarProgresso(id, request));
+    }
+
+    @PostMapping("/{id}/proposta")
+    public ResponseEntity<CampanhaResponse> iniciarProposta(@PathVariable Long id,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        return ResponseEntity.ok(campanhaService.iniciarProposta(id, revisao));
+    }
+
+    @Operation(summary = "Cancelar proposta de alteração sem afetar a versão vigente")
+    @DeleteMapping("/{id}/proposta")
+    public ResponseEntity<Void> cancelarProposta(@PathVariable Long id,
+            @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
+        campanhaService.cancelarProposta(id, revisao, true);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Remoção lógica da campanha", description = "Aplica soft delete preservando referências históricas para cálculos.")
