@@ -81,11 +81,7 @@ class SimulacaoControllerIntegrationTest {
     @Autowired
     private com.bugbusters.backend.repository.SimulacaoRepository simulacaoRepository;
 
-    @org.junit.jupiter.api.AfterEach
-    void tearDown() {
-        simulacaoVendaRepository.deleteAllInBatch();
-        simulacaoRepository.deleteAllInBatch();
-    }
+
 
     private ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 

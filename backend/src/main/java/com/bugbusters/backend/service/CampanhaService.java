@@ -63,6 +63,7 @@ public class CampanhaService {
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
         }
+        validarIdentificadores(request.regras());
         validarFaixas(request.regras());
 
         boolean possuiIncompleta = request.regras().stream().anyMatch(this::isRegraIncompleta);
@@ -208,6 +209,7 @@ public class CampanhaService {
         if (request.regras() == null || request.regras().isEmpty()) {
             throw new BusinessException("A campanha deve conter pelo menos uma regra vinculada.");
         }
+        validarIdentificadores(request.regras());
         validarFaixas(request.regras());
 
         if (request.estado() == EstadoCampanha.ATIVA) {
@@ -677,12 +679,23 @@ public class CampanhaService {
                 r.getValorMinimo(), r.getMinInclusivo(), r.getValorMaximo(), r.getMaxInclusivo(), r.getTipoOperacao(),
                 r.getValorAjuste(), r.getTipoBaseReferencia(), r.getTaxaBaseConsultada(), r.getDescricaoReferencia(),
                 r.getTaxa(), r.getExplicacao(), r.getPythonEquivalente(), r.getPendencias(), r.getCompleta(),
-                r.getBonusPercentual(), r.getBonusValorFixo());
+                r.getBonusPercentual(), r.getBonusValorFixo(), RastreabilidadeRegraService.ler(r));
+    }
+
+    private void validarIdentificadores(List<RegraItemRequest> regras) {
+        Set<String> blocos = new HashSet<>();
+        for (RegraItemRequest regra : regras) {
+            if (regra.blocoId() != null && !regra.blocoId().isBlank() && !blocos.add(regra.blocoId().trim())) {
+                throw new BusinessException("Cada regra deve ter um identificador de bloco distinto para preservar o histórico.");
+            }
+        }
     }
 
     private Map<String, Regra> indexarRegras(Long versaoId) {
         return regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versaoId).stream()
-                .collect(java.util.stream.Collectors.toMap(Regra::getIdentificadorLogico, r -> r, (a, b) -> a, LinkedHashMap::new));
+                .collect(java.util.stream.Collectors.toMap(Regra::getIdentificadorLogico, r -> r, (a, b) -> {
+                    throw new BusinessException("Esta versão contém identificadores de regra duplicados e não pode ser comparada sem correção.");
+                }, LinkedHashMap::new));
     }
 
     private com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO compararRegra(String chave, Regra anterior, Regra atual) {
@@ -716,6 +729,8 @@ public class CampanhaService {
         adicionarAlteracao(alteracoes, "pendencias", anterior.getPendencias(), atual.getPendencias());
         adicionarAlteracao(alteracoes, "bonusPercentual", anterior.getBonusPercentual(), atual.getBonusPercentual());
         adicionarAlteracao(alteracoes, "bonusValorFixo", anterior.getBonusValorFixo(), atual.getBonusValorFixo());
+        adicionarAlteracao(alteracoes, "completa", anterior.getCompleta(), atual.getCompleta());
+        adicionarAlteracao(alteracoes, "rastreabilidade", RastreabilidadeRegraService.ler(anterior), RastreabilidadeRegraService.ler(atual));
         return new com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.AlteracaoRegraDTO(chave,
                 alteracoes.isEmpty() ? com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.TipoAlteracao.SEM_ALTERACAO
                         : com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse.TipoAlteracao.ALTERADA, alteracoes);

@@ -19,6 +19,7 @@ public record VersaoCampanhaDetalheResponse(
             com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase tipoOperacao,
             java.math.BigDecimal valorAjuste, String tipoBaseReferencia, java.math.BigDecimal taxaBaseConsultada,
             String descricaoReferencia, java.math.BigDecimal taxa, String explicacao, String pythonEquivalente,
-            String pendencias, Boolean completa, java.math.BigDecimal bonusPercentual, java.math.BigDecimal bonusValorFixo
+            String pendencias, Boolean completa, java.math.BigDecimal bonusPercentual, java.math.BigDecimal bonusValorFixo,
+            RastreabilidadeRegraDTO rastreabilidade
     ) {}
 }

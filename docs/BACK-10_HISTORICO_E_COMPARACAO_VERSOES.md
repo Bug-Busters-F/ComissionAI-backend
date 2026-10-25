@@ -8,7 +8,7 @@
   - data e hora de publicação;
   - simulação aceita e seu protocolo.
 - Foi incluído um identificador lógico estável em cada regra. O `blocoId` é usado quando disponível; regras legadas recebem uma chave compatível durante a migração.
-- Foi criada a migração `V22__historico_autoria_e_comparacao_versoes.sql`, que adiciona os metadados de histórico e preenche referências existentes quando possível.
+- Foi criada a migração `V24__historico_autoria_e_comparacao_versoes.sql`, que adiciona os metadados de histórico e preenche referências existentes quando possível.
 - Na publicação de uma proposta, a aplicação associa a versão anterior, o responsável e a simulação aceita diretamente à versão publicada.
 - Foram disponibilizadas consultas somente para versões publicadas:
   - `GET /api/v1/campanhas/{id}/versoes`: lista o histórico resumido;
@@ -16,7 +16,11 @@
   - `GET /api/v1/campanhas/{id}/versoes/comparacao?versaoBase={n}&versaoComparada={n}`: compara duas versões.
 - O detalhe histórico inclui conteúdo da campanha e das regras: filtros, faixa, operação, referências/origens, taxa, explicação, Python equivalente, pendências e bônus.
 - A comparação identifica regras `ADICIONADA`, `REMOVIDA`, `ALTERADA` ou `SEM_ALTERACAO`, usando o identificador lógico, e aponta os campos alterados com os valores anterior e atual.
-- Propostas ainda não publicadas não são retornadas pelos endpoints de histórico.
+- Propostas ainda não publicadas não são retornadas pelos endpoints de histórico. A comparação vigente × proposta antes da publicação permanece para a próxima tarefa de integração.
+- Cada regra histórica inclui `rastreabilidade`: origens por campo, referências consultadas, campos manuais, pendências tipadas e confirmação de público. Registros legados sem evidências continuam com `null`, sem origem inventada.
+- Identificadores de bloco repetidos no mesmo envio são rejeitados com 400 para impedir comparação que perca regras. Um histórico legado ambíguo também não é reduzido silenciosamente a uma regra.
+- Parâmetros ausentes ou de tipo inválido retornam 400. Versões não publicadas ou pertencentes a outra campanha não são expostas pela consulta.
+- A V24 preserva V22 e V23 já aplicadas. O preenchimento retroativo associa somente simulações aceitas da própria versão publicada; o aceite de uma proposta em elaboração não é atribuído à vigente. A versão anterior é a publicação anterior, mesmo com versões canceladas entre elas.
 
 ## Como testar
 

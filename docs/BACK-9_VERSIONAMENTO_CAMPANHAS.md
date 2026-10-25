@@ -16,14 +16,14 @@ Foi implementada a base de versionamento para que uma campanha publicada não se
   - `versaoProposta`: rascunho que pode ser editado e simulado sem afetar a vigente.
 - O endpoint `PUT /api/v1/campanhas/{id}` edita uma proposta. Se a campanha já estiver publicada, a edição cria ou atualiza uma proposta sem modificar a versão vigente.
 - A simulação persiste a versão que foi avaliada.
-- O aceite de uma simulação publica a proposta na mesma transação:
-  1. valida a proposta e suas regras;
+- O aceite registra a aprovação da simulação, sem publicar a proposta. Após a revisão, `POST /api/v1/campanhas/{id}/ativar` publica a proposta na mesma transação:
+  1. valida a proposta, suas regras e a simulação aceita;
   2. promove a proposta para `PUBLICADA`;
   3. ativa as regras da nova versão;
   4. desativa as regras da versão anterior no motor produtivo;
   5. atualiza a referência vigente da campanha;
   6. preserva versões, regras e simulações anteriores para auditoria.
-- O payload de aceite aceita `versaoEsperada`, evitando que uma versão seja publicada sobre outra alteração concorrente.
+- Os payloads de aceite e de ativação recebem `versaoEsperada`. Na publicação de uma revisão, ela é obrigatória e identifica a versão vigente esperada; o aceite sozinho não publica. Esse controle não substitui uma precondição de revisão do conteúdo no PUT, que permanece para a próxima tarefa.
   - Divergência de versão retorna `409 Conflict`.
   - O lock otimista da entidade `Campanha` também protege concorrência no banco.
 - Criado `DELETE /api/v1/campanhas/{id}/proposta`, que descarta apenas o rascunho e mantém a versão publicada inalterada.
@@ -56,7 +56,9 @@ Content-Type: application/json
 }
 ```
 
-Resultado esperado:
+Após aceitar, a campanha continua em `DRAFT`. Confirme a publicação com `POST /api/v1/campanhas/{campanhaId}/ativar`, enviando `{}` na primeira versão.
+
+Resultado esperado após a ativação:
 
 - a campanha fica `ATIVA`;
 - `versaoVigente` é `1`;
@@ -110,7 +112,9 @@ Content-Type: application/json
 }
 ```
 
-Resultado esperado:
+O aceite não publica a revisão. Após conferir os dados, chame `POST /api/v1/campanhas/{campanhaId}/ativar` com `{ "versaoEsperada": 1 }`.
+
+Resultado esperado após a ativação:
 
 - `versaoVigente` passa a ser `2`;
 - `versaoProposta` fica nula;
