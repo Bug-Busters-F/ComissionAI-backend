@@ -24,6 +24,8 @@ public interface RegraRepository extends JpaRepository<Regra, Long> {
 
     List<Regra> findAllByStatusAndRemovidoEmIsNull(StatusRegra status);
 
+    Optional<Regra> findFirstByIdentificadorLogicoAndCampanhaIsNullOrderByIdAsc(String identificadorLogico);
+
     List<Regra> findAllByCampanhaIdInAndRemovidoEmIsNull(List<Long> campanhaIds);
 
     boolean existsByMatriculaInAndRemovidoEmIsNull(java.util.Collection<String> matriculas);
