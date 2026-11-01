@@ -70,6 +70,7 @@ public class CalculoService {
     private static final Logger log = LoggerFactory.getLogger(CalculoService.class);
     private static final BigDecimal TAXA_PADRAO = new BigDecimal("0.1000");
     private static final Long REGRA_PADRAO_ID = 1L;
+    private static final String REGRA_PADRAO_IDENTIFICADOR = "regra-padrao";
 
     private final ResultadoCalculoRepository resultadoCalculoRepository;
     private final LogCalculoRepository logCalculoRepository;
@@ -248,7 +249,7 @@ public class CalculoService {
 
         BigDecimal taxaAplicada = resolucao.taxa();
         Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
-        garantirRegraPadraoExistente(idRegra, taxaAplicada);
+        idRegra = garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
         // 3. Aplica percentual básico com precisão decimal e arredondamento HALF_UP
         ComissaoCalculada calculada = calcularComissaoTotal(sale.getValue(), taxaAplicada, resolucao);
@@ -522,7 +523,7 @@ public class CalculoService {
 
             BigDecimal taxaAplicada = resolucao.taxa();
             Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
-            garantirRegraPadraoExistente(idRegra, taxaAplicada);
+            idRegra = garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
             ComissaoCalculada calculada = calcularComissaoTotal(sale.getValue(), taxaAplicada, resolucao);
             BigDecimal comissao = calculada.total();
@@ -896,7 +897,7 @@ public class CalculoService {
 
         BigDecimal taxaAplicada = resolucao.taxa();
         Long idRegra = resolucao.idRegra() != null ? resolucao.idRegra() : REGRA_PADRAO_ID;
-        garantirRegraPadraoExistente(idRegra, taxaAplicada);
+        idRegra = garantirRegraPadraoExistente(idRegra, taxaAplicada);
 
         ComissaoCalculada calculada = calcularComissaoTotal(request.valorVenda(), taxaAplicada, resolucao);
         BigDecimal comissao = calculada.total();
@@ -1139,12 +1140,17 @@ public class CalculoService {
         );
     }
 
-    private Regra garantirRegraPadraoExistente(Long idRegra, BigDecimal taxa) {
+    /** Devolve o id da regra a gravar no resultado; o id fixo da padrão nem sempre existe no banco. */
+    private Long garantirRegraPadraoExistente(Long idRegra, BigDecimal taxa) {
         if (regraRepository == null) {
-            return null;
+            return idRegra;
         }
         if (regraRepository.existsById(idRegra)) {
-            return regraRepository.findById(idRegra).orElse(null);
+            return idRegra;
+        }
+        var existente = regraRepository.findFirstByIdentificadorLogicoAndCampanhaIsNullOrderByIdAsc(REGRA_PADRAO_IDENTIFICADOR);
+        if (existente.isPresent()) {
+            return existente.get().getId();
         }
 
         Regra defaultRegra = new Regra(
@@ -1155,6 +1161,10 @@ public class CalculoService {
                 LocalDate.of(2020, 1, 1),
                 LocalDate.of(2035, 12, 31)
         );
-        return regraRepository.save(defaultRegra);
+        // identificador_logico é NOT NULL desde a V24.
+        defaultRegra.setIdentificadorLogico(REGRA_PADRAO_IDENTIFICADOR);
+        // Só serve de referência para o resultado: ativa, competiria com as regras de campanha.
+        defaultRegra.setStatus(com.bugbusters.backend.dto.regra.StatusRegra.INATIVA);
+        return regraRepository.save(defaultRegra).getId();
     }
 }
