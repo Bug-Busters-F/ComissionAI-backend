@@ -622,9 +622,10 @@ public class ReferenciaPublicoService {
                 r.getMaxInclusivo(),
                 r.getTipoOperacao() != null ? r.getTipoOperacao() : TipoOperacaoBase.DEFINIR_TAXA,
                 r.getValorAjuste(),
-                null,
-                null,
-                null,
+                // Entram no hash da proposta: omitidos, o aceite de regras com ajuste sobre a base nunca confere.
+                r.getTipoBaseReferencia(),
+                r.getTaxaBaseConsultada(),
+                r.getDescricaoReferencia(),
                 r.getTaxa(),
                 null,
                 null,
