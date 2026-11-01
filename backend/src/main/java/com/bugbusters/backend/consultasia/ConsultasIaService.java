@@ -350,6 +350,10 @@ public class ConsultasIaService {
         }
         List<String> palavrasDescricao = List.of(descricao.split(" "));
         for (String palavra : nome.split(" ")) {
+            // "VENDEDORES DE BALCAO" deve casar com "VENDEDOR BALCAO".
+            if (PREPOSICOES.contains(palavra)) {
+                continue;
+            }
             List<String> formas = formasSingulares(palavra);
             boolean encontrada = palavrasDescricao.stream().anyMatch(d -> formas.stream().anyMatch(d::startsWith));
             if (!encontrada) {
@@ -358,6 +362,8 @@ public class ConsultasIaService {
         }
         return true;
     }
+
+    private static final java.util.Set<String> PREPOSICOES = java.util.Set.of("DE", "DO", "DA", "DOS", "DAS");
 
     /** A palavra e seus singulares regulares do português: "-ES" (VENDEDORES) e "-S" (GERENTES). */
     private static List<String> formasSingulares(String palavra) {
