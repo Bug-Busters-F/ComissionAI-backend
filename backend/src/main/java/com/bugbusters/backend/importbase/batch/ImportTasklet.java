@@ -23,6 +23,9 @@ import com.bugbusters.backend.importbase.EnvioArquivoTxService;
 import com.bugbusters.backend.importbase.ImportInconsistencySeverity;
 import com.bugbusters.backend.importbase.ImportType;
 import com.bugbusters.backend.importbase.reader.*;
+import com.bugbusters.backend.importbase.validation.ErroValidacaoLinhaDTO;
+import com.bugbusters.backend.importbase.validation.HrRowValidator;
+import com.bugbusters.backend.importbase.validation.SalesRowValidator;
 import com.bugbusters.backend.model.InconsistenciaImportacao;
 import com.bugbusters.backend.registration.*;
 import com.bugbusters.backend.sales.*;
@@ -42,12 +45,16 @@ public class ImportTasklet implements Tasklet {
     private final BaseComissRepository commissions;
     private final EntityManager entityManager;
     private final EnvioArquivoTxService txService;
+    private final HrRowValidator hrRowValidator;
+    private final SalesRowValidator salesRowValidator;
 
     public ImportTasklet(HrFileReader hrReader, SalesFileReader salesReader, CommissFileReader commissReader,
             RegistrationMapper registrationMapper, RegistrationRepository registrations,
             SaleMapper saleMapper, SaleRepository sales, BaseComissMapper commissMapper,
             BaseComissRepository commissions, EntityManager entityManager,
-            EnvioArquivoTxService txService) {
+            EnvioArquivoTxService txService,
+            HrRowValidator hrRowValidator,
+            SalesRowValidator salesRowValidator) {
         this.hrReader = hrReader;
         this.salesReader = salesReader;
         this.commissReader = commissReader;
@@ -59,6 +66,8 @@ public class ImportTasklet implements Tasklet {
         this.commissions = commissions;
         this.entityManager = entityManager;
         this.txService = txService;
+        this.hrRowValidator = hrRowValidator;
+        this.salesRowValidator = salesRowValidator;
     }
 
     @Override
@@ -75,10 +84,12 @@ public class ImportTasklet implements Tasklet {
                     int[] ignoradasExistentes = new int[]{0};
 
                     hrReader.forEach(input, row -> {
-                        required(row.getRegistration(), "matrícula");
-                        required(row.getStoreCode(), "código da loja");
-                        required(row.getPositionCode(), "código do cargo");
-                        required(row.getAdmissDate(), "data de admissão");
+                        List<ErroValidacaoLinhaDTO> erros = hrRowValidator.validar(row);
+                        for (ErroValidacaoLinhaDTO erro : erros) {
+                            if (erro.severidade() == ImportInconsistencySeverity.IMPEDITIVO) {
+                                throw new BusinessException(erro.motivo());
+                            }
+                        }
 
                         contribution.incrementReadCount();
 
@@ -114,17 +125,11 @@ public class ImportTasklet implements Tasklet {
                     List<InconsistenciaImportacao> inconsistencias = new ArrayList<>();
 
                     salesReader.forEach(input, row -> {
-                        required(row.getRegistration(), "matrícula");
-                        required(row.getStoreCode(), "código da loja");
-                        required(row.getBrandCode(), "código da marca");
-                        required(row.getReferenceDate(), "data de referência");
-                        required(row.getSaleValue(), "valor da venda");
-
-                        if (!YearMonth.from(row.getReferenceDate()).equals(compYm)) {
-                            throw new BusinessException(String.format(
-                                    "Linha com data de referência '%s' diverge da competência informada '%s' para o lote de vendas.",
-                                    row.getReferenceDate(), compParam
-                            ));
+                        List<ErroValidacaoLinhaDTO> erros = salesRowValidator.validar(row, compYm);
+                        for (ErroValidacaoLinhaDTO erro : erros) {
+                            if (erro.severidade() == ImportInconsistencySeverity.IMPEDITIVO) {
+                                throw new BusinessException(erro.motivo());
+                            }
                         }
 
                         contribution.incrementReadCount();

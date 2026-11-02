@@ -10,7 +10,6 @@ import com.bugbusters.backend.importbase.util.CellUtils;
 public class HrFileRowMapper {
 
     public HrFileRow toHrFileRow(Row row) {
-        
         return new HrFileRow(
                 CellUtils.getLocalDateCell(row, 0),
                 CellUtils.getIntCell(row, 1),
@@ -21,7 +20,8 @@ public class HrFileRowMapper {
                 CellUtils.getLocalDateCell(row, 6),
                 CellUtils.getLocalDateCell(row, 7),
                 CellUtils.getIntCell(row, 8),
-                CellUtils.getStringCell(row,9)
+                CellUtils.getStringCell(row, 9),
+                row.getRowNum() + 1
         );
     }
 }

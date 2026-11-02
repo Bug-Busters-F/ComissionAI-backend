@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import jakarta.persistence.LockModeType;
@@ -62,6 +63,9 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
     boolean existsByBrandId(UUID brandId);
 
     boolean existsByStoreId(UUID storeId);
+
+    Optional<Sale> findByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValue(
+            UUID registrationId, LocalDate saleDate, UUID storeId, UUID brandId, java.math.BigDecimal value);
 
     List<Sale> findByIdLoteOrigem(String idLoteOrigem);
 

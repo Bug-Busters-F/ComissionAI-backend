@@ -67,10 +67,16 @@ public interface EnvioArquivoRepository extends JpaRepository<EnvioArquivo, Long
           AND e.status = 'CONCLUIDO'
           AND e.excluidoEm IS NULL
           AND (e.rejeicaoIntegral IS NULL OR e.rejeicaoIntegral = false)
+          AND e.substituidoPorId IS NULL
         ORDER BY e.criadoEm DESC
     """)
     List<EnvioArquivo> findLotesConcluidosValidos(
             @Param("tipoBase") String tipoBase,
             @Param("competencia") String competencia
     );
+
+    @Query("SELECT COALESCE(MAX(e.reportId), 0) FROM EnvioArquivo e")
+    Long findMaxReportId();
+
+    Optional<EnvioArquivo> findFirstByArquivoImportacaoId(java.util.UUID arquivoImportacaoId);
 }

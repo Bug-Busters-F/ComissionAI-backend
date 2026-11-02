@@ -29,12 +29,18 @@ public class EnvioArquivoTxService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public EnvioArquivo criarLotePendente(String idLote, String nomeArquivo, ImportType tipoBase, String competencia, String hashConteudo) {
+        return criarLotePendente(idLote, nomeArquivo, tipoBase, competencia, hashConteudo, null);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public EnvioArquivo criarLotePendente(String idLote, String nomeArquivo, ImportType tipoBase, String competencia, String hashConteudo, java.util.UUID arquivoImportacaoId) {
         EnvioArquivo envio = new EnvioArquivo();
         envio.setIdLote(idLote);
         envio.setNomeArquivo(nomeArquivo != null ? nomeArquivo : "arquivo");
         envio.setTipoBase(tipoBase.name());
         envio.setCompetencia(competencia);
         envio.setHashConteudo(hashConteudo);
+        envio.setArquivoImportacaoId(arquivoImportacaoId);
         envio.setStatus(ImportStatus.PENDENTE.name());
         envio.setTotalLinhas(0);
         envio.setLinhasValidas(0);
