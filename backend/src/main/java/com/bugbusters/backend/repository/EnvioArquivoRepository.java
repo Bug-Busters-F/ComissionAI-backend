@@ -59,4 +59,18 @@ public interface EnvioArquivoRepository extends JpaRepository<EnvioArquivo, Long
     List<EnvioArquivo> findByTipoBaseIgnoreCase(String tipoBase);
 
     List<EnvioArquivo> findByTipoBaseIgnoreCaseAndCompetencia(String tipoBase, String competencia);
+
+    @Query("""
+        SELECT e FROM EnvioArquivo e
+        WHERE UPPER(e.tipoBase) = UPPER(:tipoBase)
+          AND (:competencia IS NULL OR e.competencia = :competencia)
+          AND e.status = 'CONCLUIDO'
+          AND e.excluidoEm IS NULL
+          AND (e.rejeicaoIntegral IS NULL OR e.rejeicaoIntegral = false)
+        ORDER BY e.criadoEm DESC
+    """)
+    List<EnvioArquivo> findLotesConcluidosValidos(
+            @Param("tipoBase") String tipoBase,
+            @Param("competencia") String competencia
+    );
 }

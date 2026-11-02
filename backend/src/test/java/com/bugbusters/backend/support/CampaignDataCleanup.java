@@ -12,6 +12,7 @@ public final class CampaignDataCleanup {
         jdbc.update("DELETE FROM tb_simulacao_venda");
         jdbc.update("DELETE FROM tb_simulacao");
         jdbc.update("DELETE FROM tb_regra");
+        jdbc.update("DELETE FROM tb_campanha_anexo_base");
         jdbc.update("DELETE FROM tb_campanha_versao");
         jdbc.update("DELETE FROM tb_campanha");
     }

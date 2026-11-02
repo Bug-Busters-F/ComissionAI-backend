@@ -134,6 +134,21 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
         }
 
+        @ExceptionHandler(CoberturaFechamentoIncompletaException.class)
+        public ResponseEntity<ApiErrorResponse> handleCoberturaIncompleta(
+                        CoberturaFechamentoIncompletaException ex, HttpServletRequest request) {
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                                "Unprocessable Entity",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
+
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
+        }
+
         @ExceptionHandler(BusinessException.class)
         public ResponseEntity<ApiErrorResponse> handleBusinessException(
                         BusinessException ex, HttpServletRequest request) {

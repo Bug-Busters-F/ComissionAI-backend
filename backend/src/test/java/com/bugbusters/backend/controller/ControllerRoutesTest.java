@@ -134,6 +134,16 @@ class ControllerRoutesTest {
             r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
             registrationRepository.save(r);
         }
+        java.time.LocalDate mesAtual = java.time.YearMonth.now().atDay(1);
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, mesAtual).isEmpty()) {
+            com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
+                    brandRepository.findByCode(10).get(),
+                    positionRepository.findByCode(150).get(),
+                    new java.math.BigDecimal("0.1000"),
+                    mesAtual
+            );
+            baseComissRepository.save(bc);
+        }
         if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, java.time.LocalDate.of(2026, 10, 1)).isEmpty()) {
             com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
                     brandRepository.findByCode(10).get(),
