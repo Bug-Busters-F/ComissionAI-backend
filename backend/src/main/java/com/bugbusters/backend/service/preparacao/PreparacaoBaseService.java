@@ -4,6 +4,7 @@ import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandResolver;
 import com.bugbusters.backend.dto.error.ApiErrorResponse.CampoInvalidoDTO;
 import com.bugbusters.backend.dto.preparacao.*;
+import com.bugbusters.backend.dto.preparacao.impacto.*;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceConflictException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
@@ -77,7 +78,7 @@ public class PreparacaoBaseService {
     private final FechamentoService fechamentoService;
     private final TravaCompetencia travaCompetencia;
     private final UsuarioAtualProvider usuarioAtualProvider;
-    private final ImpactoCorrecaoBaseHandler impactoHandler;
+    private final PropagacaoImpactoCorrecaoService propagacaoImpactoCorrecaoService;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     public PreparacaoBaseService(
@@ -102,7 +103,7 @@ public class PreparacaoBaseService {
             FechamentoService fechamentoService,
             TravaCompetencia travaCompetencia,
             UsuarioAtualProvider usuarioAtualProvider,
-            ImpactoCorrecaoBaseHandler impactoHandler) {
+            PropagacaoImpactoCorrecaoService propagacaoImpactoCorrecaoService) {
         this.campanhaRepository = campanhaRepository;
         this.lotePreparacaoRepository = lotePreparacaoRepository;
         this.linhaPreparacaoRepository = linhaPreparacaoRepository;
@@ -124,7 +125,7 @@ public class PreparacaoBaseService {
         this.fechamentoService = fechamentoService;
         this.travaCompetencia = travaCompetencia;
         this.usuarioAtualProvider = usuarioAtualProvider;
-        this.impactoHandler = impactoHandler;
+        this.propagacaoImpactoCorrecaoService = propagacaoImpactoCorrecaoService;
     }
 
     /**
@@ -517,6 +518,23 @@ public class PreparacaoBaseService {
     }
 
     /**
+     * Consulta a prévia de impactos de um lote em preparação (BACK-6).
+     */
+    @Transactional(readOnly = true)
+    public PreviaImpactoCorrecaoDTO consultarPreviaImpacto(Long campanhaId, UUID preparacaoId) {
+        buscarCampanha(campanhaId);
+        LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
+        if (!"EM_PREPARACAO".equals(lote.getStatus())) {
+            throw new BusinessException("Apenas lotes com status EM_PREPARACAO permitem consulta de prévia de impacto.");
+        }
+        List<LinhaPreparacao> linhasAtivas = linhaPreparacaoRepository.findByLotePreparacaoIdOrderByNumeroLinhaAsc(preparacaoId)
+                .stream()
+                .filter(l -> !l.isIgnorarNaEfetivacao())
+                .toList();
+        return propagacaoImpactoCorrecaoService.calcularPreviaImpacto(lote, linhasAtivas);
+    }
+
+    /**
      * Efetivação transacional na base geral (tb_registration ou tb_sales) com versionamento e origem.
      */
     @Transactional
@@ -561,7 +579,36 @@ public class PreparacaoBaseService {
             throw new BusinessException("Efetivação impedida: o lote de preparação possui " + impeditivos.size() + " erro(s) IMPEDITIVO(S). Corrija ou ignore as linhas antes de efetivar.");
         }
 
-        // 3. Trava de competência e validação de período fechado
+        // 3. Prévia de impacto e controle de confirmação (BACK-6)
+        PreviaImpactoCorrecaoDTO previa = propagacaoImpactoCorrecaoService.calcularPreviaImpacto(lote, linhasAtivas);
+        if (previa.possuiBloqueioFechamento()) {
+            throw new BusinessException("Efetivação bloqueada por competência fechada: " + String.join("; ", previa.bloqueiosFechamento()));
+        }
+        if (previa.exigeConfirmacaoExplicita() && (request == null || !Boolean.TRUE.equals(request.confirmarPropagacaoImpacto()))) {
+            List<CampoInvalidoDTO> validacoes = new ArrayList<>();
+            for (CampanhaAfetadaDTO c : previa.campanhasAfetadas()) {
+                validacoes.add(new CampoInvalidoDTO("campanha:" + c.campanhaId(),
+                        "Campanha '" + c.titulo() + "' afetada por regras dependentes."));
+            }
+            for (SimulacaoAfetadaDTO s : previa.simulacoesAfetadas()) {
+                validacoes.add(new CampoInvalidoDTO("simulacao:" + s.simulacaoId(),
+                        s.motivoImpacto()));
+            }
+            for (CalculoAfetadoDTO k : previa.calculosAfetados()) {
+                validacoes.add(new CampoInvalidoDTO("calculo:" + k.competencia(),
+                        k.motivoImpacto()));
+            }
+            for (AprovacaoCodigoAfetadaDTO a : previa.aprovacoesCodigoAfetadas()) {
+                validacoes.add(new CampoInvalidoDTO("regra:" + a.regraId(),
+                        a.motivoImpacto()));
+            }
+            throw new ResourceConflictException(
+                    "A efetivação desta correção possui impactos colaterais em campanhas, simulações ou cálculos dependentes. Consulte a prévia de impacto e confirme explicitamente a propagação informando confirmarPropagacaoImpacto=true.",
+                    validacoes
+            );
+        }
+
+        // 4. Trava de competência e validação de período fechado
         if ("SALES".equalsIgnoreCase(lote.getTipoBase()) && lote.getCompetencia() != null) {
             YearMonth ym = YearMonth.parse(lote.getCompetencia());
             fechamentoService.validarPeriodosDisponiveis(ym.atDay(1), ym.atEndOfMonth());
@@ -587,15 +634,6 @@ public class PreparacaoBaseService {
 
             Map<String, Registration> existentes = registrationRepository.findByRegistrationIn(matriculasLote).stream()
                     .collect(Collectors.toMap(r -> r.getRegistration().toUpperCase(), r -> r));
-
-            // Valida SPI BACK-6 de impactos em matrículas existentes
-            List<String> alteradas = new ArrayList<>();
-            for (LinhaPreparacao l : linhasAtivas) {
-                if (l.getMatricula() != null && existentes.containsKey(l.getMatricula().toUpperCase())) {
-                    alteradas.add(l.getMatricula().trim());
-                }
-            }
-            impactoHandler.validarImpactoRh(lote, alteradas);
 
             Set<String> processadasNesteLote = new HashSet<>();
             for (LinhaPreparacao l : linhasAtivas) {
@@ -724,7 +762,6 @@ public class PreparacaoBaseService {
                     // Venda já existe na base geral com chave idêntica
                     if (l.getRegistroAlvoId() != null) {
                         // Atualização direcionada
-                        impactoHandler.validarImpactoVendas(lote, List.of(saleAlvo.getId()));
                         Map<String, Object> valoresAntes = extrairValoresRegistroVenda(saleAlvo);
 
                         saleAlvo.setRegistration(reg);
@@ -842,6 +879,14 @@ public class PreparacaoBaseService {
         lote.setEfetivadoPor(autor);
         lotePreparacaoRepository.save(lote);
 
+        // 7. Propagação dos impactos confirmados para campanhas, simulações e cálculos
+        ResumoPropagacaoImpactoDTO resumoImpactos = null;
+        if (previa.possuiImpactos()) {
+            resumoImpactos = propagacaoImpactoCorrecaoService.propagarImpactos(
+                    lote, previa, autor, request != null ? request.motivo() : null
+            );
+        }
+
         log.info("Lote de preparação {} da campanha {} efetivado com sucesso: {} novos registros, {} atualizados, reportId {}",
                 preparacaoId, campanhaId, registrosInseridos, registrosAtualizados, proximoReportId);
 
@@ -857,7 +902,8 @@ public class PreparacaoBaseService {
                 registrosIgnoradosDuplicados,
                 advertenciasRegistradas,
                 agora,
-                autor
+                autor,
+                resumoImpactos
         );
     }
 

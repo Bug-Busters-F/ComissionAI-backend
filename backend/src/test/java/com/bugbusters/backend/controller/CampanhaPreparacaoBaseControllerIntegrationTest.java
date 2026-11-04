@@ -180,7 +180,8 @@ class CampanhaPreparacaoBaseControllerIntegrationTest {
         // 6. Efetivação do lote preparado
         EfetivarLotePreparacaoRequestDTO efetivarReq = new EfetivarLotePreparacaoRequestDTO(
                 "admin",
-                "Efetivação de teste via controller"
+                "Efetivação de teste via controller",
+                true
         );
 
         mockMvc.perform(post("/api/v1/campanhas/{campanhaId}/preparacao-bases/{preparacaoId}/efetivar", campanha.getId(), loteId)

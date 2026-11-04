@@ -1,9 +1,12 @@
 package com.bugbusters.backend.service;
 
 import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaResponse;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse.RegraVinculadaDTO;
+import com.bugbusters.backend.dto.campanha.RegraAprovacaoCodigoDTO;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
@@ -17,6 +20,7 @@ import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
+import com.bugbusters.backend.model.StatusAprovacaoCodigo;
 import com.bugbusters.backend.model.StatusVersaoCampanha;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
@@ -26,6 +30,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -266,8 +272,15 @@ public class CampanhaService {
 
         invalidarAceiteCampanha(campanha, "Aceite invalidado por edição na proposta da campanha (regras ou vigência alteradas).");
 
-        List<Regra> regrasAntigas = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(proposta.getId());
+        // Invalida aprovação de código ao editar proposta (BACK-6)
         OffsetDateTime agora = OffsetDateTime.now();
+        if (proposta.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO) {
+            proposta.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.INVALIDADO);
+            proposta.setCodigoInvalidadoEm(agora);
+            proposta.setMotivoInvalidacaoCodigo("Aprovação de código invalidada por edição de regras ou vigência na proposta.");
+        }
+
+        List<Regra> regrasAntigas = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(proposta.getId());
         for (Regra antiga : regrasAntigas) {
             antiga.setRemovidoEm(agora);
             antiga.setStatus(StatusRegra.INATIVA);
@@ -372,7 +385,6 @@ public class CampanhaService {
         r.setBonusValorFixo(item.bonusValorFixo());
 
         r.setBlocoId(item.blocoId());
-        // blocoId é estável entre reinterpretações; para regras sem bloco, cria uma chave permanente.
         r.setIdentificadorLogico(item.blocoId() != null && !item.blocoId().isBlank()
                 ? item.blocoId().trim() : UUID.randomUUID().toString());
         r.setTrechoOrigem(item.trechoOrigem());
@@ -389,6 +401,9 @@ public class CampanhaService {
         r.setDataInicio(periodo.inicio());
         r.setDataFim(periodo.fim());
         RastreabilidadeRegraService.aplicar(r, item.rastreabilidade());
+
+        r.setHashArtefatosCodigo(calcularHashArtefatos(r));
+        r.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.PENDENTE);
 
         if (Boolean.FALSE.equals(r.getCompleta()) || r.getTaxa() == null) {
             r.setStatus(StatusRegra.DRAFT);
@@ -494,6 +509,198 @@ public class CampanhaService {
             if (!divergencias.isEmpty()) {
                 throw new BusinessException("A proposta atual da campanha diverge da simulação: " + String.join("; ", divergencias));
             }
+        }
+    }
+
+    // =========================================================================
+    // APROVAÇÃO DE CÓDIGO (BACK-6 / BACK-4 / IA-10)
+    // =========================================================================
+
+    @Transactional
+    public AprovacaoCodigoCampanhaResponse aprovarCodigoCampanha(Long campanhaId, AprovacaoCodigoCampanhaRequest request) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada ou removida."));
+        CampanhaVersao versao = campanha.versaoParaRevisao();
+        if (versao == null) {
+            throw new BusinessException("A campanha não possui versão disponível para aprovação de código.");
+        }
+
+        List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
+        if (regras.isEmpty()) {
+            throw new BusinessException("A versão da campanha não possui regras vinculadas.");
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+        String autor = (request != null && request.aprovadoPor() != null && !request.aprovadoPor().isBlank())
+                ? request.aprovadoPor().trim() : "SISTEMA";
+        boolean aprovado = request != null && Boolean.TRUE.equals(request.aprovado());
+
+        StatusAprovacaoCodigo novoStatus = aprovado ? StatusAprovacaoCodigo.APROVADO : StatusAprovacaoCodigo.REJEITADO;
+
+        List<RegraAprovacaoCodigoDTO> regrasDTO = new ArrayList<>();
+        StringBuilder hashVersaoBuilder = new StringBuilder();
+        for (Regra r : regras) {
+            String hash = calcularHashArtefatos(r);
+            hashVersaoBuilder.append(hash).append(";");
+            r.setHashArtefatosCodigo(hash);
+            r.setStatusAprovacaoCodigo(novoStatus);
+            if (aprovado) {
+                r.setCodigoAprovadoEm(agora);
+                r.setCodigoAprovadoPor(autor);
+                r.setCodigoInvalidadoEm(null);
+                r.setMotivoInvalidacaoCodigo(null);
+            } else {
+                r.setCodigoInvalidadoEm(agora);
+                r.setMotivoInvalidacaoCodigo((request != null && request.motivo() != null) ? request.motivo() : "Aprovação de código rejeitada pelo usuário.");
+            }
+            regraRepository.save(r);
+
+            regrasDTO.add(new RegraAprovacaoCodigoDTO(
+                    r.getId(),
+                    r.getNome(),
+                    r.getStatusAprovacaoCodigo(),
+                    r.getHashArtefatosCodigo(),
+                    r.getPythonEquivalente(),
+                    r.getCodigoAprovadoEm(),
+                    r.getCodigoAprovadoPor(),
+                    r.getCodigoInvalidadoEm(),
+                    r.getMotivoInvalidacaoCodigo()
+            ));
+        }
+
+        String hashVersao = calcularHashString(hashVersaoBuilder.toString());
+        versao.setHashArtefatosCodigo(hashVersao);
+        versao.setStatusAprovacaoCodigo(novoStatus);
+        if (aprovado) {
+            versao.setCodigoAprovadoEm(agora);
+            versao.setCodigoAprovadoPor(autor);
+            versao.setCodigoInvalidadoEm(null);
+            versao.setMotivoInvalidacaoCodigo(null);
+        } else {
+            versao.setCodigoInvalidadoEm(agora);
+            versao.setMotivoInvalidacaoCodigo((request != null && request.motivo() != null) ? request.motivo() : "Aprovação de código rejeitada pelo usuário.");
+        }
+        campanhaVersaoRepository.save(versao);
+
+        return new AprovacaoCodigoCampanhaResponse(
+                campanha.getId(),
+                versao.getNumero(),
+                versao.getStatusAprovacaoCodigo(),
+                versao.getHashArtefatosCodigo(),
+                versao.getCodigoAprovadoEm(),
+                versao.getCodigoAprovadoPor(),
+                versao.getCodigoInvalidadoEm(),
+                versao.getMotivoInvalidacaoCodigo(),
+                regrasDTO
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public AprovacaoCodigoCampanhaResponse consultarAprovacaoCodigoCampanha(Long campanhaId) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada ou removida."));
+        CampanhaVersao versao = campanha.versaoParaRevisao();
+        if (versao == null) {
+            throw new BusinessException("A campanha não possui versão disponível.");
+        }
+
+        List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
+        StringBuilder currentHashBuilder = new StringBuilder();
+        boolean artefatosAlterados = false;
+        List<RegraAprovacaoCodigoDTO> regrasDTO = new ArrayList<>();
+        for (Regra r : regras) {
+            String hashAtual = calcularHashArtefatos(r);
+            currentHashBuilder.append(hashAtual).append(";");
+            boolean regraAlterada = r.getHashArtefatosCodigo() != null && !r.getHashArtefatosCodigo().equals(hashAtual);
+            if (regraAlterada) {
+                artefatosAlterados = true;
+            }
+            StatusAprovacaoCodigo statusRegra = r.getStatusAprovacaoCodigo();
+            OffsetDateTime invalidadoRegra = r.getCodigoInvalidadoEm();
+            String motivoRegra = r.getMotivoInvalidacaoCodigo();
+            if (statusRegra == StatusAprovacaoCodigo.APROVADO && regraAlterada) {
+                statusRegra = StatusAprovacaoCodigo.INVALIDADO;
+                invalidadoRegra = OffsetDateTime.now();
+                motivoRegra = "Artefatos modificados após aprovação formal.";
+            }
+
+            regrasDTO.add(new RegraAprovacaoCodigoDTO(
+                    r.getId(),
+                    r.getNome(),
+                    statusRegra,
+                    hashAtual,
+                    r.getPythonEquivalente(),
+                    r.getCodigoAprovadoEm(),
+                    r.getCodigoAprovadoPor(),
+                    invalidadoRegra,
+                    motivoRegra
+            ));
+        }
+
+        String currentVersaoHash = calcularHashString(currentHashBuilder.toString());
+        if (versao.getHashArtefatosCodigo() != null && !versao.getHashArtefatosCodigo().equals(currentVersaoHash)) {
+            artefatosAlterados = true;
+        }
+
+        StatusAprovacaoCodigo statusEfetivo = versao.getStatusAprovacaoCodigo();
+        OffsetDateTime invalidadoEm = versao.getCodigoInvalidadoEm();
+        String motivoInvalidacao = versao.getMotivoInvalidacaoCodigo();
+
+        if (statusEfetivo == StatusAprovacaoCodigo.APROVADO && artefatosAlterados) {
+            statusEfetivo = StatusAprovacaoCodigo.INVALIDADO;
+            invalidadoEm = OffsetDateTime.now();
+            motivoInvalidacao = "Artefatos de código ou regras foram modificados após a aprovação formal.";
+        }
+
+        return new AprovacaoCodigoCampanhaResponse(
+                campanha.getId(),
+                versao.getNumero(),
+                statusEfetivo,
+                currentVersaoHash,
+                versao.getCodigoAprovadoEm(),
+                versao.getCodigoAprovadoPor(),
+                invalidadoEm,
+                motivoInvalidacao,
+                regrasDTO
+        );
+    }
+
+    public static String calcularHashString(String input) {
+        if (input == null) return null;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static String calcularHashArtefatos(Regra r) {
+        if (r == null) return null;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String dados = String.join("|",
+                    String.valueOf(r.getPythonEquivalente()),
+                    String.valueOf(r.getExplicacao()),
+                    String.valueOf(r.getTaxa()),
+                    String.valueOf(r.getTipoOperacao()),
+                    String.valueOf(r.getValorAjuste()),
+                    String.valueOf(r.getTaxaBaseConsultada()),
+                    String.valueOf(r.getCodMarca()),
+                    String.valueOf(r.getCodLoja()),
+                    String.valueOf(r.getCodCargo()),
+                    String.valueOf(r.getMatricula()),
+                    String.valueOf(r.getCanal()),
+                    String.valueOf(r.getValorMinimo()),
+                    String.valueOf(r.getValorMaximo()),
+                    String.valueOf(r.getDataInicio()),
+                    String.valueOf(r.getDataFim())
+            );
+            byte[] hash = digest.digest(dados.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -721,7 +928,6 @@ public class CampanhaService {
         v.setDataInicio(base != null ? base.getDataInicio() : c.getDataInicio());
         v.setDataFim(base != null ? base.getDataFim() : c.getDataFim()); return v;
     }
-
 
     private boolean aceiteDaVersaoExibida(Campanha c) {
         return c.getSimulacaoAceita() != null && (c.getVersaoProposta() == null ||

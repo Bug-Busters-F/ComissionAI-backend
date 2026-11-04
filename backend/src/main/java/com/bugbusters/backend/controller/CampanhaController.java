@@ -161,4 +161,24 @@ public class CampanhaController {
         campanhaService.removerLogicamente(id);
         return ResponseEntity.noContent().build();
     }
+
+    @Operation(summary = "Aprovar código de regras da campanha", description = "Registra aprovação formal do código das regras associadas à campanha")
+    @ApiResponse(responseCode = "200", description = "Código aprovado com sucesso")
+    @ApiResponse(responseCode = "400", description = "Campanha não elegível ou regras incompletas", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/{id}/aprovacao-codigo")
+    public ResponseEntity<com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaResponse> aprovarCodigo(
+            @PathVariable Long id,
+            @Valid @RequestBody com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaRequest request) {
+        return ResponseEntity.ok(campanhaService.aprovarCodigoCampanha(id, request));
+    }
+
+    @Operation(summary = "Consultar status de aprovação de código da campanha", description = "Retorna o status atual de aprovação de código e valida se artefatos foram alterados")
+    @ApiResponse(responseCode = "200", description = "Status retornado com sucesso")
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/{id}/aprovacao-codigo")
+    public ResponseEntity<com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaResponse> consultarAprovacaoCodigo(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(campanhaService.consultarAprovacaoCodigoCampanha(id));
+    }
 }

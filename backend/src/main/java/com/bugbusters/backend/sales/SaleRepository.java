@@ -12,6 +12,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,8 +28,7 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
         where s.saleDate between :inicio and :fim
         order by s.saleDate, s.id
         """)
-    java.util.List<Sale> referencias(@org.springframework.data.repository.query.Param("inicio") java.time.LocalDate inicio,
-                                    @org.springframework.data.repository.query.Param("fim") java.time.LocalDate fim);
+    List<Sale> referencias(@Param("inicio") LocalDate inicio, @Param("fim") LocalDate fim);
 
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     List<Sale> findBySaleDateBetweenOrderBySaleDateAsc(LocalDate inicio, LocalDate fim);
@@ -42,11 +42,14 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from Sale s where s.id = :id")
-    java.util.Optional<Sale> findByIdForUpdate(@Param("id") UUID id);
+    Optional<Sale> findByIdForUpdate(@Param("id") UUID id);
 
     @Override
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
-    java.util.Optional<Sale> findById(UUID id);
+    Optional<Sale> findById(UUID id);
+
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    List<Sale> findByIdIn(Collection<UUID> ids);
 
     @Override
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
@@ -58,7 +61,10 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
 
     boolean existsByRegistrationId(UUID registrationId);
 
-    boolean existsByRegistrationIdIn(java.util.Collection<UUID> registrationIds);
+    boolean existsByRegistrationIdIn(Collection<UUID> registrationIds);
+
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    List<Sale> findByRegistrationIdIn(Collection<UUID> registrationIds);
 
     boolean existsByBrandId(UUID brandId);
 

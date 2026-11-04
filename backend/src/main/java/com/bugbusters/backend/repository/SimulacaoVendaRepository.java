@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,9 +21,13 @@ public interface SimulacaoVendaRepository extends JpaRepository<SimulacaoVenda, 
 
     long countBySimulacaoId(UUID simulacaoId);
 
-    boolean existsByIdVendaIn(java.util.Collection<UUID> idsVendas);
+    boolean existsByIdVendaIn(Collection<UUID> idsVendas);
+
+    List<SimulacaoVenda> findByIdVendaIn(Collection<UUID> idsVendas);
+
+    List<SimulacaoVenda> findByMatriculaIn(Collection<String> matriculas);
 
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
     @org.springframework.data.jpa.repository.Query("DELETE FROM SimulacaoVenda sv WHERE sv.idVenda IN :idsVendas")
-    void deleteByIdVendaIn(@org.springframework.data.repository.query.Param("idsVendas") java.util.Collection<UUID> idsVendas);
+    void deleteByIdVendaIn(@org.springframework.data.repository.query.Param("idsVendas") Collection<UUID> idsVendas);
 }

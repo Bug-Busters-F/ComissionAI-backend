@@ -1,12 +1,15 @@
 package com.bugbusters.backend.repository;
 
 import com.bugbusters.backend.model.Simulacao;
+import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,11 +26,15 @@ public interface SimulacaoRepository extends JpaRepository<Simulacao, UUID>, Jpa
 
     Page<Simulacao> findByCompetenciaAndCampanhaIdOrderByExecutadoEmDesc(String competencia, Long campanhaId, Pageable pageable);
 
-    Optional<Simulacao> findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(Long campanhaId, com.bugbusters.backend.model.StatusAceiteSimulacao statusAceite);
+    Optional<Simulacao> findFirstByCampanhaIdAndStatusAceiteOrderByAceitoEmDesc(Long campanhaId, StatusAceiteSimulacao statusAceite);
 
-    java.util.List<Simulacao> findAllByCampanhaIdAndStatusAceite(Long campanhaId, com.bugbusters.backend.model.StatusAceiteSimulacao statusAceite);
+    List<Simulacao> findAllByCampanhaIdAndStatusAceite(Long campanhaId, StatusAceiteSimulacao statusAceite);
 
-    java.util.List<Simulacao> findAllByCampanhaVersaoId(Long campanhaVersaoId);
+    List<Simulacao> findAllByCampanhaVersaoId(Long campanhaVersaoId);
 
-    java.util.List<Simulacao> findTop10ByQtdVendasComImpedimentoOrderByExecutadoEmDesc(int qtdVendasComImpedimento);
+    List<Simulacao> findByCompetenciaInAndStatusAceiteIn(Collection<String> competencias, Collection<StatusAceiteSimulacao> statusList);
+
+    List<Simulacao> findByCampanhaIdInAndStatusAceiteIn(Collection<Long> campanhaIds, Collection<StatusAceiteSimulacao> statusList);
+
+    List<Simulacao> findTop10ByQtdVendasComImpedimentoOrderByExecutadoEmDesc(int qtdVendasComImpedimento);
 }

@@ -1,6 +1,7 @@
 package com.bugbusters.backend.controller;
 
 import com.bugbusters.backend.dto.preparacao.*;
+import com.bugbusters.backend.dto.preparacao.impacto.PreviaImpactoCorrecaoDTO;
 import com.bugbusters.backend.model.ArquivoImportacao;
 import com.bugbusters.backend.service.preparacao.PreparacaoBaseService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -146,6 +147,15 @@ public class CampanhaPreparacaoBaseController {
             @RequestParam(required = false) String responsavel) {
 
         return ResponseEntity.ok(preparacaoBaseService.revalidarLote(campanhaId, preparacaoId, responsavel));
+    }
+
+    @Operation(summary = "Consultar prévia de impacto da correção", description = "Retorna o levantamento detalhado de campanhas, regras, simulações, cálculos emitidos e aprovações de código atingidos antes da confirmação da efetivação.")
+    @GetMapping("/{preparacaoId}/previa-impacto")
+    public ResponseEntity<PreviaImpactoCorrecaoDTO> consultarPreviaImpacto(
+            @PathVariable Long campanhaId,
+            @PathVariable UUID preparacaoId) {
+
+        return ResponseEntity.ok(preparacaoBaseService.consultarPreviaImpacto(campanhaId, preparacaoId));
     }
 
     @Operation(summary = "Efetivar lote de preparação na base geral", description = "Grava as alterações em tb_registration ou tb_sales com versionamento, gera o EnvioArquivo e anexa à campanha.")

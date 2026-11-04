@@ -207,7 +207,7 @@ class PreparacaoBaseServiceTest {
         EfetivacaoPreparacaoResponseDTO efetivacao = preparacaoBaseService.efetivarLote(
                 campanha.getId(),
                 loteDTO.id(),
-                new EfetivarLotePreparacaoRequestDTO("admin", "Efetivação oficial")
+                new EfetivarLotePreparacaoRequestDTO("admin", "Efetivação oficial", true)
         );
 
         assertThat(efetivacao.status()).isEqualTo("EFETIVADO");
