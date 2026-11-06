@@ -201,6 +201,6 @@ public class CampanhaPreparacaoBaseController {
             @RequestParam String tipoBase,
             @RequestParam String chaveOuId) {
 
-        return ResponseEntity.ok(preparacaoBaseService.consultarHistoricoRegistro(tipoBase, chaveOuId));
+        return ResponseEntity.ok(preparacaoBaseService.consultarHistoricoRegistro(campanhaId, tipoBase, chaveOuId));
     }
 }

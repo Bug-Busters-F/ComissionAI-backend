@@ -340,12 +340,58 @@ public class PreparacaoBaseService {
         buscarCampanha(campanhaId);
         LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
 
+        LinhaPreparacao linha = editarLinhaInterno(lote, numeroLinha, request, true);
+        return toLinhaDTO(linha);
+    }
+
+    /**
+     * Edição em lote de múltiplas linhas (usado por IA-9 ou correções em massa).
+     */
+    @Transactional
+    public LotePreparacaoResponseDTO editarLinhasEmLote(
+            Long campanhaId,
+            UUID preparacaoId,
+            EditarLinhasLoteRequestDTO request) {
+
+        buscarCampanha(campanhaId);
+        LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
+
+        if (!"EM_PREPARACAO".equals(lote.getStatus())) {
+            throw new BusinessException("Não é possível editar linhas de um lote com status '" + lote.getStatus() + "'.");
+        }
+
+        if (request != null && request.linhas() != null) {
+            for (EditarLinhasLoteRequestDTO.ItemEdicaoLinhaDTO item : request.linhas()) {
+                if (item.edicao() != null) {
+                    editarLinhaInterno(lote, item.numeroLinha(), item.edicao(), false);
+                }
+            }
+            atualizarContadoresLote(lote);
+        }
+
+        return toLoteDTO(lote);
+    }
+
+    private LinhaPreparacao editarLinhaInterno(
+            LotePreparacao lote,
+            int numeroLinha,
+            EditarLinhaPreparacaoRequestDTO request,
+            boolean recalcularContadores) {
+
         if (!"EM_PREPARACAO".equals(lote.getStatus())) {
             throw new BusinessException("Não é possível editar linhas de um lote com status '" + lote.getStatus() + "'. Apenas lotes EM_PREPARACAO podem ser editados.");
         }
 
-        LinhaPreparacao linha = linhaPreparacaoRepository.findByLotePreparacaoIdAndNumeroLinha(preparacaoId, numeroLinha)
-                .orElseThrow(() -> new ResourceNotFoundException("Linha " + numeroLinha + " não encontrada no lote de preparação " + preparacaoId));
+        String origem = "MANUAL";
+        if (request.origem() != null && !request.origem().isBlank()) {
+            origem = request.origem().trim().toUpperCase();
+            if (!"MANUAL".equals(origem) && !"IA".equals(origem)) {
+                throw new BusinessException("Origem de edição inválida: '" + request.origem() + "'. Valores permitidos: MANUAL, IA.");
+            }
+        }
+
+        LinhaPreparacao linha = linhaPreparacaoRepository.findByLotePreparacaoIdAndNumeroLinha(lote.getId(), numeroLinha)
+                .orElseThrow(() -> new ResourceNotFoundException("Linha " + numeroLinha + " não encontrada no lote de preparação " + lote.getId()));
 
         // Controle de concorrência otimista
         if (request.versao() != null && !request.versao().equals(linha.getVersao())) {
@@ -421,7 +467,7 @@ public class PreparacaoBaseService {
         revalidarUnicaLinha(lote, linha);
 
         linha.setEditada(true);
-        linha.setOrigemUltimaEdicao(request.origem() != null && !request.origem().isBlank() ? request.origem().toUpperCase() : "MANUAL");
+        linha.setOrigemUltimaEdicao(origem);
         linha.setAtualizadoEm(OffsetDateTime.now());
         linha.setAtualizadoPor(autor);
 
@@ -448,37 +494,12 @@ public class PreparacaoBaseService {
         );
         historicoEdicaoRepository.save(historico);
 
-        // Atualiza contadores do lote
-        atualizarContadoresLote(lote);
-
-        return toLinhaDTO(linha);
-    }
-
-    /**
-     * Edição em lote de múltiplas linhas (usado por IA-9 ou correções em massa).
-     */
-    @Transactional
-    public LotePreparacaoResponseDTO editarLinhasEmLote(
-            Long campanhaId,
-            UUID preparacaoId,
-            EditarLinhasLoteRequestDTO request) {
-
-        buscarCampanha(campanhaId);
-        LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
-
-        if (!"EM_PREPARACAO".equals(lote.getStatus())) {
-            throw new BusinessException("Não é possível editar linhas de um lote com status '" + lote.getStatus() + "'.");
+        // Atualiza contadores do lote se solicitado
+        if (recalcularContadores) {
+            atualizarContadoresLote(lote);
         }
 
-        if (request != null && request.linhas() != null) {
-            for (EditarLinhasLoteRequestDTO.ItemEdicaoLinhaDTO item : request.linhas()) {
-                if (item.edicao() != null) {
-                    editarLinha(campanhaId, preparacaoId, item.numeroLinha(), item.edicao());
-                }
-            }
-        }
-
-        return toLoteDTO(lote);
+        return linha;
     }
 
     /**
@@ -940,6 +961,17 @@ public class PreparacaoBaseService {
     }
 
     /**
+     * Consulta o histórico de versões de um registro na base geral vinculado a uma campanha.
+     */
+    @Transactional(readOnly = true)
+    public List<HistoricoVersaoRegistroResponseDTO> consultarHistoricoRegistro(Long campanhaId, String tipoBase, String chaveOuId) {
+        if (campanhaId != null) {
+            buscarCampanha(campanhaId);
+        }
+        return consultarHistoricoRegistro(tipoBase, chaveOuId);
+    }
+
+    /**
      * Consulta o histórico de versões de um registro na base geral.
      */
     @Transactional(readOnly = true)
@@ -1076,11 +1108,6 @@ public class PreparacaoBaseService {
         } else if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
             Map<String, Registration> colaboradores = Collections.emptyMap();
             if (linha.getMatricula() != null && !linha.getMatricula().isBlank()) {
-                registrationRepository.findByRegistrationIgnoreCase(linha.getMatricula().trim())
-                        .ifPresent(r -> {
-                            Map<String, Registration> m = new HashMap<>();
-                            m.put(r.getRegistration().toUpperCase(), r);
-                        });
                 var optReg = registrationRepository.findByRegistrationIgnoreCase(linha.getMatricula().trim());
                 if (optReg.isPresent()) {
                     colaboradores = Map.of(optReg.get().getRegistration().toUpperCase(), optReg.get());
@@ -1167,7 +1194,7 @@ public class PreparacaoBaseService {
                 invalidas++;
             }
 
-            if ("IMPEDITIVO".equals(severidadeMax)) impeditivas++;
+            if ("IMPEDITIVO".equals(severidadeMax) && !linha.isIgnorarNaEfetivacao()) impeditivas++;
             if ("ADVERTENCIA".equals(severidadeMax)) advertencias++;
             if ("AVISO".equals(severidadeMax)) avisos++;
 
@@ -1202,7 +1229,7 @@ public class PreparacaoBaseService {
             if ("VALIDA".equals(l.getStatusLinha())) validas++;
             else invalidas++;
 
-            if ("IMPEDITIVO".equals(l.getSeveridadeMaxima())) impeditivas++;
+            if ("IMPEDITIVO".equals(l.getSeveridadeMaxima()) && !l.isIgnorarNaEfetivacao()) impeditivas++;
             if ("ADVERTENCIA".equals(l.getSeveridadeMaxima())) advertencias++;
             if ("AVISO".equals(l.getSeveridadeMaxima())) avisos++;
             if (l.isEditada()) editadas++;
@@ -1281,7 +1308,8 @@ public class PreparacaoBaseService {
     }
 
     private Campanha buscarCampanha(Long campanhaId) {
-        return campanhaRepository.findById(campanhaId)
+        return campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
+                .or(() -> campanhaRepository.findById(campanhaId).filter(c -> c.getRemovidoEm() == null))
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada: " + campanhaId));
     }
 
@@ -1369,6 +1397,7 @@ public class PreparacaoBaseService {
     }
 
     private LotePreparacaoResponseDTO toLoteDTO(LotePreparacao l) {
+        int linhasIgnoradas = linhaPreparacaoRepository.countByLotePreparacaoIdAndIgnorarNaEfetivacaoTrue(l.getId());
         ResumoContagensPreparacaoDTO contagens = new ResumoContagensPreparacaoDTO(
                 l.getTotalLinhas(),
                 l.getLinhasValidas(),
@@ -1377,7 +1406,7 @@ public class PreparacaoBaseService {
                 l.getLinhasAdvertencia(),
                 l.getLinhasAviso(),
                 l.getLinhasEditadas(),
-                0
+                linhasIgnoradas
         );
 
         Long envioOrigemReportId = l.getEnvioArquivoOrigem() != null ? l.getEnvioArquivoOrigem().getReportId() : null;

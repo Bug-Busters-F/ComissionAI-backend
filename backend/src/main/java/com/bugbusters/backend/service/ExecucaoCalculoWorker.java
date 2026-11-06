@@ -109,17 +109,19 @@ public class ExecucaoCalculoWorker {
 
                         List<Campanha> ativas = campanhaRepository.findAllByEstadoAndRemovidoEmIsNullOrderByCriadoEmDesc(EstadoCampanha.ATIVA);
                         for (Campanha c : ativas) {
-                            LocalDate inicio = c.inicioParaRevisao();
-                            LocalDate fim = c.fimParaRevisao();
+                            CampanhaVersao versaoVigente = c.getVersaoVigente();
+                            LocalDate inicio = (versaoVigente != null && versaoVigente.getDataInicio() != null) ? versaoVigente.getDataInicio() : c.getDataInicio();
+                            LocalDate fim = (versaoVigente != null && versaoVigente.getDataFim() != null) ? versaoVigente.getDataFim() : c.getDataFim();
                             if (inicio != null && fim != null && !inicio.isAfter(fimComp) && !fim.isBefore(inicioComp)) {
-                                BigDecimal orc = c.orcamentoParaRevisao();
+                                BigDecimal orc = (versaoVigente != null && versaoVigente.getOrcamento() != null) ? versaoVigente.getOrcamento() : c.getOrcamento();
                                 if (orc != null && orc.compareTo(BigDecimal.ZERO) > 0) {
                                     orcamentoTotal = orcamentoTotal.add(orc);
                                     campanhasComOrcamento++;
                                 }
                                 Map<String, Object> cr = new LinkedHashMap<>();
                                 cr.put("campanhaId", c.getId());
-                                cr.put("titulo", c.tituloParaRevisao());
+                                String tit = (versaoVigente != null && versaoVigente.getTitulo() != null) ? versaoVigente.getTitulo() : c.getTitulo();
+                                cr.put("titulo", tit);
                                 cr.put("orcamento", orc);
                                 campanhasResumo.add(cr);
                             }

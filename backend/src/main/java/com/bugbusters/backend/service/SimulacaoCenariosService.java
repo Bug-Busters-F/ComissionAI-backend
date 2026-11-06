@@ -498,34 +498,28 @@ public class SimulacaoCenariosService {
      */
     @Transactional
     public void invalidarAceiteCampanha(Campanha campanha, String motivo) {
-        if (campanha == null || campanha.getId() == null) {
+        if (campanha == null || campanha.getId() == null || simulacaoRepository == null) {
             return;
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
-        if (campanha.getSimulacaoAceita() != null) {
-            Simulacao sim = campanha.getSimulacaoAceita();
-            sim.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
-            sim.setInvalidadoEm(agora);
-            sim.setMotivoInvalidacao(motivo);
-            if (simulacaoRepository != null) {
-                simulacaoRepository.save(sim);
-            }
-            campanha.setSimulacaoAceita(null);
-            campanhaRepository.save(campanha);
+        var proposta = campanha.getVersaoProposta();
+        List<Simulacao> simulacoes = proposta != null
+                ? simulacaoRepository.findAllByCampanhaVersaoId(proposta.getId())
+                : simulacaoRepository.findAllByCampanhaIdAndStatusAceite(campanha.getId(), StatusAceiteSimulacao.ACEITA);
+
+        for (Simulacao s : simulacoes) {
+            s.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+            s.setInvalidadoEm(agora);
+            s.setMotivoInvalidacao(motivo);
+        }
+        if (!simulacoes.isEmpty()) {
+            simulacaoRepository.saveAll(simulacoes);
         }
 
-        if (simulacaoRepository != null) {
-            List<Simulacao> ativas = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
-                    campanha.getId(), StatusAceiteSimulacao.ACEITA);
-            for (Simulacao s : ativas) {
-                s.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
-                s.setInvalidadoEm(agora);
-                s.setMotivoInvalidacao(motivo);
-            }
-            if (!ativas.isEmpty()) {
-                simulacaoRepository.saveAll(ativas);
-            }
+        if (proposta == null && campanha.getSimulacaoAceita() != null) {
+            campanha.setSimulacaoAceita(null);
+            campanhaRepository.save(campanha);
         }
     }
 
@@ -727,7 +721,8 @@ public class SimulacaoCenariosService {
         // 1. Resolução das regras candidatas e metadados da campanha
         Campanha campanha = null;
         if (request.campanhaId() != null) {
-            campanha = campanhaRepository.findById(request.campanhaId())
+            campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(request.campanhaId())
+                    .or(() -> campanhaRepository.findById(request.campanhaId()).filter(c -> c.getRemovidoEm() == null))
                     .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada com ID: " + request.campanhaId()));
         }
 
@@ -1236,14 +1231,6 @@ public class SimulacaoCenariosService {
         );
     }
 
-    private CenarioConsolidadoDTO consolidarCenario(
-            List<VendaSimuladaDetalheDTO> vendas,
-            BigDecimal fatorEscala,
-            String descricao,
-            BigDecimal fatorProjecao,
-            java.util.function.Function<VendaSimuladaDetalheDTO, VendaSimuladaCenarioItemDTO> extractor) {
-        return consolidarCenario(vendas, fatorEscala, descricao, fatorProjecao, null, null, extractor);
-    }
 
     private EnquadramentoOrcamentoCenarioDTO calcularEnquadramentoCenario(
             String nomeCenario,

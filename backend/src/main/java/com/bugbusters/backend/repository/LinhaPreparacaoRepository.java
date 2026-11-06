@@ -21,6 +21,8 @@ public interface LinhaPreparacaoRepository extends JpaRepository<LinhaPreparacao
 
     long countByLotePreparacaoId(UUID lotePreparacaoId);
 
+    int countByLotePreparacaoIdAndIgnorarNaEfetivacaoTrue(UUID lotePreparacaoId);
+
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM LinhaPreparacao lp WHERE lp.lotePreparacao.id = :lotePreparacaoId")
     int deleteByLotePreparacaoId(@Param("lotePreparacaoId") UUID lotePreparacaoId);

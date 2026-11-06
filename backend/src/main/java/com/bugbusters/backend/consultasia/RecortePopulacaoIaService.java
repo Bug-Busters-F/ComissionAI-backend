@@ -129,7 +129,8 @@ public class RecortePopulacaoIaService {
         Campanha campanha = null;
         CampanhaVersao versao = null;
         if (request.campanhaId() != null) {
-            campanha = campanhaRepository.findById(request.campanhaId())
+            campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(request.campanhaId())
+                    .or(() -> campanhaRepository.findById(request.campanhaId()).filter(c -> c.getRemovidoEm() == null))
                     .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada com ID: " + request.campanhaId()));
 
             if (request.versaoCampanhaEsperada() != null) {
@@ -287,10 +288,32 @@ public class RecortePopulacaoIaService {
         Map<String, Registration> mapaRh = new LinkedHashMap<>();
         Map<String, BaseComiss> mapaTaxas = new LinkedHashMap<>();
 
-        List<ReferenciaFaltanteDTO> faltantes = coberturaBaseService.verificarCobertura(
-                vendasSelecionadas,
-                YearMonth.from(periodo.dataInicioRecorte())
-        );
+        List<ReferenciaFaltanteDTO> faltantes = new ArrayList<>();
+        Set<YearMonth> mesesParaVerificar = new LinkedHashSet<>();
+        if (periodo.competencias() != null && !periodo.competencias().isEmpty()) {
+            for (String comp : periodo.competencias()) {
+                try {
+                    mesesParaVerificar.add(YearMonth.parse(comp));
+                } catch (Exception ignored) {}
+            }
+        }
+        if (mesesParaVerificar.isEmpty() && periodo.dataInicioRecorte() != null) {
+            mesesParaVerificar.add(YearMonth.from(periodo.dataInicioRecorte()));
+        }
+
+        for (YearMonth ym : mesesParaVerificar) {
+            List<Sale> vendasDoMes = vendasSelecionadas.stream()
+                    .filter(s -> s.getSaleDate() != null && YearMonth.from(s.getSaleDate()).equals(ym))
+                    .toList();
+            if (!vendasDoMes.isEmpty()) {
+                faltantes.addAll(coberturaBaseService.verificarCobertura(vendasDoMes, ym));
+            } else if (vendasSelecionadas.isEmpty()) {
+                faltantes.addAll(coberturaBaseService.verificarCobertura(Collections.emptyList(), ym));
+            }
+        }
+        if (mesesParaVerificar.isEmpty()) {
+            faltantes.addAll(coberturaBaseService.verificarCobertura(vendasSelecionadas, YearMonth.from(periodo.dataInicioRecorte())));
+        }
 
         if (!faltantes.isEmpty()) {
             for (ReferenciaFaltanteDTO f : faltantes) {

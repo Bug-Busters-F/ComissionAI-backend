@@ -79,6 +79,27 @@ public class CampanhaService {
         this(campanhaRepository, regraRepository, null, null, null, null);
     }
 
+    private OrigemOrcamentoCampanha resolverOrigemOrcamento(BigDecimal orcamento, BigDecimal orcamentoExtraidoIa, boolean orcamentoConfirmado) {
+        if (orcamento != null && orcamento.compareTo(BigDecimal.ZERO) > 0) {
+            if (orcamentoConfirmado) {
+                if (orcamentoExtraidoIa != null && orcamento.compareTo(orcamentoExtraidoIa) == 0) {
+                    return OrigemOrcamentoCampanha.CONFIRMADO_USUARIO;
+                } else if (orcamentoExtraidoIa != null) {
+                    return OrigemOrcamentoCampanha.ALTERADO_USUARIO;
+                } else {
+                    return OrigemOrcamentoCampanha.INFORMADO_USUARIO;
+                }
+            } else if (orcamentoExtraidoIa != null) {
+                return OrigemOrcamentoCampanha.EXTRAIDO_IA;
+            } else {
+                return OrigemOrcamentoCampanha.INFORMADO_USUARIO;
+            }
+        } else if (orcamentoExtraidoIa != null && orcamentoExtraidoIa.compareTo(BigDecimal.ZERO) > 0) {
+            return OrigemOrcamentoCampanha.EXTRAIDO_IA;
+        }
+        return null;
+    }
+
     @Transactional
     public CampanhaResponse criarCampanha(CampanhaRequest request) {
         PeriodoCalculado periodo = calcularEValidarPeriodo(request.dataInicio(), request.dataFim());
@@ -118,25 +139,11 @@ public class CampanhaService {
         boolean orcamentoConfirmado = Boolean.TRUE.equals(request.orcamentoConfirmado());
         OrigemOrcamentoCampanha origem = OrigemOrcamentoCampanha.NAO_DEFINIDO;
 
-        if (orcamento != null && orcamento.compareTo(BigDecimal.ZERO) > 0) {
-            if (orcamentoConfirmado) {
-                if (orcamentoExtraidoIa != null && orcamento.compareTo(orcamentoExtraidoIa) == 0) {
-                    origem = OrigemOrcamentoCampanha.CONFIRMADO_USUARIO;
-                } else if (orcamentoExtraidoIa != null) {
-                    origem = OrigemOrcamentoCampanha.ALTERADO_USUARIO;
-                } else {
-                    origem = OrigemOrcamentoCampanha.INFORMADO_USUARIO;
-                }
-            } else if (orcamentoExtraidoIa != null) {
-                origem = OrigemOrcamentoCampanha.EXTRAIDO_IA;
-            } else {
-                origem = OrigemOrcamentoCampanha.INFORMADO_USUARIO;
-            }
-        } else if (orcamentoExtraidoIa != null && orcamentoExtraidoIa.compareTo(BigDecimal.ZERO) > 0) {
+        if (orcamento == null && orcamentoExtraidoIa != null && orcamentoExtraidoIa.compareTo(BigDecimal.ZERO) > 0) {
             orcamento = orcamentoExtraidoIa;
-            origem = OrigemOrcamentoCampanha.EXTRAIDO_IA;
             orcamentoConfirmado = false;
         }
+        origem = resolverOrigemOrcamento(orcamento, orcamentoExtraidoIa, orcamentoConfirmado);
 
         campanha.setOrcamento(orcamento);
         campanha.setOrcamentoExtraidoIa(orcamentoExtraidoIa);
@@ -315,12 +322,12 @@ public class CampanhaService {
         if (request.orcamento() != null) {
             proposta.setOrcamento(request.orcamento());
             proposta.setOrcamentoExtraidoIa(request.orcamentoExtraidoIa());
-            if (request.orcamentoConfirmado() != null) {
-                proposta.setOrcamentoConfirmado(request.orcamentoConfirmado());
-                if (request.orcamentoConfirmado()) {
-                    proposta.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
-                    proposta.setOrcamentoConfirmadoEm(OffsetDateTime.now());
-                }
+            boolean orcConfirmado = Boolean.TRUE.equals(request.orcamentoConfirmado());
+            proposta.setOrcamentoConfirmado(orcConfirmado);
+            proposta.setOrigemOrcamento(resolverOrigemOrcamento(request.orcamento(), request.orcamentoExtraidoIa(), orcConfirmado));
+            if (orcConfirmado) {
+                proposta.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
+                proposta.setOrcamentoConfirmadoEm(OffsetDateTime.now());
             }
             proposta.setJustificativaOrcamento(request.justificativaOrcamento());
         }
@@ -362,12 +369,12 @@ public class CampanhaService {
             if (request.orcamento() != null) {
                 campanha.setOrcamento(request.orcamento());
                 campanha.setOrcamentoExtraidoIa(request.orcamentoExtraidoIa());
-                if (request.orcamentoConfirmado() != null) {
-                    campanha.setOrcamentoConfirmado(request.orcamentoConfirmado());
-                    if (request.orcamentoConfirmado()) {
-                        campanha.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
-                        campanha.setOrcamentoConfirmadoEm(OffsetDateTime.now());
-                    }
+                boolean orcConfirmado = Boolean.TRUE.equals(request.orcamentoConfirmado());
+                campanha.setOrcamentoConfirmado(orcConfirmado);
+                campanha.setOrigemOrcamento(resolverOrigemOrcamento(request.orcamento(), request.orcamentoExtraidoIa(), orcConfirmado));
+                if (orcConfirmado) {
+                    campanha.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
+                    campanha.setOrcamentoConfirmadoEm(OffsetDateTime.now());
                 }
                 campanha.setJustificativaOrcamento(request.justificativaOrcamento());
             }
@@ -1321,8 +1328,10 @@ public class CampanhaService {
     }
 
     private void garantirCampanhaExiste(Long campanhaId) {
-        if (!campanhaRepository.existsById(campanhaId)) {
-            throw new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada.");
+        boolean existe = campanhaRepository.existsByIdAndRemovidoEmIsNull(campanhaId)
+                || (campanhaRepository.existsById(campanhaId) && campanhaRepository.findById(campanhaId).filter(c -> c.getRemovidoEm() == null).isPresent());
+        if (!existe) {
+            throw new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada ou removida.");
         }
     }
 

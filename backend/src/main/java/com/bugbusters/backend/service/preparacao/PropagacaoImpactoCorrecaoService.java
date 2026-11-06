@@ -166,6 +166,23 @@ public class PropagacaoImpactoCorrecaoService {
             Map<String, Registration> colaboradores = registrationRepository.findByRegistrationIn(matriculasVendas).stream()
                     .collect(Collectors.toMap(r -> r.getRegistration().toUpperCase(), r -> r, (a, b) -> a));
 
+            Set<UUID> idsAlvo = linhasAtivas.stream()
+                    .map(LinhaPreparacao::getRegistroAlvoId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            Map<UUID, Sale> salesPorId = idsAlvo.isEmpty() ? Collections.emptyMap() :
+                    saleRepository.findAllById(idsAlvo).stream().collect(Collectors.toMap(Sale::getId, s -> s));
+
+            List<UUID> regIds = colaboradores.values().stream()
+                    .map(Registration::getId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            Map<UUID, List<Sale>> salesPorRegId = regIds.isEmpty() ? Collections.emptyMap() :
+                    saleRepository.findByRegistrationIdIn(regIds).stream()
+                            .filter(s -> s.getRegistration() != null && s.getRegistration().getId() != null)
+                            .collect(Collectors.groupingBy(s -> s.getRegistration().getId()));
+
             for (LinhaPreparacao l : linhasAtivas) {
                 if (l.getMatricula() == null || l.getDataReferencia() == null || l.getValorVenda() == null) continue;
                 String mat = l.getMatricula().trim();
@@ -185,9 +202,9 @@ public class PropagacaoImpactoCorrecaoService {
 
                 Sale saleAlvo = null;
                 if (l.getRegistroAlvoId() != null) {
-                    saleAlvo = saleRepository.findById(l.getRegistroAlvoId()).orElse(null);
+                    saleAlvo = salesPorId.get(l.getRegistroAlvoId());
                 } else if (reg != null && l.getDataReferencia() != null) {
-                    List<Sale> existentes = saleRepository.findByRegistrationIdIn(List.of(reg.getId()));
+                    List<Sale> existentes = salesPorRegId.getOrDefault(reg.getId(), Collections.emptyList());
                     saleAlvo = existentes.stream()
                             .filter(s -> Objects.equals(s.getSaleDate(), l.getDataReferencia()))
                             .findFirst().orElse(null);
@@ -224,9 +241,11 @@ public class PropagacaoImpactoCorrecaoService {
             }
         }
 
+        boolean houveMudancasReais = (registrosNovos > 0 || registrosAtualizados > 0);
+
         // Identificação de Campanhas e Regras Afetadas
         List<CampanhaAfetadaDTO> campanhasAfetadas = identificarCampanhasAfetadas(
-                lote, competenciasAtingidas, matriculasAtingidas, lojasAtingidas, cargosAtingidos, marcasAtingidas
+                lote, competenciasAtingidas, matriculasAtingidas, lojasAtingidas, cargosAtingidos, marcasAtingidas, houveMudancasReais
         );
 
         // Identificação de Simulações e Aceites Afetados
@@ -445,7 +464,8 @@ public class PropagacaoImpactoCorrecaoService {
             Set<String> matriculasAtingidas,
             Set<Integer> lojasAtingidas,
             Set<Integer> cargosAtingidos,
-            Set<Integer> marcasAtingidas) {
+            Set<Integer> marcasAtingidas,
+            boolean houveMudancasReais) {
 
         List<CampanhaAfetadaDTO> afetadas = new ArrayList<>();
         List<Campanha> todasCampanhas = campanhaRepository.findAllByRemovidoEmIsNullOrderByCriadoEmDesc();
@@ -486,7 +506,8 @@ public class PropagacaoImpactoCorrecaoService {
                 }
             }
 
-            if (!regrasAtingidas.isEmpty() || c.getId().equals(lote.getCampanha().getId())) {
+            boolean campanhaOrigemAfetada = c.getId().equals(lote.getCampanha().getId()) && houveMudancasReais;
+            if (!regrasAtingidas.isEmpty() || campanhaOrigemAfetada) {
                 boolean simAceita = c.getSimulacaoAceita() != null;
                 boolean codAprovado = (versao != null && versao.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO)
                         || regrasAtingidas.stream().anyMatch(r -> r.statusAprovacaoCodigoAtual() == StatusAprovacaoCodigo.APROVADO);

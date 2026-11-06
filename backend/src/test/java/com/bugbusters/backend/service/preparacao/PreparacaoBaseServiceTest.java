@@ -264,6 +264,112 @@ class PreparacaoBaseServiceTest {
         )).isInstanceOf(Exception.class);
     }
 
+    @Test
+    @DisplayName("Ignorar linha impeditiva na efetivação deve atualizar linhasIgnoradas e tornar o lote apto")
+    void deveContabilizarLinhasIgnoradasETornarLoteApto() throws Exception {
+        Object[][] dados = new Object[][]{
+                {"2026-05-01", 10, "Marca A", 100, "Loja Centro", "MATR-IGN-1", "2026-05-01", "2025-01-01", 20, "Vendedor"}
+        };
+        MockMultipartFile file = criarExcelHr(dados);
+
+        LotePreparacaoResponseDTO loteDTO = preparacaoBaseService.iniciarPreparacaoUpload(
+                campanha.getId(),
+                file,
+                "HR",
+                null,
+                "MANUAL",
+                null,
+                "teste_user"
+        );
+
+        assertThat(loteDTO.contagens().linhasImpeditivas()).isGreaterThan(0);
+        assertThat(loteDTO.aptaParaEfetivacao()).isFalse();
+        assertThat(loteDTO.contagens().linhasIgnoradas()).isEqualTo(0);
+
+        LinhaPreparacao linha = linhaPreparacaoRepository.findByLotePreparacaoIdOrderByNumeroLinhaAsc(loteDTO.id()).get(0);
+
+        EditarLinhaPreparacaoRequestDTO requestIgnorar = new EditarLinhaPreparacaoRequestDTO(
+                linha.getVersao(),
+                "MANUAL",
+                "admin",
+                "Ignorando linha com erro para permitir efetivacao",
+                true,
+                null,
+                linha.getDataReferencia(),
+                linha.getCodMarca(),
+                linha.getDescrMarca(),
+                linha.getCodLoja(),
+                linha.getDescrLoja(),
+                linha.getMatricula(),
+                linha.getDataAdmissao(),
+                linha.getDataDemissao(),
+                linha.getCodCargo(),
+                linha.getDescrCargo(),
+                linha.getValorVenda()
+        );
+
+        preparacaoBaseService.editarLinha(campanha.getId(), loteDTO.id(), linha.getNumeroLinha(), requestIgnorar);
+
+        LotePreparacao loteAtualizado = lotePreparacaoRepository.findById(loteDTO.id()).orElseThrow();
+        LotePreparacaoResponseDTO dtoAtualizado = preparacaoBaseService.consultarLote(campanha.getId(), loteDTO.id());
+
+        assertThat(loteAtualizado.getLinhasImpeditivas()).isEqualTo(0);
+        assertThat(dtoAtualizado.aptaParaEfetivacao()).isTrue();
+        assertThat(dtoAtualizado.contagens().linhasIgnoradas()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Editar linha com origem inválida deve lançar BusinessException")
+    void deveRejeitarOrigemEdicaoInvalida() throws Exception {
+        Object[][] dados = new Object[][]{
+                {"2026-05-01", 10, "Marca Alpha", 20, "Loja Centro", "MATR-ORIG-1", "2026-01-01", null, 30, "Consultor"}
+        };
+        MockMultipartFile file = criarExcelHr(dados);
+
+        LotePreparacaoResponseDTO loteDTO = preparacaoBaseService.iniciarPreparacaoUpload(
+                campanha.getId(),
+                file,
+                "HR",
+                null,
+                "MANUAL",
+                null,
+                "teste_user"
+        );
+
+        LinhaPreparacao linha = linhaPreparacaoRepository.findByLotePreparacaoIdOrderByNumeroLinhaAsc(loteDTO.id()).get(0);
+
+        EditarLinhaPreparacaoRequestDTO requestOrigemInvalida = new EditarLinhaPreparacaoRequestDTO(
+                linha.getVersao(),
+                "ORIGEM_INVALIDA",
+                "admin",
+                "Teste origem inválida",
+                false,
+                null,
+                linha.getDataReferencia(),
+                linha.getCodMarca(),
+                linha.getDescrMarca(),
+                linha.getCodLoja(),
+                linha.getDescrLoja(),
+                linha.getMatricula(),
+                linha.getDataAdmissao(),
+                linha.getDataDemissao(),
+                linha.getCodCargo(),
+                linha.getDescrCargo(),
+                linha.getValorVenda()
+        );
+
+        assertThatThrownBy(() -> preparacaoBaseService.editarLinha(campanha.getId(), loteDTO.id(), linha.getNumeroLinha(), requestOrigemInvalida))
+                .isInstanceOf(com.bugbusters.backend.exception.BusinessException.class)
+                .hasMessageContaining("Origem de edição inválida");
+    }
+
+    @Test
+    @DisplayName("Consultar histórico de registro com campanha inexistente deve falhar com 404")
+    void deveValidarCampanhaAoConsultarHistoricoRegistro() {
+        assertThatThrownBy(() -> preparacaoBaseService.consultarHistoricoRegistro(999999L, "SALES", "chave-inexistente"))
+                .isInstanceOf(com.bugbusters.backend.exception.ResourceNotFoundException.class);
+    }
+
     private MockMultipartFile criarExcelHr(Object[][] rows) throws Exception {
         try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet();

@@ -618,7 +618,8 @@ public class CoberturaFechamentoService {
     // =========================================================================
 
     private Campanha buscarCampanha(Long campanhaId) {
-        return campanhaRepository.findById(campanhaId)
+        return campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
+                .or(() -> campanhaRepository.findById(campanhaId).filter(c -> c.getRemovidoEm() == null))
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada: " + campanhaId));
     }
 
@@ -689,6 +690,7 @@ public class CoberturaFechamentoService {
                         s.getValue()
                 )));
 
+        Map<String, Long> cacheLoteParaReportId = new HashMap<>();
         List<AvisoSobreposicaoVendaDTO> avisos = new ArrayList<>();
         for (Map.Entry<ChaveVenda, List<Sale>> entry : agrupadas.entrySet()) {
             if (entry.getValue().size() > 1) {
@@ -696,7 +698,8 @@ public class CoberturaFechamentoService {
                         .map(Sale::getIdLoteOrigem)
                         .filter(Objects::nonNull)
                         .distinct()
-                        .map(idLote -> envioArquivoRepository.findByIdLote(idLote).map(EnvioArquivo::getReportId).orElse(null))
+                        .map(idLote -> cacheLoteParaReportId.computeIfAbsent(idLote,
+                                id -> envioArquivoRepository.findByIdLote(id).map(EnvioArquivo::getReportId).orElse(null)))
                         .filter(Objects::nonNull)
                         .distinct()
                         .toList();

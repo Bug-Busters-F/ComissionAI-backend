@@ -44,6 +44,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -304,5 +305,87 @@ class OrcamentoEnquadramentoIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.encaminhadaGerente").value(true))
                 .andExpect(jsonPath("$.encaminhadaGerentePor").value("analista.financeiro@empresa.com"));
+    }
+    @Test
+    @DisplayName("PUT /api/v1/campanhas/{id} deve calcular e atualizar origemOrcamento corretamente")
+    void deveAtualizarOrigemOrcamentoViaPutCampanha() throws Exception {
+        RegraItemRequest regra = new RegraItemRequest(
+                "bloco-orc-teste", "Comissão 5% E-commerce", "Regra Orçamento E-commerce", "ECOMMERCE",
+                1, null, null, null, null, null,
+                null, null, null, null,
+                TipoOperacaoBase.DEFINIR_TAXA, null,
+                null, null, null,
+                new BigDecimal("0.0500"),
+                "5% fixo sobre e-commerce", "taxa = 0.05",
+                List.of(), true, StatusRegra.DRAFT
+        );
+
+        CampanhaRequest criarReq = new CampanhaRequest(
+                "Campanha Teste Origem Orcamento",
+                "Texto descritivo",
+                LocalDate.of(2026, 5, 1),
+                LocalDate.of(2026, 5, 31),
+                null,
+                List.of(regra),
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+
+        MvcResult criarRes = mockMvc.perform(post("/api/v1/campanhas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(criarReq)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Long id = objectMapper.readTree(criarRes.getResponse().getContentAsString()).get("id").asLong();
+
+        // 1. PUT com orçamento alterado em relação à IA
+        CampanhaRequest putAlteradoReq = new CampanhaRequest(
+                "Campanha Teste Origem Orcamento Atualizada",
+                "Texto descritivo",
+                LocalDate.of(2026, 5, 1),
+                LocalDate.of(2026, 5, 31),
+                null,
+                List.of(regra),
+                new BigDecimal("2500.00"),
+                new BigDecimal("2000.00"),
+                true,
+                "usuario.teste@empresa.com",
+                "Justificativa de ajuste"
+        );
+
+        mockMvc.perform(put("/api/v1/campanhas/" + id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(putAlteradoReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orcamento").value(2500.00))
+                .andExpect(jsonPath("$.orcamentoConfirmado").value(true))
+                .andExpect(jsonPath("$.origemOrcamento").value("ALTERADO_USUARIO"));
+
+        // 2. PUT confirmando o mesmo valor da IA
+        CampanhaRequest putConfirmadoReq = new CampanhaRequest(
+                "Campanha Teste Origem Orcamento Confirmada",
+                "Texto descritivo",
+                LocalDate.of(2026, 5, 1),
+                LocalDate.of(2026, 5, 31),
+                null,
+                List.of(regra),
+                new BigDecimal("2000.00"),
+                new BigDecimal("2000.00"),
+                true,
+                "usuario.teste@empresa.com",
+                "Valor da IA confirmado"
+        );
+
+        mockMvc.perform(put("/api/v1/campanhas/" + id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(putConfirmadoReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orcamento").value(2000.00))
+                .andExpect(jsonPath("$.orcamentoConfirmado").value(true))
+                .andExpect(jsonPath("$.origemOrcamento").value("CONFIRMADO_USUARIO"));
     }
 }
