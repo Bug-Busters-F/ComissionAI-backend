@@ -169,7 +169,8 @@ class CampanhaVersoesHistoricoPRTest {
         CampanhaRequest criarReq = new CampanhaRequest(
                 "Campanha Teste PR BACK-10", "Campanha teste de versões",
                 LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30),
-                EstadoCampanha.DRAFT, List.of(regraV1)
+                EstadoCampanha.DRAFT, List.of(regraV1),
+                null, new BigDecimal("100000.00"), null, true, "analista", null
         );
 
         MvcResult postCampanhaResult = mockMvc.perform(post("/api/v1/campanhas")
@@ -224,7 +225,8 @@ class CampanhaVersoesHistoricoPRTest {
         CampanhaRequest editReqV2 = new CampanhaRequest(
                 "Campanha Teste PR BACK-10 Revisada", "Campanha teste de versões",
                 LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30),
-                EstadoCampanha.DRAFT, List.of(regraV2)
+                EstadoCampanha.DRAFT, List.of(regraV2),
+                null, new BigDecimal("100000.00"), null, true, "analista", null
         );
 
         long revisaoAtual = campanhaRepository.findById(campanhaId).get().getVersaoControle();

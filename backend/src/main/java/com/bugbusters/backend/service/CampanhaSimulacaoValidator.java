@@ -200,6 +200,26 @@ public class CampanhaSimulacaoValidator {
             divergencias.add("Assinatura canônica (fingerprint) das regras e premissas difere do snapshot aprovado.");
         }
 
+        // 3. Orçamento e Regras de Enquadramento (BACK-8)
+        BigDecimal orcamentoCampanha = campanha.orcamentoParaRevisao();
+        boolean orcamentoConfirmado = campanha.orcamentoConfirmadoParaRevisao();
+
+        if (orcamentoCampanha == null || orcamentoCampanha.compareTo(BigDecimal.ZERO) <= 0) {
+            divergencias.add("A campanha não possui orçamento monetário definido.");
+        } else if (!orcamentoConfirmado) {
+            divergencias.add("O orçamento monetário da campanha ainda não foi confirmado explicitamente.");
+        } else {
+            if (simulacao.getOrcamentoCampanha() != null && simulacao.getOrcamentoCampanha().compareTo(orcamentoCampanha) != 0) {
+                divergencias.add(String.format("O orçamento atual da proposta (R$ %s) difere do orçamento considerado na simulação (R$ %s).",
+                        orcamentoCampanha, simulacao.getOrcamentoCampanha()));
+            }
+            if (simulacao.getComissaoProjetada() != null && simulacao.getComissaoProjetada().compareTo(orcamentoCampanha) > 0) {
+                BigDecimal excedente = simulacao.getComissaoProjetada().subtract(orcamentoCampanha);
+                divergencias.add(String.format("O custo total projetado de comissões no cenário 100%% (R$ %s) excede o teto orçamentário da campanha (R$ %s) em R$ %s. Encaminhamento ao gerente e ativação bloqueados.",
+                        simulacao.getComissaoProjetada(), orcamentoCampanha, excedente));
+            }
+        }
+
         return divergencias;
     }
 

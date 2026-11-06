@@ -1,6 +1,7 @@
 package com.bugbusters.backend.model;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
@@ -27,6 +28,40 @@ public class CampanhaVersao {
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "versao_anterior_id") private CampanhaVersao versaoAnterior;
     @Column(name = "publicado_por", length = 150) private String publicadoPor;
     @OneToOne(fetch = FetchType.LAZY) @JoinColumn(name = "simulacao_aceita_id") private Simulacao simulacaoAceita;
+
+    @Column(precision = 18, scale = 2)
+    private BigDecimal orcamento;
+
+    @Column(name = "orcamento_extraido_ia", precision = 18, scale = 2)
+    private BigDecimal orcamentoExtraidoIa;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "origem_orcamento", length = 40)
+    private OrigemOrcamentoCampanha origemOrcamento = OrigemOrcamentoCampanha.NAO_DEFINIDO;
+
+    @Column(name = "orcamento_confirmado", nullable = false)
+    private boolean orcamentoConfirmado = false;
+
+    @Column(name = "orcamento_confirmado_por", length = 120)
+    private String orcamentoConfirmadoPor;
+
+    @Column(name = "orcamento_confirmado_em")
+    private OffsetDateTime orcamentoConfirmadoEm;
+
+    @Column(name = "justificativa_orcamento", columnDefinition = "TEXT")
+    private String justificativaOrcamento;
+
+    @Column(name = "encaminhada_gerente", nullable = false)
+    private boolean encaminhadaGerente = false;
+
+    @Column(name = "encaminhada_gerente_por", length = 120)
+    private String encaminhadaGerentePor;
+
+    @Column(name = "encaminhada_gerente_em")
+    private OffsetDateTime encaminhadaGerenteEm;
+
+    @Column(name = "observacao_encaminhamento", columnDefinition = "TEXT")
+    private String observacaoEncaminhamento;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status_aprovacao_codigo", nullable = false, length = 30)
@@ -60,6 +95,30 @@ public class CampanhaVersao {
     public CampanhaVersao getVersaoAnterior(){return versaoAnterior;} public void setVersaoAnterior(CampanhaVersao v){this.versaoAnterior=v;}
     public String getPublicadoPor(){return publicadoPor;} public void setPublicadoPor(String v){this.publicadoPor=v;}
     public Simulacao getSimulacaoAceita(){return simulacaoAceita;} public void setSimulacaoAceita(Simulacao v){this.simulacaoAceita=v;}
+
+    public BigDecimal getOrcamento() { return orcamento; }
+    public void setOrcamento(BigDecimal orcamento) { this.orcamento = orcamento; }
+    public BigDecimal getOrcamentoExtraidoIa() { return orcamentoExtraidoIa; }
+    public void setOrcamentoExtraidoIa(BigDecimal orcamentoExtraidoIa) { this.orcamentoExtraidoIa = orcamentoExtraidoIa; }
+    public OrigemOrcamentoCampanha getOrigemOrcamento() { return origemOrcamento; }
+    public void setOrigemOrcamento(OrigemOrcamentoCampanha origemOrcamento) { this.origemOrcamento = origemOrcamento; }
+    public boolean isOrcamentoConfirmado() { return orcamentoConfirmado; }
+    public void setOrcamentoConfirmado(boolean orcamentoConfirmado) { this.orcamentoConfirmado = orcamentoConfirmado; }
+    public String getOrcamentoConfirmadoPor() { return orcamentoConfirmadoPor; }
+    public void setOrcamentoConfirmadoPor(String orcamentoConfirmadoPor) { this.orcamentoConfirmadoPor = orcamentoConfirmadoPor; }
+    public OffsetDateTime getOrcamentoConfirmadoEm() { return orcamentoConfirmadoEm; }
+    public void setOrcamentoConfirmadoEm(OffsetDateTime orcamentoConfirmadoEm) { this.orcamentoConfirmadoEm = orcamentoConfirmadoEm; }
+    public String getJustificativaOrcamento() { return justificativaOrcamento; }
+    public void setJustificativaOrcamento(String justificativaOrcamento) { this.justificativaOrcamento = justificativaOrcamento; }
+
+    public boolean isEncaminhadaGerente() { return encaminhadaGerente; }
+    public void setEncaminhadaGerente(boolean encaminhadaGerente) { this.encaminhadaGerente = encaminhadaGerente; }
+    public String getEncaminhadaGerentePor() { return encaminhadaGerentePor; }
+    public void setEncaminhadaGerentePor(String encaminhadaGerentePor) { this.encaminhadaGerentePor = encaminhadaGerentePor; }
+    public OffsetDateTime getEncaminhadaGerenteEm() { return encaminhadaGerenteEm; }
+    public void setEncaminhadaGerenteEm(OffsetDateTime encaminhadaGerenteEm) { this.encaminhadaGerenteEm = encaminhadaGerenteEm; }
+    public String getObservacaoEncaminhamento() { return observacaoEncaminhamento; }
+    public void setObservacaoEncaminhamento(String observacaoEncaminhamento) { this.observacaoEncaminhamento = observacaoEncaminhamento; }
 
     public StatusAprovacaoCodigo getStatusAprovacaoCodigo() { return statusAprovacaoCodigo; }
     public void setStatusAprovacaoCodigo(StatusAprovacaoCodigo statusAprovacaoCodigo) { this.statusAprovacaoCodigo = statusAprovacaoCodigo; }

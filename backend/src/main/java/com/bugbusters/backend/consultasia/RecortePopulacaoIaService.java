@@ -593,7 +593,10 @@ public class RecortePopulacaoIaService {
                         versao != null && versao.getStatus() != null ? versao.getStatus().name() : null,
                         campanha.getVersaoControle(),
                         versao != null && versao.getStatusAprovacaoCodigo() != null ? versao.getStatusAprovacaoCodigo().name() : null,
-                        versao != null ? versao.getHashArtefatosCodigo() : null
+                        versao != null ? versao.getHashArtefatosCodigo() : null,
+                        campanha.orcamentoParaRevisao(),
+                        campanha.orcamentoConfirmadoParaRevisao(),
+                        campanha.origemOrcamentoParaRevisao() != null ? campanha.origemOrcamentoParaRevisao().name() : null
                 )
                 : null;
 

@@ -321,11 +321,17 @@ public class PropagacaoImpactoCorrecaoService {
                     Campanha c = sim.getCampanha();
                     if (c != null && c.getSimulacaoAceita() != null && c.getSimulacaoAceita().getId().equals(sim.getId())) {
                         c.setSimulacaoAceita(null);
+                        c.setEncaminhadaGerente(false);
+                        c.setEncaminhadaGerentePor(null);
+                        c.setEncaminhadaGerenteEm(null);
                         campanhaRepository.save(c);
                     }
                     CampanhaVersao v = sim.getCampanhaVersao();
                     if (v != null && v.getSimulacaoAceita() != null && v.getSimulacaoAceita().getId().equals(sim.getId())) {
                         v.setSimulacaoAceita(null);
+                        v.setEncaminhadaGerente(false);
+                        v.setEncaminhadaGerentePor(null);
+                        v.setEncaminhadaGerenteEm(null);
                         campanhaVersaoRepository.save(v);
                     }
                 }

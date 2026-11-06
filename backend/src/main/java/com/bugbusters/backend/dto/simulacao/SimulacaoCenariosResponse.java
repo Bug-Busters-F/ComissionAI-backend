@@ -5,7 +5,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-@Schema(description = "Resultado completo da simulação de cenários, sensibilidade e projeções pro-rata")
+@Schema(description = "Resultado completo da simulação de cenários, sensibilidade, projeções pro-rata e enquadramento orçamentário")
 public record SimulacaoCenariosResponse(
         @Schema(description = "Identificador persistido da simulação")
         java.util.UUID id,
@@ -62,7 +62,10 @@ public record SimulacaoCenariosResponse(
         List<String> avisosGerais,
 
         @Schema(description = "Memória consolidada de cálculo explicando como os totais e projeções foram alcançados sem chamadas à IA")
-        String memoriaCalculoConsolidada
+        String memoriaCalculoConsolidada,
+
+        @Schema(description = "Resumo executivo de governança e enquadramento orçamentário (BACK-8)")
+        ResumoEnquadramentoOrcamentoDTO enquadramentoOrcamento
 ) {
     public SimulacaoCenariosResponse(String competencia, int totalVendasRecortadas, BigDecimal valorTotalRecortado,
                                     Long campanhaId, String tituloCampanha, LocalDate dataInicioCampanha,
@@ -72,7 +75,20 @@ public record SimulacaoCenariosResponse(
                                     int totalVendasPaginadas, List<VendaSimuladaDetalheDTO> vendas,
                                     List<String> avisosGerais) {
         this(null, null, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha,
-             dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80,
-             cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, null);
+                dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80,
+                cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, null, null);
+    }
+
+    public SimulacaoCenariosResponse(java.util.UUID id, java.util.UUID protocolo, String competencia,
+                                    int totalVendasRecortadas, BigDecimal valorTotalRecortado,
+                                    Long campanhaId, String tituloCampanha, LocalDate dataInicioCampanha,
+                                    LocalDate dataFimCampanha, long diasInclusivos, BigDecimal fatorProjecao,
+                                    CenarioConsolidadoDTO cenario100, CenarioConsolidadoDTO cenario80,
+                                    CenarioConsolidadoDTO cenario120, CenarioConsolidadoDTO cenario150,
+                                    int totalVendasPaginadas, List<VendaSimuladaDetalheDTO> vendas,
+                                    List<String> avisosGerais, String memoriaCalculoConsolidada) {
+        this(id, protocolo, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha,
+                dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80,
+                cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, memoriaCalculoConsolidada, null);
     }
 }

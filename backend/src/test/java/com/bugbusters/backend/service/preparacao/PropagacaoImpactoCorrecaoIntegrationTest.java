@@ -194,7 +194,8 @@ class PropagacaoImpactoCorrecaoIntegrationTest {
         CampanhaRequest req = new CampanhaRequest(
                 "Campanha Impacto BACK-6", "Campanha de testes de impacto",
                 LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30),
-                EstadoCampanha.DRAFT, List.of(regraDTO)
+                EstadoCampanha.DRAFT, List.of(regraDTO),
+                new BigDecimal("500000.00"), null, true, "analista", null
         );
 
         var respCamp = campanhaService.criarCampanha(req);

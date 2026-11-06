@@ -316,7 +316,8 @@ class CampanhaCoberturaControllerIntegrationTest {
         CampanhaRequest criarReq = new CampanhaRequest(
                 titulo, "Campanha teste de fechamento",
                 inicio, fim,
-                EstadoCampanha.DRAFT, List.of(regra)
+                EstadoCampanha.DRAFT, List.of(regra),
+                new BigDecimal("100000.00"), null, true, "analista", null
         );
 
         MvcResult postCampanhaResult = mockMvc.perform(post("/api/v1/campanhas")

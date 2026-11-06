@@ -85,7 +85,10 @@ public final class RecortePopulacaoIaDTOs {
             String statusVersao,
             Long versaoControle,
             String statusAprovacaoCodigo,
-            String hashArtefatosCodigo
+            String hashArtefatosCodigo,
+            BigDecimal orcamento,
+            Boolean orcamentoConfirmado,
+            String origemOrcamento
     ) {}
 
     @Schema(description = "Resumo estatístico de versões e lotes dos registros de vendas ou RH")

@@ -2,7 +2,9 @@ package com.bugbusters.backend.dto.simulacao;
 
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -34,8 +36,20 @@ public record SimulacaoCenariosRequest(
         Boolean apenasComAlteracao,
 
         @Schema(description = "Filtrar no retorno apenas vendas que sofreram mudança de faixa nos cenários escalados (80%, 120%, 150%)", example = "false")
-        Boolean apenasComMudancaFaixa
+        Boolean apenasComMudancaFaixa,
+
+        @Schema(description = "Orçamento monetário explícito (obrigatório para simulações avulsas sem campanha vinculada)", example = "50000.00")
+        @DecimalMin(value = "0.01", message = "O orçamento deve ser maior que zero")
+        BigDecimal orcamento
 ) {
+    public SimulacaoCenariosRequest(
+            String competencia, Long campanhaId, LocalDate dataInicio, LocalDate dataFim,
+            List<RegraItemRequest> regras, Integer limite, Integer pagina,
+            Boolean apenasComAlteracao, Boolean apenasComMudancaFaixa
+    ) {
+        this(competencia, campanhaId, dataInicio, dataFim, regras, limite, pagina, apenasComAlteracao, apenasComMudancaFaixa, null);
+    }
+
     public SimulacaoCenariosRequest {
         if (limite == null || limite <= 0) {
             limite = 500;

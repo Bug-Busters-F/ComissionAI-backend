@@ -4,6 +4,9 @@ import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.AtivarCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
+import com.bugbusters.backend.dto.campanha.ConfirmarOrcamentoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.EncaminharCampanhaGerenteRequest;
+import com.bugbusters.backend.dto.campanha.OrcamentoCampanhaResponse;
 import com.bugbusters.backend.dto.campanha.VersaoCampanhaResumoResponse;
 import com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse;
 import com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse;
@@ -81,6 +84,30 @@ public class CampanhaController {
             @RequestBody(required = false) AtivarCampanhaRequest request,
             @RequestHeader(value = "X-Campanha-Revisao", required = false) Long revisao) {
         return ResponseEntity.ok(campanhaService.ativarRevisao(id, request != null ? request.versaoEsperada() : null, revisao));
+    }
+
+    @Operation(summary = "Confirmar ou alterar explicitamente o orçamento monetário da campanha (BACK-8)",
+            description = "Recebe o valor monetário do orçamento, valida e registra a confirmação explícita do analista antes da simulação.")
+    @ApiResponse(responseCode = "200", description = "Orçamento confirmado/atualizado com sucesso")
+    @ApiResponse(responseCode = "400", description = "Valor inválido ou estado incompatível", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PatchMapping("/{id}/orcamento")
+    public ResponseEntity<OrcamentoCampanhaResponse> confirmarOuAlterarOrcamento(
+            @PathVariable Long id,
+            @Valid @RequestBody ConfirmarOrcamentoCampanhaRequest request) {
+        return ResponseEntity.ok(campanhaService.confirmarOuAlterarOrcamento(id, request));
+    }
+
+    @Operation(summary = "Encaminhar campanha revisada e simulada ao gerente (BACK-8)",
+            description = "Valida o enquadramento orçamentário no cenário 100% e encaminha a campanha ao gerente para aprovação final. Bloqueia se 100% exceder o teto.")
+    @ApiResponse(responseCode = "200", description = "Campanha encaminhada com sucesso ao gerente")
+    @ApiResponse(responseCode = "400", description = "Bloqueio por falta de orçamento confirmado, falta de simulação ou teto excedido", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/{id}/encaminhar-gerente")
+    public ResponseEntity<CampanhaResponse> encaminharAoGerente(
+            @PathVariable Long id,
+            @RequestBody(required = false) EncaminharCampanhaGerenteRequest request) {
+        return ResponseEntity.ok(campanhaService.encaminharAoGerente(id, request));
     }
 
     @Operation(

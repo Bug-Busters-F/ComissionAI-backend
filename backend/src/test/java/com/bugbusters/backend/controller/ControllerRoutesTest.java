@@ -846,6 +846,9 @@ class ControllerRoutesTest {
                 "textoOriginal": "Comissão de 4.5%",
                 "dataInicio": "2026-10-01",
                 "dataFim": "2026-10-31",
+                "orcamento": 50000.00,
+                "orcamentoConfirmado": true,
+                "orcamentoConfirmadoPor": "analista",
                 "regras": [
                     {
                         "canal": "ECOMMERCE",

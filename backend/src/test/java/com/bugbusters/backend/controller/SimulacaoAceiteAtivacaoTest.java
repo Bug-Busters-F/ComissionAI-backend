@@ -171,7 +171,8 @@ class SimulacaoAceiteAtivacaoTest {
         CampanhaRequest req = new CampanhaRequest(
                 "Campanha Teste BACK-8", "Texto original",
                 LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30),
-                EstadoCampanha.DRAFT, List.of(regraDTO)
+                EstadoCampanha.DRAFT, List.of(regraDTO),
+                new BigDecimal("50000.00"), null, true, "analista", null
         );
 
         var resp = campanhaService.criarCampanha(req);
@@ -246,7 +247,8 @@ class SimulacaoAceiteAtivacaoTest {
         CampanhaRequest reqCamp = new CampanhaRequest(
                 "Campanha Com Impedimento", "Texto",
                 LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31),
-                EstadoCampanha.DRAFT, List.of(regraComImpedimento)
+                EstadoCampanha.DRAFT, List.of(regraComImpedimento),
+                new BigDecimal("50000.00"), null, true, "analista", null
         );
         var respCamp = campanhaService.criarCampanha(reqCamp);
 
@@ -583,7 +585,8 @@ class SimulacaoAceiteAtivacaoTest {
                 TipoOperacaoBase.DEFINIR_TAXA, null, null, null, null,
                 new BigDecimal(taxa), null, null, List.of(), true, StatusRegra.DRAFT);
         return new CampanhaRequest("Campanha revisada", "Texto revisado", campanha.getDataInicio(),
-                campanha.getDataFim(), EstadoCampanha.DRAFT, List.of(regra));
+                campanha.getDataFim(), EstadoCampanha.DRAFT, List.of(regra),
+                new BigDecimal("50000.00"), null, true, "analista", null);
     }
 
 }
