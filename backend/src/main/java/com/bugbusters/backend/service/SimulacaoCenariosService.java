@@ -424,6 +424,9 @@ public class SimulacaoCenariosService {
 
         if (campanha != null) {
             campanha.setSimulacaoAceita(salva);
+            if (campanha.versaoParaRevisao() != null) {
+                campanha.versaoParaRevisao().setSimulacaoAceita(salva);
+            }
             // O aceite não publica. A ativação exige a confirmação final após a revisão.
             campanhaRepository.save(campanha);
         }

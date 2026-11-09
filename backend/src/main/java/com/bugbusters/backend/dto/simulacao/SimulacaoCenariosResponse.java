@@ -62,8 +62,44 @@ public record SimulacaoCenariosResponse(
         List<String> avisosGerais,
 
         @Schema(description = "Memória consolidada de cálculo explicando como os totais e projeções foram alcançados sem chamadas à IA")
-        String memoriaCalculoConsolidada
+        String memoriaCalculoConsolidada,
+
+        @Schema(description = "Indica se o cálculo foi executado pelo programa Python homologado da campanha (BUG-106 / BACK-11)")
+        Boolean executadoViaPython,
+
+        @Schema(description = "Versão do programa Python executada")
+        Integer versaoProgramaPython,
+
+        @Schema(description = "Checksum criptográfico SHA-256 do código Python executado")
+        String checksumPython
 ) {
+    public SimulacaoCenariosResponse(
+            java.util.UUID id,
+            java.util.UUID protocolo,
+            String competencia,
+            int totalVendasRecortadas,
+            BigDecimal valorTotalRecortado,
+            Long campanhaId,
+            String tituloCampanha,
+            LocalDate dataInicioCampanha,
+            LocalDate dataFimCampanha,
+            long diasInclusivos,
+            BigDecimal fatorProjecao,
+            CenarioConsolidadoDTO cenario100,
+            CenarioConsolidadoDTO cenario80,
+            CenarioConsolidadoDTO cenario120,
+            CenarioConsolidadoDTO cenario150,
+            int totalVendasPaginadas,
+            List<VendaSimuladaDetalheDTO> vendas,
+            List<String> avisosGerais,
+            String memoriaCalculoConsolidada
+    ) {
+        this(id, protocolo, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha,
+                dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80,
+                cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, memoriaCalculoConsolidada,
+                false, null, null);
+    }
+
     public SimulacaoCenariosResponse(String competencia, int totalVendasRecortadas, BigDecimal valorTotalRecortado,
                                     Long campanhaId, String tituloCampanha, LocalDate dataInicioCampanha,
                                     LocalDate dataFimCampanha, long diasInclusivos, BigDecimal fatorProjecao,
@@ -73,6 +109,6 @@ public record SimulacaoCenariosResponse(
                                     List<String> avisosGerais) {
         this(null, null, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha,
              dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80,
-             cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, null);
+             cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, null, false, null, null);
     }
 }

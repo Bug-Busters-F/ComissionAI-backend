@@ -27,6 +27,32 @@ public class CampanhaVersao {
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "versao_anterior_id") private CampanhaVersao versaoAnterior;
     @Column(name = "publicado_por", length = 150) private String publicadoPor;
     @OneToOne(fetch = FetchType.LAZY) @JoinColumn(name = "simulacao_aceita_id") private Simulacao simulacaoAceita;
+    @OneToOne(fetch = FetchType.LAZY) @JoinColumn(name = "programa_python_aprovado_id") private CampanhaProgramaPython programaPythonAprovado;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "estado_esteira", nullable = false, length = 30)
+    private EstadoEsteiraCampanha estadoEsteira = EstadoEsteiraCampanha.EM_ELABORACAO;
+
+    @Column(name = "devolvido_em")
+    private OffsetDateTime devolvidoEm;
+
+    @Column(name = "devolvido_por", length = 150)
+    private String devolvidoPor;
+
+    @Column(name = "motivo_devolucao", columnDefinition = "TEXT")
+    private String motivoDevolucao;
+
+    @Column(name = "etapa_devolucao")
+    private Integer etapaDevolucao;
+
+    @Column(name = "gerente_aprovador", length = 150)
+    private String gerenteAprovador;
+
+    @Column(name = "gerente_aprovado_em")
+    private OffsetDateTime gerenteAprovadoEm;
+
+    @Column(name = "parecer_gerente", columnDefinition = "TEXT")
+    private String parecerGerente;
 
     public Long getId(){return id;} public void setId(Long id){this.id=id;}
     public Campanha getCampanha(){return campanha;} public void setCampanha(Campanha c){this.campanha=c;}
@@ -41,4 +67,15 @@ public class CampanhaVersao {
     public CampanhaVersao getVersaoAnterior(){return versaoAnterior;} public void setVersaoAnterior(CampanhaVersao v){this.versaoAnterior=v;}
     public String getPublicadoPor(){return publicadoPor;} public void setPublicadoPor(String v){this.publicadoPor=v;}
     public Simulacao getSimulacaoAceita(){return simulacaoAceita;} public void setSimulacaoAceita(Simulacao v){this.simulacaoAceita=v;}
+    public CampanhaProgramaPython getProgramaPythonAprovado(){return programaPythonAprovado;} public void setProgramaPythonAprovado(CampanhaProgramaPython v){this.programaPythonAprovado=v;}
+
+    public EstadoEsteiraCampanha getEstadoEsteira(){return estadoEsteira;} public void setEstadoEsteira(EstadoEsteiraCampanha e){this.estadoEsteira=e;}
+    public OffsetDateTime getDevolvidoEm(){return devolvidoEm;} public void setDevolvidoEm(OffsetDateTime d){this.devolvidoEm=d;}
+    public String getDevolvidoPor(){return devolvidoPor;} public void setDevolvidoPor(String p){this.devolvidoPor=p;}
+    public String getMotivoDevolucao(){return motivoDevolucao;} public void setMotivoDevolucao(String m){this.motivoDevolucao=m;}
+    public Integer getEtapaDevolucao(){return etapaDevolucao;} public void setEtapaDevolucao(Integer ed){this.etapaDevolucao=ed;}
+    public String getGerenteAprovador(){return gerenteAprovador;} public void setGerenteAprovador(String ga){this.gerenteAprovador=ga;}
+    public OffsetDateTime getGerenteAprovadoEm(){return gerenteAprovadoEm;} public void setGerenteAprovadoEm(OffsetDateTime gae){this.gerenteAprovadoEm=gae;}
+    public String getParecerGerente(){return parecerGerente;} public void setParecerGerente(String pg){this.parecerGerente=pg;}
+    public boolean isDevolvida(){return EstadoEsteiraCampanha.DEVOLVIDA.equals(this.estadoEsteira);}
 }

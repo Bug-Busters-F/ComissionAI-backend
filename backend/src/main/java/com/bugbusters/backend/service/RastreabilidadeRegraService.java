@@ -12,7 +12,12 @@ public final class RastreabilidadeRegraService {
     private RastreabilidadeRegraService() {}
 
     public static void aplicar(Regra regra, RastreabilidadeRegraDTO evidence) {
+        aplicar(regra, evidence, java.util.Set.of());
+    }
+
+    public static void aplicar(Regra regra, RastreabilidadeRegraDTO evidence, java.util.Set<String> pendenciasAceitas) {
         if (evidence == null) return; // Contrato legado: não atribuir novas evidências.
+        java.util.Set<String> aceitas = pendenciasAceitas == null ? java.util.Set.of() : pendenciasAceitas;
         // Canonicalize exactly as the database and commission engine, before describing the values.
         if (regra.getTaxa() != null) regra.setTaxa(regra.getTaxa().setScale(4, java.math.RoundingMode.HALF_UP));
         if (regra.getValorAjuste() != null) regra.setValorAjuste(regra.getValorAjuste().setScale(4, java.math.RoundingMode.HALF_UP));
@@ -37,10 +42,16 @@ public final class RastreabilidadeRegraService {
                 throw new BusinessException("A taxa atual diverge da operação sobre a base. Atualize a explicação e confirme o percentual antes de salvar.");
         }
         boolean bloqueada = java.util.stream.Stream.concat(evidence.pendencias().stream(), evidence.pendenciasCampanha().stream())
+                .filter(p -> (p.id() == null || !aceitas.contains(p.id())) && (p.codigo() == null || !aceitas.contains(p.codigo())))
                 .anyMatch(p -> p.severidade() != SeveridadePendencia.AVISO);
         var f = proposta.filtros();
         boolean semPublico = f.canal() == null && f.codMarca() == null && f.descrMarca() == null && f.codCargo() == null && f.descriCargo() == null && f.codLoja() == null && f.matricula() == null;
-        if (!atual || bloqueada || (semPublico && !Boolean.TRUE.equals(evidence.publicoTodasVendas()))) regra.setCompleta(false);
+        boolean publicoAceito = aceitas.contains("PUBLICO_GERAL") || aceitas.contains("filtros:PUBLICO_GERAL");
+        if (!atual || bloqueada || (semPublico && !Boolean.TRUE.equals(evidence.publicoTodasVendas()) && !publicoAceito)) {
+            regra.setCompleta(false);
+        } else if (regra.getTaxa() != null) {
+            regra.setCompleta(true);
+        }
         regra.setExplicacao(atual ? ARTEFATOS.gerarExplicacao(proposta) : null);
         regra.setPythonEquivalente(atual ? ARTEFATOS.gerarPythonEquivalente(proposta) : null);
         try { regra.setRastreabilidadeJson(JSON.writeValueAsString(evidence)); }

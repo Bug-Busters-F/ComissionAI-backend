@@ -3,6 +3,7 @@ package com.bugbusters.backend.dto.campanha;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.model.EstadoCampanha;
+import com.bugbusters.backend.model.EstadoEsteiraCampanha;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -32,7 +33,13 @@ public record CampanhaResponse(
         Integer etapaMaisAvancada,
         Long revisaoControle,
         Integer versaoOrigem,
-        String motivoBloqueioEdicao
+        String motivoBloqueioEdicao,
+        EstadoEsteiraCampanha estadoEsteira,
+        Boolean devolvida,
+        String devolvidoPor,
+        OffsetDateTime devolvidoEm,
+        String motivoDevolucao,
+        Integer etapaDevolucao
 ) {
     public CampanhaResponse(
             Long id,
@@ -46,7 +53,31 @@ public record CampanhaResponse(
             OffsetDateTime criadoEm,
             OffsetDateTime atualizadoEm
     ) {
-        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null, null, null, 1, 1, null, null, null);
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null, null, null, 1, 1, null, null, null, null, false, null, null, null, null);
+    }
+
+    public CampanhaResponse(
+            Long id,
+            String titulo,
+            String textoOriginal,
+            EstadoCampanha estado,
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            List<RegraVinculadaDTO> regras,
+            Boolean possuiIncompletas,
+            OffsetDateTime criadoEm,
+            OffsetDateTime atualizadoEm,
+            UUID simulacaoAceitaId,
+            StatusAceiteSimulacao statusAceite,
+            Integer versaoVigente,
+            Integer versaoProposta,
+            Integer ultimaEtapa,
+            Integer etapaMaisAvancada,
+            Long revisaoControle,
+            Integer versaoOrigem,
+            String motivoBloqueioEdicao
+    ) {
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, simulacaoAceitaId, statusAceite, versaoVigente, versaoProposta, ultimaEtapa, etapaMaisAvancada, revisaoControle, versaoOrigem, motivoBloqueioEdicao, null, false, null, null, null, null);
     }
 
     public record RegraVinculadaDTO(

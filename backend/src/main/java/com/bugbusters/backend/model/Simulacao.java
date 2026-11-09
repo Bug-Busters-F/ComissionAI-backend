@@ -206,6 +206,21 @@ public class Simulacao {
     @Column(name = "mudanca_faixa_150", nullable = false)
     private int mudancaFaixa150;
 
+    @Column(name = "executado_via_python", nullable = false)
+    private boolean executadoViaPython = false;
+
+    @Column(name = "codigo_python_executado", columnDefinition = "TEXT")
+    private String codigoPythonExecutado;
+
+    @Column(name = "checksum_python", length = 64)
+    private String checksumPython;
+
+    @Column(name = "versao_programa_python")
+    private Integer versaoProgramaPython;
+
+    @Column(name = "saida_python_raw", columnDefinition = "TEXT")
+    private String saidaPythonRaw;
+
     @OneToMany(mappedBy = "simulacao", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SimulacaoVenda> vendas = new ArrayList<>();
 
@@ -416,4 +431,19 @@ public class Simulacao {
 
     public List<SimulacaoVenda> getVendas() { return vendas; }
     public void setVendas(List<SimulacaoVenda> vendas) { this.vendas = vendas; }
+
+    public boolean isExecutadoViaPython() { return executadoViaPython; }
+    public void setExecutadoViaPython(boolean executadoViaPython) { this.executadoViaPython = executadoViaPython; }
+
+    public String getCodigoPythonExecutado() { return codigoPythonExecutado; }
+    public void setCodigoPythonExecutado(String codigoPythonExecutado) { this.codigoPythonExecutado = codigoPythonExecutado; }
+
+    public String getChecksumPython() { return checksumPython; }
+    public void setChecksumPython(String checksumPython) { this.checksumPython = checksumPython; }
+
+    public Integer getVersaoProgramaPython() { return versaoProgramaPython; }
+    public void setVersaoProgramaPython(Integer versaoProgramaPython) { this.versaoProgramaPython = versaoProgramaPython; }
+
+    public String getSaidaPythonRaw() { return saidaPythonRaw; }
+    public void setSaidaPythonRaw(String saidaPythonRaw) { this.saidaPythonRaw = saidaPythonRaw; }
 }
