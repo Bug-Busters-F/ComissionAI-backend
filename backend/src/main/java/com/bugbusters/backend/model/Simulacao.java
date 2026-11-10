@@ -206,6 +206,37 @@ public class Simulacao {
     @Column(name = "mudanca_faixa_150", nullable = false)
     private int mudancaFaixa150;
 
+    @Column(name = "orcamento_campanha", precision = 18, scale = 2)
+    private BigDecimal orcamentoCampanha;
+
+    @Column(name = "enquadrado_100")
+    private Boolean enquadrado100;
+
+    @Column(name = "enquadrado_80")
+    private Boolean enquadrado80;
+
+    @Column(name = "enquadrado_120")
+    private Boolean enquadrado120;
+
+    @Column(name = "enquadrado_150")
+    private Boolean enquadrado150;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_enquadramento_100", length = 30)
+    private StatusEnquadramentoOrcamento statusEnquadramento100;
+
+    @Column(name = "saldo_orcamento_100", precision = 18, scale = 2)
+    private BigDecimal saldoOrcamento100;
+
+    @Column(name = "excedente_orcamento_100", precision = 18, scale = 2)
+    private BigDecimal excedenteOrcamento100;
+
+    @Column(name = "percentual_uso_orcamento_100", precision = 10, scale = 2)
+    private BigDecimal percentualUsoOrcamento100;
+
+    @Column(name = "escopo_total_vendas")
+    private Integer escopoTotalVendas;
+
     @OneToMany(mappedBy = "simulacao", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SimulacaoVenda> vendas = new ArrayList<>();
 
@@ -416,4 +447,34 @@ public class Simulacao {
 
     public List<SimulacaoVenda> getVendas() { return vendas; }
     public void setVendas(List<SimulacaoVenda> vendas) { this.vendas = vendas; }
+
+    public BigDecimal getOrcamentoCampanha() { return orcamentoCampanha; }
+    public void setOrcamentoCampanha(BigDecimal orcamentoCampanha) { this.orcamentoCampanha = orcamentoCampanha; }
+
+    public Boolean getEnquadrado100() { return enquadrado100; }
+    public void setEnquadrado100(Boolean enquadrado100) { this.enquadrado100 = enquadrado100; }
+
+    public Boolean getEnquadrado80() { return enquadrado80; }
+    public void setEnquadrado80(Boolean enquadrado80) { this.enquadrado80 = enquadrado80; }
+
+    public Boolean getEnquadrado120() { return enquadrado120; }
+    public void setEnquadrado120(Boolean enquadrado120) { this.enquadrado120 = enquadrado120; }
+
+    public Boolean getEnquadrado150() { return enquadrado150; }
+    public void setEnquadrado150(Boolean enquadrado150) { this.enquadrado150 = enquadrado150; }
+
+    public StatusEnquadramentoOrcamento getStatusEnquadramento100() { return statusEnquadramento100; }
+    public void setStatusEnquadramento100(StatusEnquadramentoOrcamento statusEnquadramento100) { this.statusEnquadramento100 = statusEnquadramento100; }
+
+    public BigDecimal getSaldoOrcamento100() { return saldoOrcamento100; }
+    public void setSaldoOrcamento100(BigDecimal saldoOrcamento100) { this.saldoOrcamento100 = saldoOrcamento100; }
+
+    public BigDecimal getExcedenteOrcamento100() { return excedenteOrcamento100; }
+    public void setExcedenteOrcamento100(BigDecimal excedenteOrcamento100) { this.excedenteOrcamento100 = excedenteOrcamento100; }
+
+    public BigDecimal getPercentualUsoOrcamento100() { return percentualUsoOrcamento100; }
+    public void setPercentualUsoOrcamento100(BigDecimal percentualUsoOrcamento100) { this.percentualUsoOrcamento100 = percentualUsoOrcamento100; }
+
+    public Integer getEscopoTotalVendas() { return escopoTotalVendas; }
+    public void setEscopoTotalVendas(Integer escopoTotalVendas) { this.escopoTotalVendas = escopoTotalVendas; }
 }

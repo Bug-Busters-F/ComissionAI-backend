@@ -28,9 +28,11 @@ import com.bugbusters.backend.dto.simulacao.*;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Campanha;
+import com.bugbusters.backend.model.OrigemOrcamentoCampanha;
 import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.SimulacaoVenda;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
+import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
 import com.bugbusters.backend.auth.Usuario;
 import org.springframework.security.core.context.SecurityContextHolder;
 import com.bugbusters.backend.position.Position;
@@ -45,7 +47,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 
 /**
- * Serviço responsável pela simulação em sandbox e persistência isolada (BACK-6 / BACK-7).
+ * Serviço responsável pela simulação em sandbox e persistência isolada (BACK-6 / BACK-7 / BACK-8).
  *
  * Características e regras de negócio:
  * 1. Simulação isolada: NÃO grava em tb_resultado_calculo, NÃO gera logs em tb_log_calculo_imutavel
@@ -59,7 +61,11 @@ import jakarta.persistence.criteria.Predicate;
  *    reavaliando dinamicamente as faixas monetárias (inclusive transição/mudança de faixa).
  * 6. Projeção temporal: pro-rata calculada por (dias inclusivos da campanha ÷ 30).
  * 7. Precisão decimal e arredondamento idênticos ao motor de produção (HALF_UP, escala 2 para moeda e 4 para taxa).
- * 8. Consultas paginadas, totais independentes da página e memória explicativa de cálculo sem chamadas à IA.
+ * 8. Orçamento e Enquadramento (BACK-8):
+ *    - Requer orçamento formalmente confirmado antes de executar simulação de campanha.
+ *    - Compara o custo total projetado de comissões (comissaoProjetada) no período da campanha com o teto orçamentário.
+ *    - Usa rigorosamente o mesmo escopo de vendas nos 4 cenários (80%, 100%, 120%, 150%).
+ *    - Bloqueia formalização do aceite se o custo do cenário 100% exceder o teto.
  */
 @Service
 public class SimulacaoCenariosService {
@@ -141,7 +147,7 @@ public class SimulacaoCenariosService {
 
     /**
      * Executa a simulação completa e persiste os resultados e memória do cálculo
-     * nas tabelas dedicadas tb_simulacao e tb_simulacao_venda (BACK-7).
+     * nas tabelas dedicadas tb_simulacao e tb_simulacao_venda (BACK-7 / BACK-8).
      */
     @Transactional
     public SimulacaoCenariosResponse simularEPersistir(SimulacaoCenariosRequest request) {
@@ -179,7 +185,8 @@ public class SimulacaoCenariosService {
                 request.limite(),
                 request.pagina(),
                 request.apenasComAlteracao(),
-                request.apenasComMudancaFaixa()
+                request.apenasComMudancaFaixa(),
+                request.orcamento()
         );
 
         try {
@@ -253,6 +260,32 @@ public class SimulacaoCenariosService {
         simulacao.setProjetada150(c150.comissaoProjetada());
         simulacao.setDeltaProj150(c150.deltaProjetado());
         simulacao.setMudancaFaixa150(c150.qtdVendasComMudancaFaixa());
+
+        // Persistência das regras e indicadores de governança orçamentária (BACK-8)
+        if (resp.enquadramentoOrcamento() != null) {
+            simulacao.setOrcamentoCampanha(resp.enquadramentoOrcamento().orcamentoCampanha());
+            simulacao.setEscopoTotalVendas(resp.enquadramentoOrcamento().totalVendasEscopoComum());
+        } else if (resultado.campanha() != null) {
+            simulacao.setOrcamentoCampanha(resultado.campanha().orcamentoParaRevisao());
+            simulacao.setEscopoTotalVendas(resp.totalVendasRecortadas());
+        }
+
+        if (c100.enquadramento() != null) {
+            simulacao.setEnquadrado100(c100.enquadramento().dentroDoOrcamento());
+            simulacao.setStatusEnquadramento100(c100.enquadramento().statusEnquadramento());
+            simulacao.setSaldoOrcamento100(c100.enquadramento().saldoOrcamento());
+            simulacao.setExcedenteOrcamento100(c100.enquadramento().excedenteOrcamento());
+            simulacao.setPercentualUsoOrcamento100(c100.enquadramento().percentualUsoOrcamento());
+        }
+        if (c80.enquadramento() != null) {
+            simulacao.setEnquadrado80(c80.enquadramento().dentroDoOrcamento());
+        }
+        if (c120.enquadramento() != null) {
+            simulacao.setEnquadrado120(c120.enquadramento().dentroDoOrcamento());
+        }
+        if (c150.enquadramento() != null) {
+            simulacao.setEnquadrado150(c150.enquadramento().dentroDoOrcamento());
+        }
 
         simulacao = simulacaoRepository.save(simulacao);
 
@@ -352,12 +385,14 @@ public class SimulacaoCenariosService {
                 resp.totalVendasPaginadas(),
                 resp.vendas(),
                 resp.avisosGerais(),
-                resp.memoriaCalculoConsolidada()
+                resp.memoriaCalculoConsolidada(),
+                resp.enquadramentoOrcamento()
         );
     }
 
     /**
      * Registra o aceite formal de uma simulação persistida sem impedimentos (BACK-8).
+     * Bloqueia se o cenário 100% exceder o teto orçamentário.
      */
     @Transactional
     public AceiteSimulacaoResponse aceitarSimulacao(UUID simulacaoId, AceiteSimulacaoRequest request) {
@@ -386,6 +421,22 @@ public class SimulacaoCenariosService {
         if (simulacao.getStatusAceite() == StatusAceiteSimulacao.INVALIDADA || simulacao.getStatusAceite() == StatusAceiteSimulacao.REJEITADA) {
             throw new BusinessException("A simulação foi invalidada ou rejeitada. Execute uma nova simulação.");
         }
+
+        // BACK-8: Bloqueia formalização do aceite se o custo projetado no cenário 100% exceder o teto orçamentário
+        BigDecimal orcamentoTeto = simulacao.getOrcamentoCampanha();
+        if (orcamentoTeto == null && campanha != null) {
+            orcamentoTeto = campanha.orcamentoParaRevisao();
+        }
+        if (orcamentoTeto != null && orcamentoTeto.compareTo(BigDecimal.ZERO) > 0) {
+            if (simulacao.getComissaoProjetada() != null && simulacao.getComissaoProjetada().compareTo(orcamentoTeto) > 0) {
+                BigDecimal excedente = simulacao.getComissaoProjetada().subtract(orcamentoTeto);
+                throw new BusinessException(String.format(
+                        "Aceite da simulação bloqueado: O custo total projetado de comissões no cenário 100%% (R$ %s) " +
+                        "excede o teto orçamentário da campanha (R$ %s) em R$ %s. Ajuste as regras ou revise o orçamento.",
+                        simulacao.getComissaoProjetada(), orcamentoTeto, excedente));
+            }
+        }
+
         if (campanha != null && campanhaService != null) {
             if (simulacao.getCampanhaVersao() == null && simulacao.getCampanha() == null) {
                 simulacao.setCampanhaVersao(campanha.versaoParaRevisao());
@@ -455,34 +506,28 @@ public class SimulacaoCenariosService {
      */
     @Transactional
     public void invalidarAceiteCampanha(Campanha campanha, String motivo) {
-        if (campanha == null || campanha.getId() == null) {
+        if (campanha == null || campanha.getId() == null || simulacaoRepository == null) {
             return;
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
-        if (campanha.getSimulacaoAceita() != null) {
-            Simulacao sim = campanha.getSimulacaoAceita();
-            sim.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
-            sim.setInvalidadoEm(agora);
-            sim.setMotivoInvalidacao(motivo);
-            if (simulacaoRepository != null) {
-                simulacaoRepository.save(sim);
-            }
-            campanha.setSimulacaoAceita(null);
-            campanhaRepository.save(campanha);
+        var proposta = campanha.getVersaoProposta();
+        List<Simulacao> simulacoes = proposta != null
+                ? simulacaoRepository.findAllByCampanhaVersaoId(proposta.getId())
+                : simulacaoRepository.findAllByCampanhaIdAndStatusAceite(campanha.getId(), StatusAceiteSimulacao.ACEITA);
+
+        for (Simulacao s : simulacoes) {
+            s.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+            s.setInvalidadoEm(agora);
+            s.setMotivoInvalidacao(motivo);
+        }
+        if (!simulacoes.isEmpty()) {
+            simulacaoRepository.saveAll(simulacoes);
         }
 
-        if (simulacaoRepository != null) {
-            List<Simulacao> ativas = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(
-                    campanha.getId(), StatusAceiteSimulacao.ACEITA);
-            for (Simulacao s : ativas) {
-                s.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
-                s.setInvalidadoEm(agora);
-                s.setMotivoInvalidacao(motivo);
-            }
-            if (!ativas.isEmpty()) {
-                simulacaoRepository.saveAll(ativas);
-            }
+        if (proposta == null && campanha.getSimulacaoAceita() != null) {
+            campanha.setSimulacaoAceita(null);
+            campanhaRepository.save(campanha);
         }
     }
 
@@ -527,6 +572,49 @@ public class SimulacaoCenariosService {
         }
         avisos.add("Simulação recuperada da persistência isolada (tb_simulacao).");
 
+        CenarioConsolidadoDTO c100 = extrairCenario100(s);
+        CenarioConsolidadoDTO c80 = extrairCenario80(s);
+        CenarioConsolidadoDTO c120 = extrairCenario120(s);
+        CenarioConsolidadoDTO c150 = extrairCenario150(s);
+
+        ResumoEnquadramentoOrcamentoDTO resumoEnquadramento = null;
+        if (s.getOrcamentoCampanha() != null) {
+            Map<String, EnquadramentoOrcamentoCenarioDTO> mapCenarios = new LinkedHashMap<>();
+            mapCenarios.put("80%", c80.enquadramento());
+            mapCenarios.put("100%", c100.enquadramento());
+            mapCenarios.put("120%", c120.enquadramento());
+            mapCenarios.put("150%", c150.enquadramento());
+
+            boolean aptoGerente = c100.enquadramento() != null
+                    && Boolean.TRUE.equals(c100.enquadramento().dentroDoOrcamento())
+                    && s.getQtdVendasComImpedimento() == 0;
+
+            String motivoBloqueio = null;
+            if (c100.enquadramento() != null && Boolean.FALSE.equals(c100.enquadramento().dentroDoOrcamento())) {
+                motivoBloqueio = String.format(LOCALE_PT_BR,
+                        "Custo projetado em 100%% (R$ %,.2f) excede o teto orçamentário (R$ %,.2f) em R$ %,.2f.",
+                        c100.comissaoProjetada(), s.getOrcamentoCampanha(), c100.enquadramento().excedenteOrcamento());
+            } else if (s.getQtdVendasComImpedimento() > 0) {
+                motivoBloqueio = String.format("A simulação possui %d venda(s) com impedimentos cadastrais ou falta de taxa base.", s.getQtdVendasComImpedimento());
+            }
+
+            Campanha camp = s.getCampanha();
+            Boolean orcamentoConfirmado = camp != null ? camp.orcamentoConfirmadoParaRevisao() : true;
+            OrigemOrcamentoCampanha origem = camp != null ? camp.origemOrcamentoParaRevisao() : OrigemOrcamentoCampanha.INFORMADO_USUARIO;
+
+            resumoEnquadramento = new ResumoEnquadramentoOrcamentoDTO(
+                    s.getOrcamentoCampanha(),
+                    orcamentoConfirmado,
+                    origem,
+                    s.getEscopoTotalVendas() != null ? s.getEscopoTotalVendas() : s.getTotalVendasRecortadas(),
+                    true,
+                    s.getStatusEnquadramento100(),
+                    aptoGerente,
+                    motivoBloqueio,
+                    mapCenarios
+            );
+        }
+
         return new SimulacaoCenariosResponse(
                 s.getId(),
                 s.getProtocolo(),
@@ -539,14 +627,15 @@ public class SimulacaoCenariosService {
                 s.getDataFimCampanha(),
                 s.getDiasInclusivos(),
                 s.getFatorProjecao(),
-                extrairCenario100(s),
-                extrairCenario80(s),
-                extrairCenario120(s),
-                extrairCenario150(s),
+                c100,
+                c80,
+                c120,
+                c150,
                 (int) vendasPage.getTotalElements(),
                 vendasDTO,
                 avisos,
-                s.getMemoriaCalculoConsolidada()
+                s.getMemoriaCalculoConsolidada(),
+                resumoEnquadramento
         );
     }
 
@@ -640,8 +729,31 @@ public class SimulacaoCenariosService {
         // 1. Resolução das regras candidatas e metadados da campanha
         Campanha campanha = null;
         if (request.campanhaId() != null) {
-            campanha = campanhaRepository.findById(request.campanhaId())
+            campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(request.campanhaId())
+                    .or(() -> campanhaRepository.findById(request.campanhaId()).filter(c -> c.getRemovidoEm() == null))
                     .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada com ID: " + request.campanhaId()));
+        }
+
+        // Validação e resolução do orçamento monetário (BACK-8)
+        BigDecimal orcamentoEfetivo = null;
+        boolean orcamentoConfirmado = false;
+        OrigemOrcamentoCampanha origemOrcamento = OrigemOrcamentoCampanha.NAO_DEFINIDO;
+
+        if (campanha != null) {
+            orcamentoEfetivo = campanha.orcamentoParaRevisao();
+            orcamentoConfirmado = campanha.orcamentoConfirmadoParaRevisao();
+            origemOrcamento = campanha.origemOrcamentoParaRevisao();
+
+            if (orcamentoEfetivo == null || orcamentoEfetivo.compareTo(BigDecimal.ZERO) <= 0 || !orcamentoConfirmado) {
+                throw new BusinessException(String.format(
+                        "Simulação bloqueada: A campanha ID %d ('%s') deve possuir orçamento monetário estritamente positivo e " +
+                        "formalmente confirmado antes da realização da simulação. Confirme o orçamento da proposta primeiro.",
+                        campanha.getId(), campanha.tituloParaRevisao()));
+            }
+        } else if (request.orcamento() != null && request.orcamento().compareTo(BigDecimal.ZERO) > 0) {
+            orcamentoEfetivo = request.orcamento();
+            orcamentoConfirmado = true;
+            origemOrcamento = OrigemOrcamentoCampanha.INFORMADO_USUARIO;
         }
 
         List<RegraItemRequest> regrasAvaliadas = resolverRegras(request, campanha);
@@ -683,7 +795,8 @@ public class SimulacaoCenariosService {
         List<String> avisosGerais = new ArrayList<>();
         if (vendasDoMes.isEmpty()) {
             avisosGerais.add(String.format("A competência '%s' não possui nenhuma transação de venda registrada.", competenciaStr));
-            SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, avisosGerais);
+            SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha,
+                    diasInclusivos, fatorProjecao, avisosGerais, orcamentoEfetivo, orcamentoConfirmado, origemOrcamento);
             return new ResultadoSimulacaoInterna(vazia, campanha, List.of(), regrasAvaliadas);
         }
 
@@ -704,7 +817,8 @@ public class SimulacaoCenariosService {
 
         if (vendasRecortadas.isEmpty()) {
             avisosGerais.add(String.format("Nenhuma venda da competência '%s' pertence ao público-alvo das regras avaliadas.", competenciaStr));
-            SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, avisosGerais);
+            SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha,
+                    diasInclusivos, fatorProjecao, avisosGerais, orcamentoEfetivo, orcamentoConfirmado, origemOrcamento);
             return new ResultadoSimulacaoInterna(vazia, campanha, List.of(), regrasAvaliadas);
         }
 
@@ -725,11 +839,44 @@ public class SimulacaoCenariosService {
                     countVendasComImpedimento, todasVendasSimuladas.size()));
         }
 
-        // 6. Consolidação dos indicadores por cenário
-        CenarioConsolidadoDTO cenario100 = consolidarCenario(todasVendasSimuladas, FATOR_100, "Cenário 100% (Proposta Revisada)", fatorProjecao, VendaSimuladaDetalheDTO::cenario100);
-        CenarioConsolidadoDTO cenario80 = consolidarCenario(todasVendasSimuladas, FATOR_80, "Cenário 80% (Volume Reduzido)", fatorProjecao, VendaSimuladaDetalheDTO::cenario80);
-        CenarioConsolidadoDTO cenario120 = consolidarCenario(todasVendasSimuladas, FATOR_120, "Cenário 120% (Crescimento Otimista)", fatorProjecao, VendaSimuladaDetalheDTO::cenario120);
-        CenarioConsolidadoDTO cenario150 = consolidarCenario(todasVendasSimuladas, FATOR_150, "Cenário 150% (Alta Performance)", fatorProjecao, VendaSimuladaDetalheDTO::cenario150);
+        // 6. Consolidação dos indicadores por cenário com enquadramento orçamentário (BACK-8)
+        CenarioConsolidadoDTO cenario100 = consolidarCenario(todasVendasSimuladas, FATOR_100, "Cenário 100% (Proposta Revisada)", fatorProjecao, orcamentoEfetivo, "100%", VendaSimuladaDetalheDTO::cenario100);
+        CenarioConsolidadoDTO cenario80 = consolidarCenario(todasVendasSimuladas, FATOR_80, "Cenário 80% (Volume Reduzido)", fatorProjecao, orcamentoEfetivo, "80%", VendaSimuladaDetalheDTO::cenario80);
+        CenarioConsolidadoDTO cenario120 = consolidarCenario(todasVendasSimuladas, FATOR_120, "Cenário 120% (Crescimento Otimista)", fatorProjecao, orcamentoEfetivo, "120%", VendaSimuladaDetalheDTO::cenario120);
+        CenarioConsolidadoDTO cenario150 = consolidarCenario(todasVendasSimuladas, FATOR_150, "Cenário 150% (Alta Performance)", fatorProjecao, orcamentoEfetivo, "150%", VendaSimuladaDetalheDTO::cenario150);
+
+        Map<String, EnquadramentoOrcamentoCenarioDTO> mapCenarios = new LinkedHashMap<>();
+        mapCenarios.put("80%", cenario80.enquadramento());
+        mapCenarios.put("100%", cenario100.enquadramento());
+        mapCenarios.put("120%", cenario120.enquadramento());
+        mapCenarios.put("150%", cenario150.enquadramento());
+
+        boolean aptoGerente = cenario100.enquadramento() != null
+                && Boolean.TRUE.equals(cenario100.enquadramento().dentroDoOrcamento())
+                && countVendasComImpedimento == 0;
+
+        String motivoBloqueio = null;
+        if (cenario100.enquadramento() != null && Boolean.FALSE.equals(cenario100.enquadramento().dentroDoOrcamento())) {
+            motivoBloqueio = String.format(LOCALE_PT_BR,
+                    "Custo projetado em 100%% (R$ %,.2f) excede o teto orçamentário (R$ %,.2f) em R$ %,.2f.",
+                    cenario100.comissaoProjetada(), orcamentoEfetivo, cenario100.enquadramento().excedenteOrcamento());
+        } else if (countVendasComImpedimento > 0) {
+            motivoBloqueio = String.format("A simulação possui %d venda(s) com impedimentos cadastrais ou falta de taxa base.", countVendasComImpedimento);
+        } else if (orcamentoEfetivo == null) {
+            motivoBloqueio = "Orçamento monetário não informado.";
+        }
+
+        ResumoEnquadramentoOrcamentoDTO resumoEnquadramento = new ResumoEnquadramentoOrcamentoDTO(
+                orcamentoEfetivo,
+                orcamentoConfirmado,
+                origemOrcamento,
+                todasVendasSimuladas.size(),
+                true, // Rigorosamente o mesmo escopo nos quatro cenários
+                cenario100.enquadramento() != null ? cenario100.enquadramento().statusEnquadramento() : StatusEnquadramentoOrcamento.NAO_APLICAVEL,
+                aptoGerente,
+                motivoBloqueio,
+                mapCenarios
+        );
 
         // 7. Geração da memória explicativa consolidada
         String memoriaConsolidada = gerarMemoriaCalculoConsolidada(
@@ -744,7 +891,10 @@ public class SimulacaoCenariosService {
                 cenario100,
                 cenario80,
                 cenario120,
-                cenario150
+                cenario150,
+                orcamentoEfetivo,
+                orcamentoConfirmado,
+                origemOrcamento
         );
 
         // 8. Filtros e paginação da listagem de vendas
@@ -782,7 +932,8 @@ public class SimulacaoCenariosService {
                 vendasPaginadas.size(),
                 vendasPaginadas,
                 avisosGerais,
-                memoriaConsolidada
+                memoriaConsolidada,
+                resumoEnquadramento
         );
 
         return new ResultadoSimulacaoInterna(response, campanha, todasVendasSimuladas, regrasAvaliadas);
@@ -1013,6 +1164,8 @@ public class SimulacaoCenariosService {
             BigDecimal fatorEscala,
             String descricao,
             BigDecimal fatorProjecao,
+            BigDecimal orcamentoTeto,
+            String nomeCenario,
             java.util.function.Function<VendaSimuladaDetalheDTO, VendaSimuladaCenarioItemDTO> extractor) {
 
         BigDecimal totalVendas = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
@@ -1058,6 +1211,15 @@ public class SimulacaoCenariosService {
         BigDecimal comissaoProjetada = totalComissaoProposta.multiply(fatorProjecao).setScale(2, RoundingMode.HALF_UP);
         BigDecimal deltaProjetado = deltaComissao.multiply(fatorProjecao).setScale(2, RoundingMode.HALF_UP);
 
+        EnquadramentoOrcamentoCenarioDTO enquadramento = calcularEnquadramentoCenario(
+                nomeCenario,
+                fatorEscala,
+                vendas.size(),
+                orcamentoTeto,
+                comissaoProjetada,
+                deltaProjetado
+        );
+
         return new CenarioConsolidadoDTO(
                 fatorEscala,
                 descricao,
@@ -1072,7 +1234,60 @@ public class SimulacaoCenariosService {
                 deltaProjetado,
                 qtdMudancaFaixa,
                 qtdRegraAplicada,
-                qtdFallbackBase
+                qtdFallbackBase,
+                enquadramento
+        );
+    }
+
+
+    private EnquadramentoOrcamentoCenarioDTO calcularEnquadramentoCenario(
+            String nomeCenario,
+            BigDecimal multiplicadorVolume,
+            int totalVendasEscopo,
+            BigDecimal orcamentoTeto,
+            BigDecimal comissaoProjetada,
+            BigDecimal deltaProjetado) {
+        if (orcamentoTeto == null || orcamentoTeto.compareTo(BigDecimal.ZERO) <= 0) {
+            return new EnquadramentoOrcamentoCenarioDTO(
+                    nomeCenario,
+                    multiplicadorVolume,
+                    totalVendasEscopo,
+                    null,
+                    comissaoProjetada,
+                    deltaProjetado,
+                    StatusEnquadramentoOrcamento.NAO_APLICAVEL,
+                    null,
+                    null,
+                    null,
+                    null
+            );
+        }
+
+        boolean dentroDoOrcamento = comissaoProjetada.compareTo(orcamentoTeto) <= 0;
+        StatusEnquadramentoOrcamento status = dentroDoOrcamento
+                ? StatusEnquadramentoOrcamento.ENQUADRADO
+                : StatusEnquadramentoOrcamento.ACIMA_DO_TETO;
+
+        BigDecimal saldo = orcamentoTeto.subtract(comissaoProjetada).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal excedente = dentroDoOrcamento
+                ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                : comissaoProjetada.subtract(orcamentoTeto).setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal percentualUso = comissaoProjetada.multiply(BigDecimal.valueOf(100))
+                .divide(orcamentoTeto, 2, RoundingMode.HALF_UP);
+
+        return new EnquadramentoOrcamentoCenarioDTO(
+                nomeCenario,
+                multiplicadorVolume,
+                totalVendasEscopo,
+                orcamentoTeto,
+                comissaoProjetada,
+                deltaProjetado,
+                status,
+                dentroDoOrcamento,
+                saldo,
+                excedente,
+                percentualUso
         );
     }
 
@@ -1155,7 +1370,10 @@ public class SimulacaoCenariosService {
             CenarioConsolidadoDTO cenario100,
             CenarioConsolidadoDTO cenario80,
             CenarioConsolidadoDTO cenario120,
-            CenarioConsolidadoDTO cenario150) {
+            CenarioConsolidadoDTO cenario150,
+            BigDecimal orcamentoEfetivo,
+            Boolean orcamentoConfirmado,
+            OrigemOrcamentoCampanha origemOrcamento) {
 
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(LOCALE_PT_BR, "Simulação consolidada para a competência %s. ", competencia));
@@ -1196,6 +1414,19 @@ public class SimulacaoCenariosService {
                 cenario120.totalComissaoProposta(), cenario120.qtdVendasComMudancaFaixa()));
         sb.append(String.format(LOCALE_PT_BR, "Cenário 150%% = R$ %,.2f comissão (%d mudanças de faixa). ",
                 cenario150.totalComissaoProposta(), cenario150.qtdVendasComMudancaFaixa()));
+
+        // Seção explicativa de governança e enquadramento orçamentário (BACK-8)
+        if (orcamentoEfetivo != null && orcamentoEfetivo.compareTo(BigDecimal.ZERO) > 0) {
+            sb.append(String.format(LOCALE_PT_BR, "Governança Orçamentária: Teto R$ %,.2f (%s, confirmado=%s). ",
+                    orcamentoEfetivo, origemOrcamento, Boolean.TRUE.equals(orcamentoConfirmado) ? "SIM" : "NAO"));
+            if (cenario100.enquadramento() != null) {
+                sb.append(String.format(LOCALE_PT_BR, "Cenário 100%% %s (Saldo: R$ %,.2f, Consumo: %,.2f%%). ",
+                        cenario100.enquadramento().statusEnquadramento(),
+                        cenario100.enquadramento().saldoOrcamento(),
+                        cenario100.enquadramento().percentualUsoOrcamento()));
+            }
+        }
+
         sb.append("Cálculo 100% determinístico e auditável, sem dependência de chamadas à IA.");
 
         return sb.toString();
@@ -1208,12 +1439,33 @@ public class SimulacaoCenariosService {
             LocalDate dataFim,
             long diasInclusivos,
             BigDecimal fatorProjecao,
-            List<String> avisos) {
+            List<String> avisos,
+            BigDecimal orcamentoEfetivo,
+            Boolean orcamentoConfirmado,
+            OrigemOrcamentoCampanha origemOrcamento) {
 
-        CenarioConsolidadoDTO vazio100 = criarCenarioVazio(FATOR_100, "Cenário 100% (Proposta Revisada)");
-        CenarioConsolidadoDTO vazio80 = criarCenarioVazio(FATOR_80, "Cenário 80% (Volume Reduzido)");
-        CenarioConsolidadoDTO vazio120 = criarCenarioVazio(FATOR_120, "Cenário 120% (Crescimento Otimista)");
-        CenarioConsolidadoDTO vazio150 = criarCenarioVazio(FATOR_150, "Cenário 150% (Alta Performance)");
+        CenarioConsolidadoDTO vazio100 = criarCenarioVazio(FATOR_100, "Cenário 100% (Proposta Revisada)", orcamentoEfetivo);
+        CenarioConsolidadoDTO vazio80 = criarCenarioVazio(FATOR_80, "Cenário 80% (Volume Reduzido)", orcamentoEfetivo);
+        CenarioConsolidadoDTO vazio120 = criarCenarioVazio(FATOR_120, "Cenário 120% (Crescimento Otimista)", orcamentoEfetivo);
+        CenarioConsolidadoDTO vazio150 = criarCenarioVazio(FATOR_150, "Cenário 150% (Alta Performance)", orcamentoEfetivo);
+
+        Map<String, EnquadramentoOrcamentoCenarioDTO> mapCenarios = new LinkedHashMap<>();
+        mapCenarios.put("80%", vazio80.enquadramento());
+        mapCenarios.put("100%", vazio100.enquadramento());
+        mapCenarios.put("120%", vazio120.enquadramento());
+        mapCenarios.put("150%", vazio150.enquadramento());
+
+        ResumoEnquadramentoOrcamentoDTO resumo = new ResumoEnquadramentoOrcamentoDTO(
+                orcamentoEfetivo,
+                orcamentoConfirmado,
+                origemOrcamento,
+                0,
+                true,
+                vazio100.enquadramento() != null ? vazio100.enquadramento().statusEnquadramento() : StatusEnquadramentoOrcamento.NAO_APLICAVEL,
+                orcamentoEfetivo != null,
+                null,
+                mapCenarios
+        );
 
         return new SimulacaoCenariosResponse(
                 null,
@@ -1234,14 +1486,17 @@ public class SimulacaoCenariosService {
                 0,
                 List.of(),
                 avisos,
-                "Nenhuma venda da competência pertence ao público-alvo das regras avaliadas. Não houve cálculo a consolidar."
+                "Nenhuma venda da competência pertence ao público-alvo das regras avaliadas. Não houve cálculo a consolidar.",
+                resumo
         );
     }
 
-    private CenarioConsolidadoDTO criarCenarioVazio(BigDecimal fator, String descricao) {
+    private CenarioConsolidadoDTO criarCenarioVazio(BigDecimal fator, String descricao, BigDecimal orcamentoTeto) {
         BigDecimal zero2 = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal zero4 = BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
-        return new CenarioConsolidadoDTO(fator, descricao, zero2, zero2, zero2, zero2, zero2, zero4, zero4, zero2, zero2, 0, 0, 0);
+        String nomeCenario = fator.multiply(BigDecimal.valueOf(100)).intValue() + "%";
+        EnquadramentoOrcamentoCenarioDTO enq = calcularEnquadramentoCenario(nomeCenario, fator, 0, orcamentoTeto, zero2, zero2);
+        return new CenarioConsolidadoDTO(fator, descricao, zero2, zero2, zero2, zero2, zero2, zero4, zero4, zero2, zero2, 0, 0, 0, enq);
     }
 
     private List<RegraItemRequest> resolverRegras(SimulacaoCenariosRequest request, Campanha campanha) {
@@ -1337,7 +1592,12 @@ public class SimulacaoCenariosService {
                 extrairCenario100(s),
                 extrairCenario80(s),
                 extrairCenario120(s),
-                extrairCenario150(s)
+                extrairCenario150(s),
+                s.getOrcamentoCampanha(),
+                s.getStatusEnquadramento100(),
+                s.getEnquadrado100(),
+                s.getSaldoOrcamento100(),
+                s.getPercentualUsoOrcamento100()
         );
     }
 
@@ -1427,6 +1687,22 @@ public class SimulacaoCenariosService {
     }
 
     private CenarioConsolidadoDTO extrairCenario100(Simulacao s) {
+        EnquadramentoOrcamentoCenarioDTO enq = null;
+        if (s.getOrcamentoCampanha() != null) {
+            enq = new EnquadramentoOrcamentoCenarioDTO(
+                    "100%",
+                    FATOR_100,
+                    s.getEscopoTotalVendas() != null ? s.getEscopoTotalVendas() : s.getTotalVendasRecortadas(),
+                    s.getOrcamentoCampanha(),
+                    s.getComissaoProjetada(),
+                    s.getDeltaProjetado(),
+                    s.getStatusEnquadramento100(),
+                    s.getEnquadrado100(),
+                    s.getSaldoOrcamento100(),
+                    s.getExcedenteOrcamento100(),
+                    s.getPercentualUsoOrcamento100()
+            );
+        }
         return new CenarioConsolidadoDTO(
                 FATOR_100,
                 "Cenário 100% (Proposta Revisada)",
@@ -1441,11 +1717,33 @@ public class SimulacaoCenariosService {
                 s.getDeltaProjetado(),
                 s.getQtdVendasComMudancaFaixa(),
                 s.getQtdVendasComRegraAplicada(),
-                s.getQtdVendasComFallbackBase()
+                s.getQtdVendasComFallbackBase(),
+                enq
         );
     }
 
     private CenarioConsolidadoDTO extrairCenario80(Simulacao s) {
+        EnquadramentoOrcamentoCenarioDTO enq = null;
+        if (s.getOrcamentoCampanha() != null && s.getProjetada80() != null) {
+            BigDecimal saldo = s.getOrcamentoCampanha().subtract(s.getProjetada80()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal excedente = Boolean.TRUE.equals(s.getEnquadrado80()) ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                    : s.getProjetada80().subtract(s.getOrcamentoCampanha()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal perc = s.getOrcamentoCampanha().compareTo(BigDecimal.ZERO) > 0
+                    ? s.getProjetada80().multiply(BigDecimal.valueOf(100)).divide(s.getOrcamentoCampanha(), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            enq = new EnquadramentoOrcamentoCenarioDTO(
+                    "80%",
+                    FATOR_80,
+                    s.getEscopoTotalVendas() != null ? s.getEscopoTotalVendas() : s.getTotalVendasRecortadas(),
+                    s.getOrcamentoCampanha(),
+                    s.getProjetada80(),
+                    s.getDeltaProj80(),
+                    Boolean.TRUE.equals(s.getEnquadrado80()) ? StatusEnquadramentoOrcamento.ENQUADRADO : StatusEnquadramentoOrcamento.ACIMA_DO_TETO,
+                    s.getEnquadrado80(),
+                    saldo,
+                    excedente,
+                    perc
+            );
+        }
         return new CenarioConsolidadoDTO(
                 FATOR_80,
                 "Cenário 80% (Volume Reduzido)",
@@ -1460,11 +1758,33 @@ public class SimulacaoCenariosService {
                 s.getDeltaProj80(),
                 s.getMudancaFaixa80(),
                 s.getQtdVendasComRegraAplicada(),
-                s.getQtdVendasComFallbackBase()
+                s.getQtdVendasComFallbackBase(),
+                enq
         );
     }
 
     private CenarioConsolidadoDTO extrairCenario120(Simulacao s) {
+        EnquadramentoOrcamentoCenarioDTO enq = null;
+        if (s.getOrcamentoCampanha() != null && s.getProjetada120() != null) {
+            BigDecimal saldo = s.getOrcamentoCampanha().subtract(s.getProjetada120()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal excedente = Boolean.TRUE.equals(s.getEnquadrado120()) ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                    : s.getProjetada120().subtract(s.getOrcamentoCampanha()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal perc = s.getOrcamentoCampanha().compareTo(BigDecimal.ZERO) > 0
+                    ? s.getProjetada120().multiply(BigDecimal.valueOf(100)).divide(s.getOrcamentoCampanha(), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            enq = new EnquadramentoOrcamentoCenarioDTO(
+                    "120%",
+                    FATOR_120,
+                    s.getEscopoTotalVendas() != null ? s.getEscopoTotalVendas() : s.getTotalVendasRecortadas(),
+                    s.getOrcamentoCampanha(),
+                    s.getProjetada120(),
+                    s.getDeltaProj120(),
+                    Boolean.TRUE.equals(s.getEnquadrado120()) ? StatusEnquadramentoOrcamento.ENQUADRADO : StatusEnquadramentoOrcamento.ACIMA_DO_TETO,
+                    s.getEnquadrado120(),
+                    saldo,
+                    excedente,
+                    perc
+            );
+        }
         return new CenarioConsolidadoDTO(
                 FATOR_120,
                 "Cenário 120% (Crescimento Otimista)",
@@ -1479,11 +1799,33 @@ public class SimulacaoCenariosService {
                 s.getDeltaProj120(),
                 s.getMudancaFaixa120(),
                 s.getQtdVendasComRegraAplicada(),
-                s.getQtdVendasComFallbackBase()
+                s.getQtdVendasComFallbackBase(),
+                enq
         );
     }
 
     private CenarioConsolidadoDTO extrairCenario150(Simulacao s) {
+        EnquadramentoOrcamentoCenarioDTO enq = null;
+        if (s.getOrcamentoCampanha() != null && s.getProjetada150() != null) {
+            BigDecimal saldo = s.getOrcamentoCampanha().subtract(s.getProjetada150()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal excedente = Boolean.TRUE.equals(s.getEnquadrado150()) ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                    : s.getProjetada150().subtract(s.getOrcamentoCampanha()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal perc = s.getOrcamentoCampanha().compareTo(BigDecimal.ZERO) > 0
+                    ? s.getProjetada150().multiply(BigDecimal.valueOf(100)).divide(s.getOrcamentoCampanha(), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            enq = new EnquadramentoOrcamentoCenarioDTO(
+                    "150%",
+                    FATOR_150,
+                    s.getEscopoTotalVendas() != null ? s.getEscopoTotalVendas() : s.getTotalVendasRecortadas(),
+                    s.getOrcamentoCampanha(),
+                    s.getProjetada150(),
+                    s.getDeltaProj150(),
+                    Boolean.TRUE.equals(s.getEnquadrado150()) ? StatusEnquadramentoOrcamento.ENQUADRADO : StatusEnquadramentoOrcamento.ACIMA_DO_TETO,
+                    s.getEnquadrado150(),
+                    saldo,
+                    excedente,
+                    perc
+            );
+        }
         return new CenarioConsolidadoDTO(
                 FATOR_150,
                 "Cenário 150% (Alta Performance)",
@@ -1498,7 +1840,8 @@ public class SimulacaoCenariosService {
                 s.getDeltaProj150(),
                 s.getMudancaFaixa150(),
                 s.getQtdVendasComRegraAplicada(),
-                s.getQtdVendasComFallbackBase()
+                s.getQtdVendasComFallbackBase(),
+                enq
         );
     }
 }

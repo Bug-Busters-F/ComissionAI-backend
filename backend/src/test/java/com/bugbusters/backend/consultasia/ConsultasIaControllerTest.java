@@ -319,7 +319,25 @@ class ConsultasIaControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
-    // ------------------------------------------------------------ dados de simulação
+    // ------------------------------------------------------------ recorte da população (BACK-10)
+
+    private Campanha criarCampanhaComRegra() {
+        Campanha cp = new Campanha("Campanha Setembro", "Texto", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+        cp.setEstado(EstadoCampanha.ATIVA);
+        cp = campanhaRepository.save(cp);
+
+        Regra r = new Regra();
+        r.setCampanha(cp);
+        r.setNome("Regra Geral");
+        r.setStatus(StatusRegra.ATIVA);
+        r.setDataInicio(LocalDate.of(2026, 9, 1));
+        r.setDataFim(LocalDate.of(2026, 9, 30));
+        r.setTaxa(new BigDecimal("0.0275"));
+        r.setPythonEquivalente("def calcular_comissao(venda):\n    return 1");
+        r.setExplicacao("Regra geral");
+        regraRepository.save(r);
+        return cp;
+    }
 
     private void novaVenda(String valor, LocalDate data) {
         Sale s = new Sale();
@@ -334,50 +352,112 @@ class ConsultasIaControllerTest {
     }
 
     @Test
-    @DisplayName("Dados de simulação: paginação determinística, filtros e formato do contrato")
-    void deveConsultarDadosSimulacao() throws Exception {
+    @DisplayName("Recorte da população POST: retorna JSON canônico, totais, fontes e hashes canônicos")
+    void deveObterRecortePopulacaoPost() throws Exception {
+        Campanha cp = criarCampanhaComRegra();
+
         novaVenda("100.00", LocalDate.of(2026, 9, 1));
         novaVenda("200.00", LocalDate.of(2026, 9, 2));
-        novaVenda("300.00", LocalDate.of(2026, 9, 3));
-        novaVenda("999.00", LocalDate.of(2026, 10, 1));
         saleRepository.flush();
 
         BaseComiss baseSetembro = new BaseComiss(brand, gerenteLoja, new BigDecimal("0.0275"), LocalDate.of(2026, 9, 1));
         baseComissRepository.save(baseSetembro);
 
-        mockMvc.perform(get(BASE + "/dados-simulacao").param("competencia", "2026-09").param("matricula", "CONS-001")
-                        .param("page", "0").param("size", "2"))
+        String json = """
+                {
+                    "campanhaId": %d,
+                    "competencia": "2026-09"
+                }
+                """.formatted(cp.getId());
+
+        mockMvc.perform(post(BASE + "/recorte-populacao").contentType(MediaType.APPLICATION_JSON).content(json))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content", hasSize(2)))
-                .andExpect(jsonPath("$.content[0].valorVenda", is(100.0)))
-                .andExpect(jsonPath("$.content[0].dataVenda", is("2026-09-01")))
-                .andExpect(jsonPath("$.content[0].matricula", is("CONS-001")))
-                .andExpect(jsonPath("$.content[0].codLoja", is(9201)))
-                .andExpect(jsonPath("$.content[0].codMarca", is(9101)))
-                .andExpect(jsonPath("$.content[0].codCargo", is(9301)))
-                .andExpect(jsonPath("$.content[0].canal", is("ECOMMERCE")))
-                .andExpect(jsonPath("$.content[0].id").isString())
-                .andExpect(jsonPath("$.number", is(0)))
-                .andExpect(jsonPath("$.totalPages", is(2)))
-                .andExpect(jsonPath("$.totalElements", is(3)))
-                .andExpect(jsonPath("$.last", is(false)));
-
-        mockMvc.perform(get(BASE + "/dados-simulacao").param("competencia", "2026-09").param("matricula", "CONS-001")
-                        .param("page", "1").param("size", "2"))
-                .andExpect(jsonPath("$.content", hasSize(1)))
-                .andExpect(jsonPath("$.content[0].valorVenda", is(300.0)))
-                .andExpect(jsonPath("$.last", is(true)));
-
-        mockMvc.perform(get(BASE + "/dados-simulacao").param("competencia", "2026-09").param("matricula", "CONS-001")
-                        .param("cargo", "9302"))
-                .andExpect(jsonPath("$.content", hasSize(0)))
-                .andExpect(jsonPath("$.totalElements", is(0)))
-                .andExpect(jsonPath("$.last", is(true)));
+                .andExpect(jsonPath("$.totais.totalVendas", is(2)))
+                .andExpect(jsonPath("$.totais.totalColaboradoresRh", is(1)))
+                .andExpect(jsonPath("$.totais.totalTaxasContratuais", is(1)))
+                .andExpect(jsonPath("$.vendas", hasSize(2)))
+                .andExpect(jsonPath("$.vendas[0].matricula", is("CONS-001")))
+                .andExpect(jsonPath("$.colaboradoresRh[0].matricula", is("CONS-001")))
+                .andExpect(jsonPath("$.taxasContratuais[0].codMarca", is(9101)))
+                .andExpect(jsonPath("$.hashRecorte").isString())
+                .andExpect(jsonPath("$.hashVendas").isString())
+                .andExpect(jsonPath("$.hashRh").isString())
+                .andExpect(jsonPath("$.hashTaxasContratuais").isString());
     }
 
     @Test
-    @DisplayName("Dados de simulação: competência ausente é erro 400")
-    void deveExigirCompetencia() throws Exception {
-        mockMvc.perform(get(BASE + "/dados-simulacao")).andExpect(status().isBadRequest());
+    @DisplayName("Recorte da população GET: suporte a parâmetros de query para inspeção rápida")
+    void deveObterRecortePopulacaoGet() throws Exception {
+        Campanha cp = criarCampanhaComRegra();
+
+        novaVenda("150.00", LocalDate.of(2026, 9, 15));
+        saleRepository.flush();
+
+        BaseComiss baseSetembro = new BaseComiss(brand, gerenteLoja, new BigDecimal("0.0275"), LocalDate.of(2026, 9, 1));
+        baseComissRepository.save(baseSetembro);
+
+        mockMvc.perform(get(BASE + "/recorte-populacao")
+                        .param("campanhaId", cp.getId().toString())
+                        .param("competencia", "2026-09"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totais.totalVendas", is(1)))
+                .andExpect(jsonPath("$.hashRecorte").isString());
+    }
+
+    @Test
+    @DisplayName("Recorte da população POST: aceita regras informadas diretamente no payload e valida completude")
+    void deveAceitarRegrasDiretamenteNoPayload() throws Exception {
+        String json = """
+                {
+                    "competencia": "2026-09",
+                    "regras": [
+                        {
+                            "blocoId": "regra-1",
+                            "nome": "Comissão Ecommerce 5%",
+                            "canal": "ECOMMERCE",
+                            "taxa": 0.05
+                        }
+                    ]
+                }
+                """;
+
+        mockMvc.perform(post(BASE + "/recorte-populacao").contentType(MediaType.APPLICATION_JSON).content(json))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status", is(422)))
+                .andExpect(jsonPath("$.validacoes[0].campo", is("periodo")));
+    }
+
+    @Test
+    @DisplayName("Recorte da população: parâmetros ausentes responde 400")
+    void deveExigirParametrosMinimosRecorte() throws Exception {
+        mockMvc.perform(get(BASE + "/recorte-populacao")).andExpect(status().isBadRequest());
+        mockMvc.perform(post(BASE + "/recorte-populacao").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Recorte da população: verificar consistência sem retornar payload completo")
+    void deveVerificarConsistenciaRecorte() throws Exception {
+        Campanha cp = criarCampanhaComRegra();
+
+        novaVenda("100.00", LocalDate.of(2026, 9, 1));
+        saleRepository.flush();
+
+        BaseComiss baseSetembro = new BaseComiss(brand, gerenteLoja, new BigDecimal("0.0275"), LocalDate.of(2026, 9, 1));
+        baseComissRepository.save(baseSetembro);
+
+        String json = """
+                {
+                    "campanhaId": %d,
+                    "competencia": "2026-09"
+                }
+                """.formatted(cp.getId());
+
+        mockMvc.perform(post(BASE + "/recorte-populacao/verificar-consistencia")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consistente", is(true)))
+                .andExpect(jsonPath("$.hashRecorteAtual").isString());
     }
 }

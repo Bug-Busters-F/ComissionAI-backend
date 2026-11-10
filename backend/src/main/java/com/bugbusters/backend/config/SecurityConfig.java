@@ -58,6 +58,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/estado")
                             .hasAnyRole(ADMIN, GERENTE)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/progresso").hasAnyRole(ADMIN, GERENTE, NEGOCIOS, CODIGO)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/orcamento").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/encaminhar-gerente").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/aprovacao-codigo").hasAnyRole(ADMIN, CODIGO, NEGOCIOS)
+                        .requestMatchers("/api/v1/campanhas/*/preparacao-bases/**", "/api/v1/campanhas/*/anexos-base/**", "/api/v1/campanhas/*/cobertura-fechamento/**").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/ativar", "/api/v1/comissoes/calcular/**",
                                 "/api/v1/execucoes/**", "/api/v1/comissoes/fechamento/**").hasAnyRole(ADMIN, GERENTE)
                         // O aceite da simulação pertence à etapa 3; publicação continua gerencial.

@@ -53,6 +53,19 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.badRequest().body(error);
         }
 
+        @ExceptionHandler(java.time.format.DateTimeParseException.class)
+        public ResponseEntity<ApiErrorResponse> handleDateTimeParseException(
+                        java.time.format.DateTimeParseException ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                "Bad Request",
+                                "Data em formato inválido. Utilize o formato AAAA-MM-DD.",
+                                request.getRequestURI(),
+                                List.of(new CampoInvalidoDTO("data", ex.getMessage())));
+                return ResponseEntity.badRequest().body(error);
+        }
+
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ApiErrorResponse> handleValidationException(
                         MethodArgumentNotValidException ex, HttpServletRequest request) {
@@ -139,6 +152,36 @@ public class GlobalExceptionHandler {
                                 validacoes);
 
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+
+        @ExceptionHandler(CoberturaFechamentoIncompletaException.class)
+        public ResponseEntity<ApiErrorResponse> handleCoberturaIncompleta(
+                        CoberturaFechamentoIncompletaException ex, HttpServletRequest request) {
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                                "Unprocessable Entity",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
+
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
+        }
+
+        @ExceptionHandler(RecortePopulacaoIncompletoException.class)
+        public ResponseEntity<ApiErrorResponse> handleRecorteIncompleto(
+                        RecortePopulacaoIncompletoException ex, HttpServletRequest request) {
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                                "Unprocessable Entity",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
+
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
         }
 
         @ExceptionHandler(BusinessException.class)

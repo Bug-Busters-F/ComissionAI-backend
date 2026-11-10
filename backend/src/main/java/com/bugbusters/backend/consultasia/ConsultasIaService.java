@@ -1,5 +1,17 @@
 package com.bugbusters.backend.consultasia;
 
+import java.util.function.Function;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bugbusters.backend.dto.basecomiss.ReferenciaFaltanteDTO;
+import com.bugbusters.backend.consultasia.ConsultasIaDTOs.PaginaDTO;
+import com.bugbusters.backend.consultasia.ConsultasIaDTOs.VendaSimulacaoDTO;
+import com.bugbusters.backend.sales.Sale;
+import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.sales.SaleSpecification;
+
+
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.time.LocalDate;
@@ -11,15 +23,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.bugbusters.backend.dto.basecomiss.ReferenciaFaltanteDTO;
 import com.bugbusters.backend.service.CoberturaBaseService;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandRepository;
@@ -29,10 +37,8 @@ import com.bugbusters.backend.consultasia.ConsultasIaDTOs.CondicoesDTO;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.ConflitoDTO;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.ItemCatalogoDTO;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.MatriculaResponse;
-import com.bugbusters.backend.consultasia.ConsultasIaDTOs.PaginaDTO;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.RegrasConcorrentesRequest;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.RegrasConcorrentesResponse;
-import com.bugbusters.backend.consultasia.ConsultasIaDTOs.VendaSimulacaoDTO;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.Marca;
@@ -42,9 +48,6 @@ import com.bugbusters.backend.position.PositionRepository;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.repository.RegraRepository;
-import com.bugbusters.backend.sales.Sale;
-import com.bugbusters.backend.sales.SaleRepository;
-import com.bugbusters.backend.sales.SaleSpecification;
 import com.bugbusters.backend.service.TaxaComissaoResolver;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
@@ -58,6 +61,7 @@ import com.bugbusters.backend.store.StoreRepository;
 public class ConsultasIaService {
 
     static final int TAMANHO_MAXIMO_PAGINA = 1000;
+
     private static final Long REGRA_BASE_ID = 1L;
 
     private final BrandRepository brandRepository;
@@ -68,6 +72,7 @@ public class ConsultasIaService {
     private final RegraRepository regraRepository;
     private final SaleRepository saleRepository;
 
+    @Autowired
     public ConsultasIaService(BrandRepository brandRepository, StoreRepository storeRepository,
                               PositionRepository positionRepository, RegistrationRepository registrationRepository,
                               CoberturaBaseService coberturaBaseService, RegraRepository regraRepository,
@@ -79,6 +84,12 @@ public class ConsultasIaService {
         this.coberturaBaseService = coberturaBaseService;
         this.regraRepository = regraRepository;
         this.saleRepository = saleRepository;
+    }
+
+    public ConsultasIaService(BrandRepository brandRepository, StoreRepository storeRepository,
+                              PositionRepository positionRepository, RegistrationRepository registrationRepository,
+                              CoberturaBaseService coberturaBaseService, RegraRepository regraRepository) {
+        this(brandRepository, storeRepository, positionRepository, registrationRepository, coberturaBaseService, regraRepository, null);
     }
 
     // ---------------------------------------------------------------- catálogos
@@ -261,6 +272,8 @@ public class ConsultasIaService {
         return true;
     }
 
+    // ---------------------------------------------------------------- utilitários
+
     // ---------------------------------------------------------------- dados de simulação
 
     public PaginaDTO<VendaSimulacaoDTO> buscarDadosSimulacao(String competencia, Integer marca, Integer loja,
@@ -270,6 +283,10 @@ public class ConsultasIaService {
             throw new BusinessException("O parâmetro page não pode ser negativo.");
         }
         int tamanho = Math.max(1, Math.min(size, TAMANHO_MAXIMO_PAGINA));
+
+        if (saleRepository == null) {
+            return new PaginaDTO<>(false, List.of(), page, tamanho, 0, 0L, true);
+        }
 
         Page<Sale> pagina = saleRepository.findAll(
                 SaleSpecification.comFiltros(ym.atDay(1), ym.atEndOfMonth(), marca, loja, cargo,
@@ -306,8 +323,6 @@ public class ConsultasIaService {
                 pagina.isLast()
         );
     }
-
-    // ---------------------------------------------------------------- utilitários
 
     private YearMonth parseCompetencia(String competencia) {
         if (competencia == null || competencia.isBlank()) {

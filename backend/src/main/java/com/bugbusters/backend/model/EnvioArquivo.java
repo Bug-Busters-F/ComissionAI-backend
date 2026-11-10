@@ -61,6 +61,18 @@ public class EnvioArquivo {
     @Column(name = "excluido_por", length = 100)
     private String excluidoPor;
 
+    @Column(name = "arquivo_importacao_id")
+    private java.util.UUID arquivoImportacaoId;
+
+    @Column(name = "envio_anterior_id")
+    private Long envioAnteriorId;
+
+    @Column(name = "substituido_por_id")
+    private Long substituidoPorId;
+
+    @Column(name = "origem_lote", length = 30)
+    private String origemLote = "IMPORTACAO_DIRETA";
+
     @OneToMany(mappedBy = "envio", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<InconsistenciaImportacao> inconsistencias = new ArrayList<>();
 
@@ -117,6 +129,18 @@ public class EnvioArquivo {
 
     public String getExcluidoPor() { return excluidoPor; }
     public void setExcluidoPor(String excluidoPor) { this.excluidoPor = excluidoPor; }
+
+    public java.util.UUID getArquivoImportacaoId() { return arquivoImportacaoId; }
+    public void setArquivoImportacaoId(java.util.UUID arquivoImportacaoId) { this.arquivoImportacaoId = arquivoImportacaoId; }
+
+    public Long getEnvioAnteriorId() { return envioAnteriorId; }
+    public void setEnvioAnteriorId(Long envioAnteriorId) { this.envioAnteriorId = envioAnteriorId; }
+
+    public Long getSubstituidoPorId() { return substituidoPorId; }
+    public void setSubstituidoPorId(Long substituidoPorId) { this.substituidoPorId = substituidoPorId; }
+
+    public String getOrigemLote() { return origemLote; }
+    public void setOrigemLote(String origemLote) { this.origemLote = origemLote; }
 
     public List<InconsistenciaImportacao> getInconsistencias() { return inconsistencias; }
 }

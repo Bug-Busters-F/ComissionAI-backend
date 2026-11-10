@@ -1,6 +1,7 @@
 package com.bugbusters.backend.controller;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -23,6 +24,7 @@ import com.bugbusters.backend.dto.calculo.CalculoCompetenciaRequest;
 import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoIndividualResponseDTO;
 import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
+import com.bugbusters.backend.dto.calculo.SnapshotResultadoCalculoDTO;
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
 import com.bugbusters.backend.service.CalculoService;
 
@@ -144,5 +146,17 @@ public class CalculoController {
             @PathVariable UUID id
     ) {
         return ResponseEntity.ok(calculoService.buscarPorId(id));
+    }
+
+    @Operation(
+            summary = "Consultar snapshots históricos de resultado de cálculo para uma venda (BACK-6)",
+            description = "Recupera snapshots preservados de resultados de cálculo anteriores de uma venda que foram invalidados ou recalculados após correções de base."
+    )
+    @ApiResponse(responseCode = "200", description = "Lista de snapshots retornada com sucesso")
+    @GetMapping("/comissoes/vendas/{idVenda}/snapshots")
+    public ResponseEntity<List<SnapshotResultadoCalculoDTO>> listarSnapshotsPorVenda(
+            @Parameter(description = "Identificador único da venda (UUID)")
+            @PathVariable UUID idVenda) {
+        return ResponseEntity.ok(calculoService.listarSnapshotsPorVenda(idVenda));
     }
 }

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,18 +39,24 @@ public interface ResultadoCalculoRepository extends JpaRepository<ResultadoCalcu
      */
     List<ResultadoCalculo> findByMatricula(String matricula);
 
+    List<ResultadoCalculo> findByMatriculaIn(Collection<String> matriculas);
+
+    List<ResultadoCalculo> findByIdVendaInAndFechamentoIdIsNull(Collection<UUID> idsVendas);
+
+    List<ResultadoCalculo> findByMatriculaInAndFechamentoIdIsNull(Collection<String> matriculas);
+
     /**
      * Busca resultados de cálculo em lote para uma coleção de IDs de venda (Otimização BACK-14).
      */
-    List<ResultadoCalculo> findByIdVendaIn(java.util.Collection<UUID> idsVendas);
+    List<ResultadoCalculo> findByIdVendaIn(Collection<UUID> idsVendas);
 
-    boolean existsByIdVendaIn(java.util.Collection<UUID> idsVendas);
+    boolean existsByIdVendaIn(Collection<UUID> idsVendas);
 
-    List<ResultadoCalculo> findTop5ByIdVendaIn(java.util.Collection<UUID> idsVendas);
+    List<ResultadoCalculo> findTop5ByIdVendaIn(Collection<UUID> idsVendas);
 
-    boolean existsByMatriculaIn(java.util.Collection<String> matriculas);
+    boolean existsByMatriculaIn(Collection<String> matriculas);
 
-    List<ResultadoCalculo> findTop5ByMatriculaIn(java.util.Collection<String> matriculas);
+    List<ResultadoCalculo> findTop5ByMatriculaIn(Collection<String> matriculas);
 
     @org.springframework.data.jpa.repository.Query("""
         SELECT COUNT(r) FROM ResultadoCalculo r

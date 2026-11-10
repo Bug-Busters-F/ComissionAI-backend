@@ -39,6 +39,9 @@ import com.bugbusters.backend.dto.calculo.CalculoImpedimentoDTO;
 import com.bugbusters.backend.dto.calculo.CalculoIndividualResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoItemResponseDTO;
 import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
+import com.bugbusters.backend.dto.calculo.SnapshotResultadoCalculoDTO;
+import com.bugbusters.backend.model.SnapshotResultadoCalculo;
+import com.bugbusters.backend.repository.SnapshotResultadoCalculoRepository;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.LogCalculoImutavel;
@@ -86,6 +89,7 @@ public class CalculoService {
     private final BrandRepository brandRepository;
     private final StoreRepository storeRepository;
     private final com.bugbusters.backend.repository.FechamentoCompetenciaRepository fechamentoCompetenciaRepository;
+    private final SnapshotResultadoCalculoRepository snapshotResultadoCalculoRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -101,7 +105,8 @@ public class CalculoService {
                           @org.springframework.beans.factory.annotation.Autowired(required = false) RegistrationRepository registrationRepository,
                           @org.springframework.beans.factory.annotation.Autowired(required = false) BrandRepository brandRepository,
                           @org.springframework.beans.factory.annotation.Autowired(required = false) StoreRepository storeRepository,
-                          @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.repository.FechamentoCompetenciaRepository fechamentoCompetenciaRepository) {
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.repository.FechamentoCompetenciaRepository fechamentoCompetenciaRepository,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) SnapshotResultadoCalculoRepository snapshotResultadoCalculoRepository) {
         this.resultadoCalculoRepository = resultadoCalculoRepository;
         this.logCalculoRepository = logCalculoRepository;
         this.regraRepository = regraRepository;
@@ -113,6 +118,21 @@ public class CalculoService {
         this.brandRepository = brandRepository;
         this.storeRepository = storeRepository;
         this.fechamentoCompetenciaRepository = fechamentoCompetenciaRepository;
+        this.snapshotResultadoCalculoRepository = snapshotResultadoCalculoRepository;
+    }
+
+    public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
+                          LogCalculoRepository logCalculoRepository,
+                          RegraRepository regraRepository,
+                          SaleRepository saleRepository,
+                          TaxaComissaoResolver taxaComissaoResolver,
+                          CoberturaBaseService coberturaBaseService,
+                          com.bugbusters.backend.service.lock.TravaCompetencia travaCompetencia,
+                          RegistrationRepository registrationRepository,
+                          BrandRepository brandRepository,
+                          StoreRepository storeRepository,
+                          com.bugbusters.backend.repository.FechamentoCompetenciaRepository fechamentoCompetenciaRepository) {
+        this(resultadoCalculoRepository, logCalculoRepository, regraRepository, saleRepository, taxaComissaoResolver, coberturaBaseService, travaCompetencia, registrationRepository, brandRepository, storeRepository, fechamentoCompetenciaRepository, null);
     }
 
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -202,6 +222,12 @@ public class CalculoService {
         Optional<ResultadoCalculo> existenteOpt = resultadoCalculoRepository.findByIdVenda(idVenda);
         if (existenteOpt.isPresent()) {
             ResultadoCalculo existente = existenteOpt.get();
+            if (existente.isDesatualizadoPorCorrecao()) {
+                throw new BusinessException(String.format(
+                        "O resultado prévio da venda '%s' foi invalidado por correções na base (%s). É obrigatório executar recálculo da competência com recálculo habilitado.",
+                        idVenda, existente.getMotivoDesatualizacao() != null ? existente.getMotivoDesatualizacao() : "Base alterada"
+                ));
+            }
             if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
                 throw new BusinessException(String.format(
                         "Solicitação rejeitada por duplicidade com dados divergentes. A venda com ID '%s' já foi calculada com valor %s (valor atual: %s).",
@@ -487,6 +513,17 @@ public class CalculoService {
 
             // Sem recálculo, o resultado vigente é reutilizado sem consultar as regras atuais.
             if (existente != null && !recalcular) {
+                if (existente.isDesatualizadoPorCorrecao()) {
+                    impedimentos.add(new CalculoImpedimentoDTO(
+                            idVenda,
+                            matricula,
+                            sale.getSaleDate(),
+                            sale.getValue(),
+                            String.format("Cálculo anterior da venda '%s' foi invalidado por correção na base (%s). É necessário recalcular com recálculo habilitado.",
+                                    idVenda, existente.getMotivoDesatualizacao() != null ? existente.getMotivoDesatualizacao() : "Base alterada")
+                    ));
+                    continue;
+                }
                 if (sale.getValue().compareTo(existente.getValorVenda()) != 0) {
                     impedimentos.add(impedimentoPorDivergencia(idVenda, matricula, sale, existente));
                     continue;
@@ -636,7 +673,26 @@ public class CalculoService {
             BigDecimal comissao,
             String origemTaxa
     ) {
-        resultado.setProtocoloCalculo(UUID.randomUUID());
+        UUID novoProtocolo = UUID.randomUUID();
+
+        if (snapshotResultadoCalculoRepository != null) {
+            SnapshotResultadoCalculo snapshot = new SnapshotResultadoCalculo(
+                    resultado,
+                    resultado.isDesatualizadoPorCorrecao()
+                            ? (resultado.getMotivoDesatualizacao() != null ? resultado.getMotivoDesatualizacao() : "Invalidado por correção de base")
+                            : "Substituído por recálculo explícito",
+                    resultado.getLoteCorrecao()
+            );
+            snapshot.setSubstituidoPorProtocolo(novoProtocolo);
+            snapshotResultadoCalculoRepository.save(snapshot);
+        }
+
+        resultado.setProtocoloAnterior(resultado.getProtocoloCalculo());
+        resultado.setProtocoloCalculo(novoProtocolo);
+        resultado.setDesatualizadoPorCorrecao(false);
+        resultado.setDesatualizadoEm(null);
+        resultado.setMotivoDesatualizacao(null);
+        resultado.setLoteCorrecao(null);
         resultado.setIdVenda(idVenda);
         resultado.setMatricula(matricula);
         resultado.setCodMarca(codMarca);
@@ -1204,5 +1260,46 @@ public class CalculoService {
         // Só serve de referência para o resultado: ativa, competiria com as regras de campanha.
         defaultRegra.setStatus(com.bugbusters.backend.dto.regra.StatusRegra.INATIVA);
         return regraRepository.save(defaultRegra).getId();
+    }
+
+    public List<SnapshotResultadoCalculoDTO> listarSnapshotsPorVenda(UUID idVenda) {
+        if (idVenda == null) {
+            throw new BusinessException("O ID da venda é obrigatório para consultar snapshots.");
+        }
+        if (snapshotResultadoCalculoRepository == null) {
+            return Collections.emptyList();
+        }
+        return snapshotResultadoCalculoRepository.findByIdVendaOrderByPreservadoEmDesc(idVenda).stream()
+                .map(this::toSnapshotDTO)
+                .toList();
+    }
+
+    private SnapshotResultadoCalculoDTO toSnapshotDTO(SnapshotResultadoCalculo s) {
+        return new SnapshotResultadoCalculoDTO(
+                s.getId(),
+                s.getResultadoCalculoId(),
+                s.getProtocoloCalculo(),
+                s.getIdVenda(),
+                s.getMatricula(),
+                s.getCodMarca(),
+                s.getCodLoja(),
+                s.getCodCargo(),
+                s.getRegraId(),
+                s.getOrigemTaxa(),
+                s.getDataVenda(),
+                s.getValorVenda(),
+                s.getTaxaAplicada(),
+                s.getValorComissao(),
+                s.getValorBonusPercentual(),
+                s.getValorBonusFixo(),
+                s.getVersaoCampanhaNumero(),
+                s.getFechamentoId(),
+                s.getTipoCalculo(),
+                s.getCalculadoEm(),
+                s.getPreservadoEm(),
+                s.getMotivoPreservacao(),
+                s.getLotePreparacao() != null ? s.getLotePreparacao().getId() : null,
+                s.getSubstituidoPorProtocolo()
+        );
     }
 }

@@ -47,6 +47,7 @@ class CampanhaMultiplasRegrasTest {
     private static final String DUAS_REGRAS = """
             {"titulo":"Campanha N regras","textoOriginal":"3% até 10 mil e 4% acima, mais bônus",
              "dataInicio":"2026-10-01","dataFim":"2026-10-31",
+             "orcamento":50000.00,"orcamentoConfirmado":true,
              "regras":[
                {"codLoja":75,"taxa":0.0300,"valorMaximo":10000.00,"maxInclusivo":false,"bonusValorFixo":25.00},
                {"codLoja":75,"taxa":0.0400,"valorMinimo":10000.00,"bonusPercentual":0.0100,"canal":"ecommerce"}

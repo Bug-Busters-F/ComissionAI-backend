@@ -1,9 +1,15 @@
 package com.bugbusters.backend.service;
 
 import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaResponse;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse;
 import com.bugbusters.backend.dto.campanha.CampanhaResponse.RegraVinculadaDTO;
+import com.bugbusters.backend.dto.campanha.ConfirmarOrcamentoCampanhaRequest;
+import com.bugbusters.backend.dto.campanha.EncaminharCampanhaGerenteRequest;
+import com.bugbusters.backend.dto.campanha.OrcamentoCampanhaResponse;
+import com.bugbusters.backend.dto.campanha.RegraAprovacaoCodigoDTO;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
@@ -14,18 +20,25 @@ import com.bugbusters.backend.exception.ResourceConflictException;
 import com.bugbusters.backend.model.Campanha;
 import com.bugbusters.backend.model.CampanhaVersao;
 import com.bugbusters.backend.model.EstadoCampanha;
+import com.bugbusters.backend.model.OrigemOrcamentoCampanha;
+import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
+import java.math.BigDecimal;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
+import com.bugbusters.backend.model.StatusAprovacaoCodigo;
 import com.bugbusters.backend.model.StatusVersaoCampanha;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.SimulacaoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -39,6 +52,9 @@ public class CampanhaService {
     private final SimulacaoRepository simulacaoRepository;
     private final CampanhaVersaoRepository campanhaVersaoRepository;
     private final FechamentoService fechamentoService;
+
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
 
     @Autowired
     public CampanhaService(CampanhaRepository campanhaRepository,
@@ -65,6 +81,27 @@ public class CampanhaService {
 
     public CampanhaService(CampanhaRepository campanhaRepository, RegraRepository regraRepository) {
         this(campanhaRepository, regraRepository, null, null, null, null);
+    }
+
+    private OrigemOrcamentoCampanha resolverOrigemOrcamento(BigDecimal orcamento, BigDecimal orcamentoExtraidoIa, boolean orcamentoConfirmado) {
+        if (orcamento != null && orcamento.compareTo(BigDecimal.ZERO) > 0) {
+            if (orcamentoConfirmado) {
+                if (orcamentoExtraidoIa != null && orcamento.compareTo(orcamentoExtraidoIa) == 0) {
+                    return OrigemOrcamentoCampanha.CONFIRMADO_USUARIO;
+                } else if (orcamentoExtraidoIa != null) {
+                    return OrigemOrcamentoCampanha.ALTERADO_USUARIO;
+                } else {
+                    return OrigemOrcamentoCampanha.INFORMADO_USUARIO;
+                }
+            } else if (orcamentoExtraidoIa != null) {
+                return OrigemOrcamentoCampanha.EXTRAIDO_IA;
+            } else {
+                return OrigemOrcamentoCampanha.INFORMADO_USUARIO;
+            }
+        } else if (orcamentoExtraidoIa != null && orcamentoExtraidoIa.compareTo(BigDecimal.ZERO) > 0) {
+            return OrigemOrcamentoCampanha.EXTRAIDO_IA;
+        }
+        return null;
     }
 
     @Transactional
@@ -100,6 +137,28 @@ public class CampanhaService {
         campanha.setDataInicio(periodo.inicio());
         campanha.setDataFim(periodo.fim());
         campanha.setEstado(estadoFinal);
+
+        BigDecimal orcamento = request.orcamento();
+        BigDecimal orcamentoExtraidoIa = request.orcamentoExtraidoIa();
+        boolean orcamentoConfirmado = Boolean.TRUE.equals(request.orcamentoConfirmado());
+        OrigemOrcamentoCampanha origem = OrigemOrcamentoCampanha.NAO_DEFINIDO;
+
+        if (orcamento == null && orcamentoExtraidoIa != null && orcamentoExtraidoIa.compareTo(BigDecimal.ZERO) > 0) {
+            orcamento = orcamentoExtraidoIa;
+            orcamentoConfirmado = false;
+        }
+        origem = resolverOrigemOrcamento(orcamento, orcamentoExtraidoIa, orcamentoConfirmado);
+
+        campanha.setOrcamento(orcamento);
+        campanha.setOrcamentoExtraidoIa(orcamentoExtraidoIa);
+        campanha.setOrigemOrcamento(origem);
+        campanha.setOrcamentoConfirmado(orcamentoConfirmado);
+        if (orcamentoConfirmado) {
+            campanha.setOrcamentoConfirmadoPor(usuarioAtualProvider.obterUsuarioAtual(request.orcamentoConfirmadoPor()));
+            campanha.setOrcamentoConfirmadoEm(OffsetDateTime.now());
+        }
+        campanha.setJustificativaOrcamento(request.justificativaOrcamento());
+        campanha.setEncaminhadaGerente(false);
 
         Campanha campanhaSalva = campanhaRepository.save(campanha);
         CampanhaVersao proposta = criarVersao(campanhaSalva, 1, com.bugbusters.backend.model.StatusVersaoCampanha.PROPOSTA, periodo, request);
@@ -264,10 +323,31 @@ public class CampanhaService {
         proposta.setDataInicio(periodo.inicio());
         proposta.setDataFim(periodo.fim());
 
+        if (request.orcamento() != null) {
+            proposta.setOrcamento(request.orcamento());
+            proposta.setOrcamentoExtraidoIa(request.orcamentoExtraidoIa());
+            boolean orcConfirmado = Boolean.TRUE.equals(request.orcamentoConfirmado());
+            proposta.setOrcamentoConfirmado(orcConfirmado);
+            proposta.setOrigemOrcamento(resolverOrigemOrcamento(request.orcamento(), request.orcamentoExtraidoIa(), orcConfirmado));
+            if (orcConfirmado) {
+                proposta.setOrcamentoConfirmadoPor(usuarioAtualProvider.obterUsuarioAtual(request.orcamentoConfirmadoPor()));
+                proposta.setOrcamentoConfirmadoEm(OffsetDateTime.now());
+            }
+            proposta.setJustificativaOrcamento(request.justificativaOrcamento());
+        }
+        proposta.setEncaminhadaGerente(false);
+
         invalidarAceiteCampanha(campanha, "Aceite invalidado por edição na proposta da campanha (regras ou vigência alteradas).");
 
-        List<Regra> regrasAntigas = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(proposta.getId());
+        // Invalida aprovação de código ao editar proposta (BACK-6)
         OffsetDateTime agora = OffsetDateTime.now();
+        if (proposta.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO) {
+            proposta.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.INVALIDADO);
+            proposta.setCodigoInvalidadoEm(agora);
+            proposta.setMotivoInvalidacaoCodigo("Aprovação de código invalidada por edição de regras ou vigência na proposta.");
+        }
+
+        List<Regra> regrasAntigas = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(proposta.getId());
         for (Regra antiga : regrasAntigas) {
             antiga.setRemovidoEm(agora);
             antiga.setStatus(StatusRegra.INATIVA);
@@ -290,6 +370,19 @@ public class CampanhaService {
             campanha.setTitulo(request.titulo()); campanha.setTextoOriginal(request.textoOriginal());
             campanha.setDataInicio(periodo.inicio()); campanha.setDataFim(periodo.fim());
             campanha.setEstado(EstadoCampanha.DRAFT);
+            if (request.orcamento() != null) {
+                campanha.setOrcamento(request.orcamento());
+                campanha.setOrcamentoExtraidoIa(request.orcamentoExtraidoIa());
+                boolean orcConfirmado = Boolean.TRUE.equals(request.orcamentoConfirmado());
+                campanha.setOrcamentoConfirmado(orcConfirmado);
+                campanha.setOrigemOrcamento(resolverOrigemOrcamento(request.orcamento(), request.orcamentoExtraidoIa(), orcConfirmado));
+                if (orcConfirmado) {
+                    campanha.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
+                    campanha.setOrcamentoConfirmadoEm(OffsetDateTime.now());
+                }
+                campanha.setJustificativaOrcamento(request.justificativaOrcamento());
+            }
+            campanha.setEncaminhadaGerente(false);
         }
         campanha.setAtualizadoEm(OffsetDateTime.now());
         campanhaRepository.saveAndFlush(campanha);
@@ -372,7 +465,6 @@ public class CampanhaService {
         r.setBonusValorFixo(item.bonusValorFixo());
 
         r.setBlocoId(item.blocoId());
-        // blocoId é estável entre reinterpretações; para regras sem bloco, cria uma chave permanente.
         r.setIdentificadorLogico(item.blocoId() != null && !item.blocoId().isBlank()
                 ? item.blocoId().trim() : UUID.randomUUID().toString());
         r.setTrechoOrigem(item.trechoOrigem());
@@ -389,6 +481,9 @@ public class CampanhaService {
         r.setDataInicio(periodo.inicio());
         r.setDataFim(periodo.fim());
         RastreabilidadeRegraService.aplicar(r, item.rastreabilidade());
+
+        r.setHashArtefatosCodigo(calcularHashArtefatos(r));
+        r.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.PENDENTE);
 
         if (Boolean.FALSE.equals(r.getCompleta()) || r.getTaxa() == null) {
             r.setStatus(StatusRegra.DRAFT);
@@ -497,6 +592,207 @@ public class CampanhaService {
         }
     }
 
+    // =========================================================================
+    // APROVAÇÃO DE CÓDIGO (BACK-6 / BACK-4 / IA-10)
+    // =========================================================================
+
+    @Transactional
+    public AprovacaoCodigoCampanhaResponse aprovarCodigoCampanha(Long campanhaId, AprovacaoCodigoCampanhaRequest request) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada ou removida."));
+        CampanhaVersao versao = campanha.versaoParaRevisao();
+        if (versao == null) {
+            throw new BusinessException("A campanha não possui versão disponível para aprovação de código.");
+        }
+
+        List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
+        if (regras.isEmpty()) {
+            throw new BusinessException("A versão da campanha não possui regras vinculadas.");
+        }
+
+        if (request == null || request.aprovado() == null) {
+            throw new BusinessException("O campo 'aprovado' é obrigatório.");
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+        String autor = usuarioAtualProvider.obterUsuarioAtual(request.aprovadoPor());
+        boolean aprovado = request.aprovado();
+
+        StatusAprovacaoCodigo novoStatus = aprovado ? StatusAprovacaoCodigo.APROVADO : StatusAprovacaoCodigo.REJEITADO;
+
+        List<RegraAprovacaoCodigoDTO> regrasDTO = new ArrayList<>();
+        StringBuilder hashVersaoBuilder = new StringBuilder();
+        for (Regra r : regras) {
+            String hash = calcularHashArtefatos(r);
+            hashVersaoBuilder.append(hash).append(";");
+            r.setHashArtefatosCodigo(hash);
+            r.setStatusAprovacaoCodigo(novoStatus);
+            if (aprovado) {
+                r.setCodigoAprovadoEm(agora);
+                r.setCodigoAprovadoPor(autor);
+                r.setCodigoInvalidadoEm(null);
+                r.setMotivoInvalidacaoCodigo(null);
+            } else {
+                r.setCodigoInvalidadoEm(agora);
+                r.setMotivoInvalidacaoCodigo((request != null && request.motivo() != null) ? request.motivo() : "Aprovação de código rejeitada pelo usuário.");
+            }
+            regraRepository.save(r);
+
+            regrasDTO.add(new RegraAprovacaoCodigoDTO(
+                    r.getId(),
+                    r.getNome(),
+                    r.getStatusAprovacaoCodigo(),
+                    r.getHashArtefatosCodigo(),
+                    r.getPythonEquivalente(),
+                    r.getCodigoAprovadoEm(),
+                    r.getCodigoAprovadoPor(),
+                    r.getCodigoInvalidadoEm(),
+                    r.getMotivoInvalidacaoCodigo()
+            ));
+        }
+
+        String hashVersao = calcularHashString(hashVersaoBuilder.toString());
+        if (request.hashArtefatosCodigo() != null && !request.hashArtefatosCodigo().isBlank()
+                && !request.hashArtefatosCodigo().equals(hashVersao)) {
+            throw new ResourceConflictException("O hash dos artefatos de código enviado ("
+                    + request.hashArtefatosCodigo() + ") diverge do hash atual calculado ("
+                    + hashVersao + "). Recarregue os artefatos antes de aprovar.");
+        }
+        versao.setHashArtefatosCodigo(hashVersao);
+        versao.setStatusAprovacaoCodigo(novoStatus);
+        if (aprovado) {
+            versao.setCodigoAprovadoEm(agora);
+            versao.setCodigoAprovadoPor(autor);
+            versao.setCodigoInvalidadoEm(null);
+            versao.setMotivoInvalidacaoCodigo(null);
+        } else {
+            versao.setCodigoInvalidadoEm(agora);
+            versao.setMotivoInvalidacaoCodigo((request != null && request.motivo() != null) ? request.motivo() : "Aprovação de código rejeitada pelo usuário.");
+        }
+        campanhaVersaoRepository.save(versao);
+
+        return new AprovacaoCodigoCampanhaResponse(
+                campanha.getId(),
+                versao.getNumero(),
+                versao.getStatusAprovacaoCodigo(),
+                versao.getHashArtefatosCodigo(),
+                versao.getCodigoAprovadoEm(),
+                versao.getCodigoAprovadoPor(),
+                versao.getCodigoInvalidadoEm(),
+                versao.getMotivoInvalidacaoCodigo(),
+                regrasDTO
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public AprovacaoCodigoCampanhaResponse consultarAprovacaoCodigoCampanha(Long campanhaId) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada ou removida."));
+        CampanhaVersao versao = campanha.versaoParaRevisao();
+        if (versao == null) {
+            throw new BusinessException("A campanha não possui versão disponível.");
+        }
+
+        List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
+        StringBuilder currentHashBuilder = new StringBuilder();
+        boolean artefatosAlterados = false;
+        List<RegraAprovacaoCodigoDTO> regrasDTO = new ArrayList<>();
+        for (Regra r : regras) {
+            String hashAtual = calcularHashArtefatos(r);
+            currentHashBuilder.append(hashAtual).append(";");
+            boolean regraAlterada = r.getHashArtefatosCodigo() != null && !r.getHashArtefatosCodigo().equals(hashAtual);
+            if (regraAlterada) {
+                artefatosAlterados = true;
+            }
+            StatusAprovacaoCodigo statusRegra = r.getStatusAprovacaoCodigo();
+            OffsetDateTime invalidadoRegra = r.getCodigoInvalidadoEm();
+            String motivoRegra = r.getMotivoInvalidacaoCodigo();
+            if (statusRegra == StatusAprovacaoCodigo.APROVADO && regraAlterada) {
+                statusRegra = StatusAprovacaoCodigo.INVALIDADO;
+                invalidadoRegra = OffsetDateTime.now();
+                motivoRegra = "Artefatos modificados após aprovação formal.";
+            }
+
+            regrasDTO.add(new RegraAprovacaoCodigoDTO(
+                    r.getId(),
+                    r.getNome(),
+                    statusRegra,
+                    hashAtual,
+                    r.getPythonEquivalente(),
+                    r.getCodigoAprovadoEm(),
+                    r.getCodigoAprovadoPor(),
+                    invalidadoRegra,
+                    motivoRegra
+            ));
+        }
+
+        String currentVersaoHash = calcularHashString(currentHashBuilder.toString());
+        if (versao.getHashArtefatosCodigo() != null && !versao.getHashArtefatosCodigo().equals(currentVersaoHash)) {
+            artefatosAlterados = true;
+        }
+
+        StatusAprovacaoCodigo statusEfetivo = versao.getStatusAprovacaoCodigo();
+        OffsetDateTime invalidadoEm = versao.getCodigoInvalidadoEm();
+        String motivoInvalidacao = versao.getMotivoInvalidacaoCodigo();
+
+        if (statusEfetivo == StatusAprovacaoCodigo.APROVADO && artefatosAlterados) {
+            statusEfetivo = StatusAprovacaoCodigo.INVALIDADO;
+            invalidadoEm = OffsetDateTime.now();
+            motivoInvalidacao = "Artefatos de código ou regras foram modificados após a aprovação formal.";
+        }
+
+        return new AprovacaoCodigoCampanhaResponse(
+                campanha.getId(),
+                versao.getNumero(),
+                statusEfetivo,
+                currentVersaoHash,
+                versao.getCodigoAprovadoEm(),
+                versao.getCodigoAprovadoPor(),
+                invalidadoEm,
+                motivoInvalidacao,
+                regrasDTO
+        );
+    }
+
+    public static String calcularHashString(String input) {
+        if (input == null) return null;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static String calcularHashArtefatos(Regra r) {
+        if (r == null) return null;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String dados = String.join("|",
+                    String.valueOf(r.getPythonEquivalente()),
+                    String.valueOf(r.getExplicacao()),
+                    String.valueOf(r.getTaxa()),
+                    String.valueOf(r.getTipoOperacao()),
+                    String.valueOf(r.getValorAjuste()),
+                    String.valueOf(r.getTaxaBaseConsultada()),
+                    String.valueOf(r.getCodMarca()),
+                    String.valueOf(r.getCodLoja()),
+                    String.valueOf(r.getCodCargo()),
+                    String.valueOf(r.getMatricula()),
+                    String.valueOf(r.getCanal()),
+                    String.valueOf(r.getValorMinimo()),
+                    String.valueOf(r.getValorMaximo()),
+                    String.valueOf(r.getDataInicio()),
+                    String.valueOf(r.getDataFim())
+            );
+            byte[] hash = digest.digest(dados.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private CampanhaResponse mapearParaResponse(Campanha c, List<Regra> regras) {
         return mapearParaResponse(c, regras, c.versaoParaRevisao());
     }
@@ -561,7 +857,18 @@ public class CampanhaService {
                 c.getVersaoControle(),
                 c.getVersaoProposta() != null && c.getVersaoProposta().getVersaoAnterior() != null
                         ? c.getVersaoProposta().getVersaoAnterior().getNumero() : null,
-                motivoBloqueioEdicao(c)
+                motivoBloqueioEdicao(c),
+                exibida != null ? exibida.getOrcamento() : c.getOrcamento(),
+                exibida != null ? exibida.getOrcamentoExtraidoIa() : c.getOrcamentoExtraidoIa(),
+                exibida != null ? exibida.getOrigemOrcamento() : c.getOrigemOrcamento(),
+                exibida != null ? exibida.isOrcamentoConfirmado() : c.isOrcamentoConfirmado(),
+                exibida != null ? exibida.getOrcamentoConfirmadoPor() : c.getOrcamentoConfirmadoPor(),
+                exibida != null ? exibida.getOrcamentoConfirmadoEm() : c.getOrcamentoConfirmadoEm(),
+                exibida != null ? exibida.getJustificativaOrcamento() : c.getJustificativaOrcamento(),
+                exibida != null ? exibida.isEncaminhadaGerente() : c.isEncaminhadaGerente(),
+                exibida != null ? exibida.getEncaminhadaGerentePor() : c.getEncaminhadaGerentePor(),
+                exibida != null ? exibida.getEncaminhadaGerenteEm() : c.getEncaminhadaGerenteEm(),
+                exibida != null ? exibida.getObservacaoEncaminhamento() : c.getObservacaoEncaminhamento()
         );
     }
 
@@ -634,6 +941,17 @@ public class CampanhaService {
         campanha.setTitulo(proposta.getTitulo()); campanha.setTextoOriginal(proposta.getTextoOriginal());
         campanha.setDataInicio(proposta.getDataInicio()); campanha.setDataFim(proposta.getDataFim());
         campanha.setEstado(EstadoCampanha.ATIVA); campanha.setAtualizadoEm(agora);
+        campanha.setOrcamento(proposta.getOrcamento());
+        campanha.setOrcamentoExtraidoIa(proposta.getOrcamentoExtraidoIa());
+        campanha.setOrigemOrcamento(proposta.getOrigemOrcamento());
+        campanha.setOrcamentoConfirmado(proposta.isOrcamentoConfirmado());
+        campanha.setOrcamentoConfirmadoPor(proposta.getOrcamentoConfirmadoPor());
+        campanha.setOrcamentoConfirmadoEm(proposta.getOrcamentoConfirmadoEm());
+        campanha.setJustificativaOrcamento(proposta.getJustificativaOrcamento());
+        campanha.setEncaminhadaGerente(proposta.isEncaminhadaGerente());
+        campanha.setEncaminhadaGerentePor(proposta.getEncaminhadaGerentePor());
+        campanha.setEncaminhadaGerenteEm(proposta.getEncaminhadaGerenteEm());
+        campanha.setObservacaoEncaminhamento(proposta.getObservacaoEncaminhamento());
         campanhaVersaoRepository.save(proposta);
         campanhaRepository.saveAndFlush(campanha); // @Version garante compare-and-swap no commit
     }
@@ -647,7 +965,8 @@ public class CampanhaService {
                         v.getNumero(), v.getVersaoAnterior() != null ? v.getVersaoAnterior().getNumero() : null,
                         v.getPublicadoPor(), v.getPublicadoEm(),
                         v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getId() : null,
-                        v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getProtocolo() : null))
+                        v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getProtocolo() : null,
+                        v.getOrcamento(), v.isOrcamentoConfirmado()))
                 .toList();
     }
 
@@ -661,7 +980,11 @@ public class CampanhaService {
                 campanhaId, v.getNumero(), v.getVersaoAnterior() != null ? v.getVersaoAnterior().getNumero() : null,
                 v.getTitulo(), v.getTextoOriginal(), v.getDataInicio(), v.getDataFim(), v.getPublicadoPor(), v.getPublicadoEm(),
                 v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getId() : null,
-                v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getProtocolo() : null, regras);
+                v.getSimulacaoAceita() != null ? v.getSimulacaoAceita().getProtocolo() : null, regras,
+                v.getOrcamento(), v.getOrcamentoExtraidoIa(), v.getOrigemOrcamento(),
+                v.isOrcamentoConfirmado(), v.getOrcamentoConfirmadoPor(), v.getOrcamentoConfirmadoEm(),
+                v.getJustificativaOrcamento(), v.isEncaminhadaGerente(), v.getEncaminhadaGerentePor(),
+                v.getEncaminhadaGerenteEm(), v.getObservacaoEncaminhamento());
     }
 
     @Transactional(readOnly = true)
@@ -673,6 +996,7 @@ public class CampanhaService {
         adicionarAlteracao(campanha, "textoOriginal", base.getTextoOriginal(), atual.getTextoOriginal());
         adicionarAlteracao(campanha, "dataInicio", base.getDataInicio(), atual.getDataInicio());
         adicionarAlteracao(campanha, "dataFim", base.getDataFim(), atual.getDataFim());
+        adicionarAlteracao(campanha, "orcamento", base.getOrcamento(), atual.getOrcamento());
         Map<String, Regra> regrasBase = indexarRegras(base.getId());
         Map<String, Regra> regrasAtuais = indexarRegras(atual.getId());
         Set<String> chaves = new TreeSet<>(); chaves.addAll(regrasBase.keySet()); chaves.addAll(regrasAtuais.keySet());
@@ -707,7 +1031,16 @@ public class CampanhaService {
 
     private CampanhaVersao criarVersao(Campanha c, int numero, com.bugbusters.backend.model.StatusVersaoCampanha status, PeriodoCalculado p, CampanhaRequest r) {
         CampanhaVersao v = new CampanhaVersao(); v.setCampanha(c); v.setNumero(numero); v.setStatus(status);
-        v.setTitulo(r.titulo()); v.setTextoOriginal(r.textoOriginal()); v.setDataInicio(p.inicio()); v.setDataFim(p.fim()); return v;
+        v.setTitulo(r.titulo()); v.setTextoOriginal(r.textoOriginal()); v.setDataInicio(p.inicio()); v.setDataFim(p.fim());
+        v.setOrcamento(c.getOrcamento());
+        v.setOrcamentoExtraidoIa(c.getOrcamentoExtraidoIa());
+        v.setOrigemOrcamento(c.getOrigemOrcamento());
+        v.setOrcamentoConfirmado(c.isOrcamentoConfirmado());
+        v.setOrcamentoConfirmadoPor(c.getOrcamentoConfirmadoPor());
+        v.setOrcamentoConfirmadoEm(c.getOrcamentoConfirmadoEm());
+        v.setJustificativaOrcamento(c.getJustificativaOrcamento());
+        v.setEncaminhadaGerente(false);
+        return v;
     }
     private CampanhaVersao copiarComoProposta(Campanha c, CampanhaVersao base) {
         int numero = campanhaVersaoRepository.findFirstByCampanhaIdOrderByNumeroDesc(c.getId())
@@ -719,9 +1052,27 @@ public class CampanhaService {
         v.setTitulo(base != null ? base.getTitulo() : c.getTitulo());
         v.setTextoOriginal(base != null ? base.getTextoOriginal() : c.getTextoOriginal());
         v.setDataInicio(base != null ? base.getDataInicio() : c.getDataInicio());
-        v.setDataFim(base != null ? base.getDataFim() : c.getDataFim()); return v;
+        v.setDataFim(base != null ? base.getDataFim() : c.getDataFim());
+        if (base != null) {
+            v.setOrcamento(base.getOrcamento());
+            v.setOrcamentoExtraidoIa(base.getOrcamentoExtraidoIa());
+            v.setOrigemOrcamento(base.getOrigemOrcamento());
+            v.setOrcamentoConfirmado(base.isOrcamentoConfirmado());
+            v.setOrcamentoConfirmadoPor(base.getOrcamentoConfirmadoPor());
+            v.setOrcamentoConfirmadoEm(base.getOrcamentoConfirmadoEm());
+            v.setJustificativaOrcamento(base.getJustificativaOrcamento());
+        } else {
+            v.setOrcamento(c.getOrcamento());
+            v.setOrcamentoExtraidoIa(c.getOrcamentoExtraidoIa());
+            v.setOrigemOrcamento(c.getOrigemOrcamento());
+            v.setOrcamentoConfirmado(c.isOrcamentoConfirmado());
+            v.setOrcamentoConfirmadoPor(c.getOrcamentoConfirmadoPor());
+            v.setOrcamentoConfirmadoEm(c.getOrcamentoConfirmadoEm());
+            v.setJustificativaOrcamento(c.getJustificativaOrcamento());
+        }
+        v.setEncaminhadaGerente(false);
+        return v;
     }
-
 
     private boolean aceiteDaVersaoExibida(Campanha c) {
         return c.getSimulacaoAceita() != null && (c.getVersaoProposta() == null ||
@@ -803,9 +1154,230 @@ public class CampanhaService {
         return ativarCampanha(id, vigente);
     }
 
+    @Transactional
+    public OrcamentoCampanhaResponse confirmarOuAlterarOrcamento(Long id, ConfirmarOrcamentoCampanhaRequest request) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
+
+        validarEstadoEditavel(campanha);
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(), campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
+        if (request.versaoEsperada() != null) {
+            CampanhaVersao v = campanha.versaoParaRevisao();
+            if (v != null && !Objects.equals(v.getNumero(), request.versaoEsperada())) {
+                throw new ResourceConflictException("A versão da campanha mudou. Versão esperada: " + request.versaoEsperada() + ", atual: " + v.getNumero());
+            }
+        }
+
+        CampanhaVersao proposta = campanha.getVersaoProposta();
+        if (proposta == null && campanha.getVersaoVigente() != null) {
+            CampanhaVersao base = campanha.getVersaoVigente();
+            proposta = copiarComoProposta(campanha, base);
+            proposta = campanhaVersaoRepository.save(proposta);
+            campanha.setVersaoProposta(proposta);
+
+            List<Regra> copias = new ArrayList<>();
+            for (Regra regra : regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(base.getId())) {
+                var r = mapearRegraHistorica(regra);
+                var item = new RegraItemRequest(r.blocoId() != null && !r.blocoId().isBlank() ? r.blocoId() : r.identificadorLogico() != null ? r.identificadorLogico() : "persisted-" + r.id(), r.trechoOrigem(), r.nome(), r.canal(), r.codMarca(), r.descrMarca(),
+                        r.codLoja(), r.codCargo(), r.descriCargo(), r.matricula(), r.valorMinimo(), r.minInclusivo(), r.valorMaximo(), r.maxInclusivo(),
+                        r.tipoOperacao(), r.valorAjuste(), r.tipoBaseReferencia(), r.taxaBaseConsultada(), r.descricaoReferencia(), r.taxa(),
+                        r.explicacao(), r.pythonEquivalente(), List.of(), r.completa(), StatusRegra.DRAFT,
+                        r.bonusPercentual(), r.bonusValorFixo(), r.rastreabilidade());
+                Regra copia = converterParaEntidade(item, campanha, new PeriodoCalculado(base.getDataInicio(), base.getDataFim()), EstadoCampanha.DRAFT, copias.size() + 1);
+                copia.setPendencias(regra.getPendencias());
+                copia.setCampanhaVersao(proposta);
+                copias.add(copia);
+            }
+            if (!copias.isEmpty()) {
+                regraRepository.saveAll(copias);
+            }
+        }
+
+        BigDecimal orcamentoAnterior = proposta != null ? proposta.getOrcamento() : campanha.getOrcamento();
+        BigDecimal orcamentoNovo = request.orcamento();
+        BigDecimal extraidoIa = request.orcamentoExtraidoIa() != null ? request.orcamentoExtraidoIa()
+                : (proposta != null ? proposta.getOrcamentoExtraidoIa() : campanha.getOrcamentoExtraidoIa());
+
+        OrigemOrcamentoCampanha origem;
+        boolean alteradoEmRelacaoAoExtraido = false;
+        if (extraidoIa != null && orcamentoNovo.compareTo(extraidoIa) == 0) {
+            origem = OrigemOrcamentoCampanha.CONFIRMADO_USUARIO;
+        } else if (extraidoIa != null) {
+            origem = OrigemOrcamentoCampanha.ALTERADO_USUARIO;
+            alteradoEmRelacaoAoExtraido = true;
+        } else {
+            origem = OrigemOrcamentoCampanha.INFORMADO_USUARIO;
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+        String responsavel = usuarioAtualProvider.obterUsuarioAtual(request != null ? request.responsavel() : null);
+
+        boolean orcamentoMudou = orcamentoAnterior == null || orcamentoAnterior.compareTo(orcamentoNovo) != 0;
+        boolean simulacaoInvalidada = false;
+
+        if (proposta != null) {
+            proposta.setOrcamento(orcamentoNovo);
+            proposta.setOrcamentoExtraidoIa(extraidoIa);
+            proposta.setOrigemOrcamento(origem);
+            proposta.setOrcamentoConfirmado(true);
+            proposta.setOrcamentoConfirmadoPor(responsavel);
+            proposta.setOrcamentoConfirmadoEm(agora);
+            proposta.setJustificativaOrcamento(request.justificativa());
+            if (orcamentoMudou) {
+                proposta.setEncaminhadaGerente(false);
+                proposta.setEncaminhadaGerentePor(null);
+                proposta.setEncaminhadaGerenteEm(null);
+                invalidarAceiteCampanha(campanha, "Simulação aceita invalidada por alteração no orçamento da proposta.");
+                simulacaoInvalidada = true;
+            }
+            campanhaVersaoRepository.save(proposta);
+        }
+
+        if (campanha.getVersaoVigente() == null) {
+            campanha.setOrcamento(orcamentoNovo);
+            campanha.setOrcamentoExtraidoIa(extraidoIa);
+            campanha.setOrigemOrcamento(origem);
+            campanha.setOrcamentoConfirmado(true);
+            campanha.setOrcamentoConfirmadoPor(responsavel);
+            campanha.setOrcamentoConfirmadoEm(agora);
+            campanha.setJustificativaOrcamento(request.justificativa());
+            if (orcamentoMudou) {
+                campanha.setEncaminhadaGerente(false);
+                campanha.setEncaminhadaGerentePor(null);
+                campanha.setEncaminhadaGerenteEm(null);
+            }
+        }
+
+        campanha.setAtualizadoEm(agora);
+        campanhaRepository.saveAndFlush(campanha);
+
+        Integer versaoNumero = proposta != null ? proposta.getNumero() : (campanha.getVersaoVigente() != null ? campanha.getVersaoVigente().getNumero() : 1);
+        return new OrcamentoCampanhaResponse(
+                campanha.getId(),
+                versaoNumero,
+                orcamentoNovo,
+                extraidoIa,
+                origem,
+                true,
+                responsavel,
+                agora,
+                request.justificativa(),
+                alteradoEmRelacaoAoExtraido,
+                simulacaoInvalidada
+        );
+    }
+
+    @Transactional
+    public CampanhaResponse encaminharAoGerente(Long id, EncaminharCampanhaGerenteRequest request) {
+        Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
+
+        validarEstadoEditavel(campanha);
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(), campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
+
+        if (request != null && request.versaoEsperada() != null) {
+            CampanhaVersao v = campanha.versaoParaRevisao();
+            if (v != null && !Objects.equals(v.getNumero(), request.versaoEsperada())) {
+                throw new ResourceConflictException("A proposta mudou. Versão esperada: " + request.versaoEsperada() + ", atual: " + v.getNumero());
+            }
+        }
+
+        BigDecimal orcamento = campanha.orcamentoParaRevisao();
+        boolean orcamentoConfirmado = campanha.orcamentoConfirmadoParaRevisao();
+
+        if (orcamento == null || orcamento.compareTo(BigDecimal.ZERO) <= 0 || !orcamentoConfirmado) {
+            throw new BusinessException(String.format(
+                    "Encaminhamento ao gerente bloqueado: A campanha ID %d ('%s') não possui orçamento formalmente confirmado.",
+                    campanha.getId(), campanha.tituloParaRevisao()));
+        }
+
+        Simulacao sim = null;
+        if (request != null && request.simulacaoId() != null) {
+            sim = simulacaoRepository.findById(request.simulacaoId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Simulação não encontrada com ID: " + request.simulacaoId()));
+        } else if (campanha.getSimulacaoAceita() != null) {
+            sim = campanha.getSimulacaoAceita();
+        } else {
+            CampanhaVersao v = campanha.versaoParaRevisao();
+            if (v != null) {
+                sim = simulacaoRepository.findFirstByCampanhaVersaoIdOrderByExecutadoEmDesc(v.getId()).orElse(null);
+            }
+            if (sim == null) {
+                sim = simulacaoRepository.findFirstByCampanhaIdOrderByExecutadoEmDesc(campanha.getId()).orElse(null);
+            }
+        }
+
+        if (sim == null) {
+            throw new BusinessException("Encaminhamento ao gerente bloqueado: Nenhuma simulação encontrada para esta campanha. Realize a simulação antes de encaminhar.");
+        }
+
+        if (sim.getStatusAceite() == StatusAceiteSimulacao.INVALIDADA || sim.getStatusAceite() == StatusAceiteSimulacao.REJEITADA) {
+            throw new BusinessException("Encaminhamento ao gerente bloqueado: A simulação mais recente está invalidada ou rejeitada. Realize uma nova simulação.");
+        }
+
+        BigDecimal custo100 = sim.getComissaoProjetada();
+        if (custo100 != null && custo100.compareTo(orcamento) > 0) {
+            BigDecimal excedente = custo100.subtract(orcamento);
+            throw new BusinessException(String.format(
+                    "Não é permitido encaminhar ao gerente: o cenário base de 100%% da meta excede o orçamento estabelecido para a campanha " +
+                    "(custo projetado: R$ %s, teto: R$ %s, excedente: R$ %s). Ajuste as regras ou revise o orçamento antes de encaminhar.",
+                    custo100, orcamento, excedente));
+        }
+
+        if (Boolean.FALSE.equals(sim.getEnquadrado100()) || StatusEnquadramentoOrcamento.ACIMA_DO_TETO.equals(sim.getStatusEnquadramento100())) {
+            throw new BusinessException("Não é permitido encaminhar ao gerente: o cenário base de 100% da meta excede o orçamento estabelecido para a campanha. " +
+                    "Ajuste as regras ou revise o orçamento antes de encaminhar.");
+        }
+
+        if (sim.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+            throw new BusinessException("Apenas simulações com status ACEITA podem ser encaminhadas ao gerente.");
+        }
+
+        if (sim.getQtdVendasComImpedimento() > 0) {
+            throw new BusinessException(String.format(
+                    "Não é permitido encaminhar ao gerente: a simulação contém %d venda(s) com impedimento. Corrija as bases antes de prosseguir.",
+                    sim.getQtdVendasComImpedimento()));
+        }
+
+        if (campanhaSimulacaoValidator != null) {
+            List<String> divergencias = campanhaSimulacaoValidator.conferirDivergencias(campanha, sim);
+            if (!divergencias.isEmpty()) {
+                throw new BusinessException("Encaminhamento ao gerente bloqueado: A proposta atual da campanha diverge da simulação: " + String.join("; ", divergencias));
+            }
+        }
+
+        OffsetDateTime agora = OffsetDateTime.now();
+        String responsavel = usuarioAtualProvider.obterUsuarioAtual(request != null ? request.encaminhadoPor() : null);
+        String observacao = request != null ? request.observacao() : null;
+
+        CampanhaVersao proposta = campanha.getVersaoProposta();
+        if (proposta != null) {
+            proposta.setEncaminhadaGerente(true);
+            proposta.setEncaminhadaGerentePor(responsavel);
+            proposta.setEncaminhadaGerenteEm(agora);
+            proposta.setObservacaoEncaminhamento(observacao);
+            campanhaVersaoRepository.save(proposta);
+        }
+
+        campanha.setEncaminhadaGerente(true);
+        campanha.setEncaminhadaGerentePor(responsavel);
+        campanha.setEncaminhadaGerenteEm(agora);
+        campanha.setObservacaoEncaminhamento(observacao);
+        campanha.setAtualizadoEm(agora);
+        campanhaRepository.saveAndFlush(campanha);
+
+        return mapearParaResponse(campanha, regrasDaVersaoExibida(campanha));
+    }
+
     private void garantirCampanhaExiste(Long campanhaId) {
-        if (!campanhaRepository.existsById(campanhaId)) {
-            throw new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada.");
+        boolean existe = campanhaRepository.existsByIdAndRemovidoEmIsNull(campanhaId)
+                || (campanhaRepository.existsById(campanhaId) && campanhaRepository.findById(campanhaId).filter(c -> c.getRemovidoEm() == null).isPresent());
+        if (!existe) {
+            throw new ResourceNotFoundException("Campanha com ID " + campanhaId + " não encontrada ou removida.");
         }
     }
 
