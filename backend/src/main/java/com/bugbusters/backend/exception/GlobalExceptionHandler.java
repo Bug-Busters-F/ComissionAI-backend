@@ -53,6 +53,19 @@ public class GlobalExceptionHandler {
                 return ResponseEntity.badRequest().body(error);
         }
 
+        @ExceptionHandler(java.time.format.DateTimeParseException.class)
+        public ResponseEntity<ApiErrorResponse> handleDateTimeParseException(
+                        java.time.format.DateTimeParseException ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                "Bad Request",
+                                "Data em formato inválido. Utilize o formato AAAA-MM-DD.",
+                                request.getRequestURI(),
+                                List.of(new CampoInvalidoDTO("data", ex.getMessage())));
+                return ResponseEntity.badRequest().body(error);
+        }
+
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ApiErrorResponse> handleValidationException(
                         MethodArgumentNotValidException ex, HttpServletRequest request) {

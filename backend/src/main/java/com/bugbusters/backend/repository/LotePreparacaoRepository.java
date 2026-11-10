@@ -1,7 +1,9 @@
 package com.bugbusters.backend.repository;
 
 import com.bugbusters.backend.model.LotePreparacao;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -29,6 +31,10 @@ public interface LotePreparacaoRepository extends JpaRepository<LotePreparacao, 
     );
 
     Optional<LotePreparacao> findByIdAndCampanhaId(UUID id, Long campanhaId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM LotePreparacao l WHERE l.id = :id AND l.campanha.id = :campanhaId")
+    Optional<LotePreparacao> findByIdAndCampanhaIdForUpdate(@Param("id") UUID id, @Param("campanhaId") Long campanhaId);
 
     List<LotePreparacao> findByCampanhaIdAndStatusOrderByCriadoEmDesc(Long campanhaId, String status);
 }

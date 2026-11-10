@@ -70,6 +70,12 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
 
     boolean existsByStoreId(UUID storeId);
 
+    List<Sale> findAllByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValueOrderByIdAsc(
+            UUID registrationId, LocalDate saleDate, UUID storeId, UUID brandId, java.math.BigDecimal value);
+
+    Optional<Sale> findFirstByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValueOrderByIdAsc(
+            UUID registrationId, LocalDate saleDate, UUID storeId, UUID brandId, java.math.BigDecimal value);
+
     Optional<Sale> findByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValue(
             UUID registrationId, LocalDate saleDate, UUID storeId, UUID brandId, java.math.BigDecimal value);
 

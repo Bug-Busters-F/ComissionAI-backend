@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.BaseComissaoResponse;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.CatalogoResponse;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.MatriculaResponse;
+import com.bugbusters.backend.consultasia.ConsultasIaDTOs.PaginaDTO;
+import com.bugbusters.backend.consultasia.ConsultasIaDTOs.VendaSimulacaoDTO;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.RegrasConcorrentesRequest;
 import com.bugbusters.backend.consultasia.ConsultasIaDTOs.RegrasConcorrentesResponse;
 import com.bugbusters.backend.consultasia.RecortePopulacaoIaDTOs.ConsistenciaRecorteIaResponse;
@@ -153,8 +155,24 @@ public class ConsultasIaController {
     @ApiResponse(responseCode = "400", description = "Parâmetros ausentes ou inválidos", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Conflito de versão ou mutação de dados", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     @ApiResponse(responseCode = "422", description = "Recorte incompleto", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+
     @PostMapping("/recorte-populacao/verificar-consistencia")
     public ResponseEntity<ConsistenciaRecorteIaResponse> verificarConsistencia(@RequestBody VerificarConsistenciaRecorteIaRequest request) {
         return ResponseEntity.ok(recorteService.verificarConsistencia(request));
+    }
+
+    @Operation(summary = "Dados de vendas para simulação", description = "Vendas da competência, filtráveis por marca, loja, cargo (códigos) e matrícula, paginadas (máximo 1000 por página) e em ordem determinística (data, id). Página vazia = sem dados.")
+    @ApiResponse(responseCode = "200", description = "Página de vendas")
+    @ApiResponse(responseCode = "400", description = "Competência ausente ou inválida", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/dados-simulacao")
+    public ResponseEntity<PaginaDTO<VendaSimulacaoDTO>> dadosSimulacao(
+            @Parameter(description = "Competência YYYY-MM", example = "2026-09") @RequestParam(required = false) String competencia,
+            @RequestParam(required = false) Integer marca,
+            @RequestParam(required = false) Integer loja,
+            @RequestParam(required = false) Integer cargo,
+            @RequestParam(required = false) String matricula,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "1000") int size) {
+        return ResponseEntity.ok(service.buscarDadosSimulacao(competencia, marca, loja, cargo, matricula, page, size));
     }
 }

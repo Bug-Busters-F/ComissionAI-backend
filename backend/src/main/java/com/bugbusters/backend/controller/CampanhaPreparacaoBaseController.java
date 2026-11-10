@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -114,7 +115,7 @@ public class CampanhaPreparacaoBaseController {
             @PathVariable Long campanhaId,
             @PathVariable UUID preparacaoId,
             @PathVariable int numeroLinha,
-            @RequestBody EditarLinhaPreparacaoRequestDTO request) {
+            @Valid @RequestBody EditarLinhaPreparacaoRequestDTO request) {
 
         return ResponseEntity.ok(preparacaoBaseService.editarLinha(campanhaId, preparacaoId, numeroLinha, request));
     }
@@ -124,7 +125,7 @@ public class CampanhaPreparacaoBaseController {
     public ResponseEntity<LotePreparacaoResponseDTO> editarLinhasEmLote(
             @PathVariable Long campanhaId,
             @PathVariable UUID preparacaoId,
-            @RequestBody EditarLinhasLoteRequestDTO request) {
+            @Valid @RequestBody EditarLinhasLoteRequestDTO request) {
 
         return ResponseEntity.ok(preparacaoBaseService.editarLinhasEmLote(campanhaId, preparacaoId, request));
     }
@@ -185,13 +186,13 @@ public class CampanhaPreparacaoBaseController {
             @PathVariable Long campanhaId,
             @PathVariable UUID preparacaoId) {
 
-        ArquivoImportacao arq = preparacaoBaseService.baixarArquivoOriginal(campanhaId, preparacaoId);
-        String contentType = arq.getContentType() != null ? arq.getContentType() : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        ArquivoOriginalDownloadDTO arq = preparacaoBaseService.baixarArquivoOriginal(campanhaId, preparacaoId);
+        String contentType = arq.contentType() != null ? arq.contentType() : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + arq.getNomeArquivo() + "\"")
-                .body(arq.getConteudo());
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + arq.nomeArquivo() + "\"")
+                .body(arq.conteudo());
     }
 
     @Operation(summary = "Consultar histórico de versões de um registro na base geral")

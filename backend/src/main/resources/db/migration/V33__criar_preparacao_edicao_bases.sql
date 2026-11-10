@@ -1,5 +1,5 @@
 -- =============================================================================
--- V29: Área de Preparação, Edição Validada, Preservação de Arquivos e
+-- V33: Área de Preparação, Edição Validada, Preservação de Arquivos e
 --      Versionamento de Registros das Bases Globais (BACK-5)
 -- =============================================================================
 

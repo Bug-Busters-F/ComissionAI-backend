@@ -72,6 +72,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
+    open-in-view: false
   flyway:
     enabled: false
   batch:

@@ -1,5 +1,5 @@
 -- =============================================================================
--- V30: Propagação de Impactos de Correções de Bases Globais (BACK-6)
+-- V34: Propagação de Impactos de Correções de Bases Globais (BACK-6)
 -- =============================================================================
 
 -- 1. Controle de desatualização por correção posterior e encadeamento em tb_resultado_calculo

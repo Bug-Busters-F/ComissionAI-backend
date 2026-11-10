@@ -1,10 +1,12 @@
 package com.bugbusters.backend.dto.preparacao;
 
+import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
 public record EditarLinhaPreparacaoRequestDTO(
+        @NotNull(message = "A versão da linha é obrigatória para controle de concorrência.")
         Long versao,
         String origem,
         String responsavel,

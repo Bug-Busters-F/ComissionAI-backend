@@ -33,6 +33,7 @@ import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.SimulacaoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +52,9 @@ public class CampanhaService {
     private final SimulacaoRepository simulacaoRepository;
     private final CampanhaVersaoRepository campanhaVersaoRepository;
     private final FechamentoService fechamentoService;
+
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
 
     @Autowired
     public CampanhaService(CampanhaRepository campanhaRepository,
@@ -150,7 +154,7 @@ public class CampanhaService {
         campanha.setOrigemOrcamento(origem);
         campanha.setOrcamentoConfirmado(orcamentoConfirmado);
         if (orcamentoConfirmado) {
-            campanha.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
+            campanha.setOrcamentoConfirmadoPor(usuarioAtualProvider.obterUsuarioAtual(request.orcamentoConfirmadoPor()));
             campanha.setOrcamentoConfirmadoEm(OffsetDateTime.now());
         }
         campanha.setJustificativaOrcamento(request.justificativaOrcamento());
@@ -326,7 +330,7 @@ public class CampanhaService {
             proposta.setOrcamentoConfirmado(orcConfirmado);
             proposta.setOrigemOrcamento(resolverOrigemOrcamento(request.orcamento(), request.orcamentoExtraidoIa(), orcConfirmado));
             if (orcConfirmado) {
-                proposta.setOrcamentoConfirmadoPor(request.orcamentoConfirmadoPor() != null ? request.orcamentoConfirmadoPor() : "usuario");
+                proposta.setOrcamentoConfirmadoPor(usuarioAtualProvider.obterUsuarioAtual(request.orcamentoConfirmadoPor()));
                 proposta.setOrcamentoConfirmadoEm(OffsetDateTime.now());
             }
             proposta.setJustificativaOrcamento(request.justificativaOrcamento());
@@ -606,10 +610,13 @@ public class CampanhaService {
             throw new BusinessException("A versão da campanha não possui regras vinculadas.");
         }
 
+        if (request == null || request.aprovado() == null) {
+            throw new BusinessException("O campo 'aprovado' é obrigatório.");
+        }
+
         OffsetDateTime agora = OffsetDateTime.now();
-        String autor = (request != null && request.aprovadoPor() != null && !request.aprovadoPor().isBlank())
-                ? request.aprovadoPor().trim() : "SISTEMA";
-        boolean aprovado = request != null && Boolean.TRUE.equals(request.aprovado());
+        String autor = usuarioAtualProvider.obterUsuarioAtual(request.aprovadoPor());
+        boolean aprovado = request.aprovado();
 
         StatusAprovacaoCodigo novoStatus = aprovado ? StatusAprovacaoCodigo.APROVADO : StatusAprovacaoCodigo.REJEITADO;
 
@@ -645,6 +652,12 @@ public class CampanhaService {
         }
 
         String hashVersao = calcularHashString(hashVersaoBuilder.toString());
+        if (request.hashArtefatosCodigo() != null && !request.hashArtefatosCodigo().isBlank()
+                && !request.hashArtefatosCodigo().equals(hashVersao)) {
+            throw new ResourceConflictException("O hash dos artefatos de código enviado ("
+                    + request.hashArtefatosCodigo() + ") diverge do hash atual calculado ("
+                    + hashVersao + "). Recarregue os artefatos antes de aprovar.");
+        }
         versao.setHashArtefatosCodigo(hashVersao);
         versao.setStatusAprovacaoCodigo(novoStatus);
         if (aprovado) {
@@ -1147,6 +1160,9 @@ public class CampanhaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
 
         validarEstadoEditavel(campanha);
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(), campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
         if (request.versaoEsperada() != null) {
             CampanhaVersao v = campanha.versaoParaRevisao();
             if (v != null && !Objects.equals(v.getNumero(), request.versaoEsperada())) {
@@ -1156,9 +1172,27 @@ public class CampanhaService {
 
         CampanhaVersao proposta = campanha.getVersaoProposta();
         if (proposta == null && campanha.getVersaoVigente() != null) {
-            proposta = copiarComoProposta(campanha, campanha.getVersaoVigente());
+            CampanhaVersao base = campanha.getVersaoVigente();
+            proposta = copiarComoProposta(campanha, base);
             proposta = campanhaVersaoRepository.save(proposta);
             campanha.setVersaoProposta(proposta);
+
+            List<Regra> copias = new ArrayList<>();
+            for (Regra regra : regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(base.getId())) {
+                var r = mapearRegraHistorica(regra);
+                var item = new RegraItemRequest(r.blocoId() != null && !r.blocoId().isBlank() ? r.blocoId() : r.identificadorLogico() != null ? r.identificadorLogico() : "persisted-" + r.id(), r.trechoOrigem(), r.nome(), r.canal(), r.codMarca(), r.descrMarca(),
+                        r.codLoja(), r.codCargo(), r.descriCargo(), r.matricula(), r.valorMinimo(), r.minInclusivo(), r.valorMaximo(), r.maxInclusivo(),
+                        r.tipoOperacao(), r.valorAjuste(), r.tipoBaseReferencia(), r.taxaBaseConsultada(), r.descricaoReferencia(), r.taxa(),
+                        r.explicacao(), r.pythonEquivalente(), List.of(), r.completa(), StatusRegra.DRAFT,
+                        r.bonusPercentual(), r.bonusValorFixo(), r.rastreabilidade());
+                Regra copia = converterParaEntidade(item, campanha, new PeriodoCalculado(base.getDataInicio(), base.getDataFim()), EstadoCampanha.DRAFT, copias.size() + 1);
+                copia.setPendencias(regra.getPendencias());
+                copia.setCampanhaVersao(proposta);
+                copias.add(copia);
+            }
+            if (!copias.isEmpty()) {
+                regraRepository.saveAll(copias);
+            }
         }
 
         BigDecimal orcamentoAnterior = proposta != null ? proposta.getOrcamento() : campanha.getOrcamento();
@@ -1178,7 +1212,7 @@ public class CampanhaService {
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
-        String responsavel = request.responsavel() != null && !request.responsavel().isBlank() ? request.responsavel() : "analista";
+        String responsavel = usuarioAtualProvider.obterUsuarioAtual(request != null ? request.responsavel() : null);
 
         boolean orcamentoMudou = orcamentoAnterior == null || orcamentoAnterior.compareTo(orcamentoNovo) != 0;
         boolean simulacaoInvalidada = false;
@@ -1241,6 +1275,9 @@ public class CampanhaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada."));
 
         validarEstadoEditavel(campanha);
+        if (fechamentoService != null) {
+            fechamentoService.validarPeriodosDisponiveis(campanha.getDataInicio(), campanha.getDataFim(), campanha.inicioParaRevisao(), campanha.fimParaRevisao());
+        }
 
         if (request != null && request.versaoEsperada() != null) {
             CampanhaVersao v = campanha.versaoParaRevisao();
@@ -1296,6 +1333,16 @@ public class CampanhaService {
                     "Ajuste as regras ou revise o orçamento antes de encaminhar.");
         }
 
+        if (sim.getStatusAceite() != StatusAceiteSimulacao.ACEITA) {
+            throw new BusinessException("Apenas simulações com status ACEITA podem ser encaminhadas ao gerente.");
+        }
+
+        if (sim.getQtdVendasComImpedimento() > 0) {
+            throw new BusinessException(String.format(
+                    "Não é permitido encaminhar ao gerente: a simulação contém %d venda(s) com impedimento. Corrija as bases antes de prosseguir.",
+                    sim.getQtdVendasComImpedimento()));
+        }
+
         if (campanhaSimulacaoValidator != null) {
             List<String> divergencias = campanhaSimulacaoValidator.conferirDivergencias(campanha, sim);
             if (!divergencias.isEmpty()) {
@@ -1304,8 +1351,7 @@ public class CampanhaService {
         }
 
         OffsetDateTime agora = OffsetDateTime.now();
-        String responsavel = (request != null && request.encaminhadoPor() != null && !request.encaminhadoPor().isBlank())
-                ? request.encaminhadoPor() : "analista";
+        String responsavel = usuarioAtualProvider.obterUsuarioAtual(request != null ? request.encaminhadoPor() : null);
         String observacao = request != null ? request.observacao() : null;
 
         CampanhaVersao proposta = campanha.getVersaoProposta();

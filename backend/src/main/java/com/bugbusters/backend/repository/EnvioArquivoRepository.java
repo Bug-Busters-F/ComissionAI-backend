@@ -78,5 +78,8 @@ public interface EnvioArquivoRepository extends JpaRepository<EnvioArquivo, Long
     @Query("SELECT COALESCE(MAX(e.reportId), 0) FROM EnvioArquivo e")
     Long findMaxReportId();
 
+    @Query(value = "SELECT nextval('seq_envio_arquivo_report_id')", nativeQuery = true)
+    Long nextReportId();
+
     Optional<EnvioArquivo> findFirstByArquivoImportacaoId(java.util.UUID arquivoImportacaoId);
 }

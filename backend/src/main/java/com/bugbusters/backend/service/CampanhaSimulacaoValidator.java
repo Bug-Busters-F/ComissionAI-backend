@@ -205,9 +205,9 @@ public class CampanhaSimulacaoValidator {
         boolean orcamentoConfirmado = campanha.orcamentoConfirmadoParaRevisao();
 
         if (orcamentoCampanha == null || orcamentoCampanha.compareTo(BigDecimal.ZERO) <= 0) {
-            divergencias.add("A campanha não possui orçamento monetário definido.");
+            divergencias.add("A campanha não possui orçamento monetário definido. Confirme ou informe o orçamento através da rota PATCH /api/v1/campanhas/{id}/orcamento antes de prosseguir.");
         } else if (!orcamentoConfirmado) {
-            divergencias.add("O orçamento monetário da campanha ainda não foi confirmado explicitamente.");
+            divergencias.add("O orçamento monetário da campanha ainda não foi confirmado explicitamente. Confirme o orçamento através da rota PATCH /api/v1/campanhas/{id}/orcamento antes de prosseguir.");
         } else {
             if (simulacao.getOrcamentoCampanha() != null && simulacao.getOrcamentoCampanha().compareTo(orcamentoCampanha) != 0) {
                 divergencias.add(String.format("O orçamento atual da proposta (R$ %s) difere do orçamento considerado na simulação (R$ %s).",

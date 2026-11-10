@@ -1,5 +1,5 @@
 -- =============================================================================
--- V28: Anexos de Bases Gerais por Campanha para Cobertura de Fechamento (BACK-13)
+-- V32: Anexos de Bases Gerais por Campanha para Cobertura de Fechamento (BACK-13)
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS tb_campanha_anexo_base (

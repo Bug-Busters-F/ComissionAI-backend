@@ -206,7 +206,10 @@ public class PropagacaoImpactoCorrecaoService {
                 } else if (reg != null && l.getDataReferencia() != null) {
                     List<Sale> existentes = salesPorRegId.getOrDefault(reg.getId(), Collections.emptyList());
                     saleAlvo = existentes.stream()
-                            .filter(s -> Objects.equals(s.getSaleDate(), l.getDataReferencia()))
+                            .filter(s -> Objects.equals(s.getSaleDate(), l.getDataReferencia())
+                                    && s.getStore() != null && Objects.equals(s.getStore().getCode(), l.getCodLoja())
+                                    && s.getBrand() != null && Objects.equals(s.getBrand().getCode(), l.getCodMarca())
+                                    && s.getValue() != null && l.getValorVenda() != null && s.getValue().compareTo(l.getValorVenda()) == 0)
                             .findFirst().orElse(null);
                 }
 
@@ -259,7 +262,7 @@ public class PropagacaoImpactoCorrecaoService {
         );
 
         // Identificação de Aprovações de Código Afetadas
-        List<AprovacaoCodigoAfetadaDTO> aprovacoesCodigoAfetadas = identificarAprovacoesCodigoAfetadas(campanhasAfetadas);
+        List<AprovacaoCodigoAfetadaDTO> aprovacoesCodigoAfetadas = identificarAprovacoesCodigoAfetadas(lote, campanhasAfetadas);
 
         boolean possuiImpactos = !campanhasAfetadas.isEmpty() || !simulacoesAfetadas.isEmpty()
                 || !calculosAfetados.isEmpty() || !aprovacoesCodigoAfetadas.isEmpty();
@@ -486,10 +489,7 @@ public class PropagacaoImpactoCorrecaoService {
                 // Interceptação de período
                 boolean periodoCasou = periodoIntercepta(r.getDataInicio(), r.getDataFim(), competenciasAtingidas);
 
-                // Se HR sem competência definida inicialmente, considera o período geral da regra
-                if (competenciasAtingidas.isEmpty()) {
-                    periodoCasou = true;
-                }
+
 
                 if (!periodoCasou) continue;
 
@@ -506,7 +506,9 @@ public class PropagacaoImpactoCorrecaoService {
                 }
             }
 
-            boolean campanhaOrigemAfetada = c.getId().equals(lote.getCampanha().getId()) && houveMudancasReais;
+            boolean campanhaOrigemAfetada = c.getId().equals(lote.getCampanha().getId())
+                    && houveMudancasReais
+                    && !competenciasAtingidas.isEmpty();
             if (!regrasAtingidas.isEmpty() || campanhaOrigemAfetada) {
                 boolean simAceita = c.getSimulacaoAceita() != null;
                 boolean codAprovado = (versao != null && versao.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO)
@@ -729,7 +731,7 @@ public class PropagacaoImpactoCorrecaoService {
         return dtos;
     }
 
-    private List<AprovacaoCodigoAfetadaDTO> identificarAprovacoesCodigoAfetadas(List<CampanhaAfetadaDTO> campanhasAfetadas) {
+    private List<AprovacaoCodigoAfetadaDTO> identificarAprovacoesCodigoAfetadas(LotePreparacao lote, List<CampanhaAfetadaDTO> campanhasAfetadas) {
         List<AprovacaoCodigoAfetadaDTO> aprovacoes = new ArrayList<>();
 
         for (CampanhaAfetadaDTO c : campanhasAfetadas) {

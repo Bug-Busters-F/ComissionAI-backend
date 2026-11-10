@@ -1,5 +1,5 @@
 -- =============================================================================
--- V31: Persistir orçamento monetário e regras de enquadramento (BACK-8 / BUG-103)
+-- V35: Persistir orçamento monetário e regras de enquadramento (BACK-8 / BUG-103)
 -- =============================================================================
 
 -- 1. Orçamento e encaminhamento na tb_campanha
@@ -45,3 +45,29 @@ ALTER TABLE tb_execucao_calculo ADD COLUMN IF NOT EXISTS orcamento_total_campanh
 ALTER TABLE tb_execucao_calculo ADD COLUMN IF NOT EXISTS comissao_total_apurada NUMERIC(18, 2);
 ALTER TABLE tb_execucao_calculo ADD COLUMN IF NOT EXISTS status_enquadramento_execucao VARCHAR(30);
 ALTER TABLE tb_execucao_calculo ADD COLUMN IF NOT EXISTS resumo_orcamento_json TEXT;
+
+-- 5. Backfill de compatibilidade para campanhas pré-existentes (evita bloqueio acidental na simulação/ativação)
+UPDATE tb_campanha c
+SET orcamento = COALESCE(
+        (SELECT s.comissao_projetada FROM tb_simulacao s WHERE s.id = c.simulacao_aceita_id),
+        10000.00
+    ),
+    orcamento_confirmado = TRUE,
+    origem_orcamento = 'CONFIRMADO_USUARIO',
+    orcamento_confirmado_por = 'MIGRATION_BACKFILL',
+    orcamento_confirmado_em = CURRENT_TIMESTAMP,
+    justificativa_orcamento = 'Backfill de compatibilidade da migration V35 para campanhas pré-existentes.'
+WHERE c.orcamento IS NULL AND (c.estado IN ('ATIVA', 'CONCLUIDA') OR c.simulacao_aceita_id IS NOT NULL);
+
+UPDATE tb_campanha_versao v
+SET orcamento = COALESCE(
+        (SELECT c.orcamento FROM tb_campanha c WHERE c.id = v.campanha_id),
+        10000.00
+    ),
+    orcamento_confirmado = TRUE,
+    origem_orcamento = 'CONFIRMADO_USUARIO',
+    orcamento_confirmado_por = 'MIGRATION_BACKFILL',
+    orcamento_confirmado_em = CURRENT_TIMESTAMP,
+    justificativa_orcamento = 'Backfill de compatibilidade da migration V35 para versões pré-existentes.'
+WHERE v.orcamento IS NULL AND v.status = 'VIGENTE';
+

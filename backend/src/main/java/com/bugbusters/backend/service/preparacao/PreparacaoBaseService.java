@@ -81,6 +81,33 @@ public class PreparacaoBaseService {
     private final PropagacaoImpactoCorrecaoService propagacaoImpactoCorrecaoService;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.bugbusters.backend.repository.ResultadoCalculoRepository resultadoCalculoRepository;
+
+    private synchronized long obterProximoReportId() {
+        if (jdbcTemplate != null) {
+            try {
+                Long nextVal = jdbcTemplate.queryForObject("SELECT nextval('seq_envio_arquivo_report_id')", Long.class);
+                if (nextVal != null && nextVal > 0) {
+                    return nextVal;
+                }
+            } catch (Exception ex) {
+                try {
+                    jdbcTemplate.execute("CREATE SEQUENCE IF NOT EXISTS seq_envio_arquivo_report_id START WITH 1000000 INCREMENT BY 1");
+                    Long nextVal = jdbcTemplate.queryForObject("SELECT nextval('seq_envio_arquivo_report_id')", Long.class);
+                    if (nextVal != null && nextVal > 0) {
+                        return nextVal;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return Math.max(1000000L, envioArquivoRepository.findMaxReportId() + 1);
+    }
+
     public PreparacaoBaseService(
             CampanhaRepository campanhaRepository,
             LotePreparacaoRepository lotePreparacaoRepository,
@@ -394,11 +421,11 @@ public class PreparacaoBaseService {
                 .orElseThrow(() -> new ResourceNotFoundException("Linha " + numeroLinha + " não encontrada no lote de preparação " + lote.getId()));
 
         // Controle de concorrência otimista
-        if (request.versao() != null && !request.versao().equals(linha.getVersao())) {
+        if (request.versao() == null || !request.versao().equals(linha.getVersao())) {
             throw new ResourceConflictException(
-                    String.format("Conflito de edição na linha %d: a linha foi alterada por outro usuário ou processo (versão atual: %d, versão enviada: %d).",
-                            numeroLinha, linha.getVersao(), request.versao()),
-                    List.of(new CampoInvalidoDTO("versao", "Versão desatualizada. Recarregue a linha antes de salvar."))
+                    String.format("Conflito de edição na linha %d: a versão enviada (%s) é inválida ou difere da versão atual (%d). Recarregue a linha antes de salvar.",
+                            numeroLinha, request.versao(), linha.getVersao()),
+                    List.of(new CampoInvalidoDTO("versao", "Versão desatualizada ou não informada. Recarregue a linha antes de salvar."))
             );
         }
 
@@ -471,7 +498,10 @@ public class PreparacaoBaseService {
         linha.setAtualizadoEm(OffsetDateTime.now());
         linha.setAtualizadoPor(autor);
 
-        linha = linhaPreparacaoRepository.save(linha);
+        linha = linhaPreparacaoRepository.saveAndFlush(linha);
+        long versaoNova = (linha.getVersao() != null && linha.getVersao() > versaoAntiga)
+                ? linha.getVersao()
+                : versaoAntiga + 1;
 
         Map<String, Object> valoresNovos = extrairValoresEditaveis(linha);
         String histAnteriorJson = toJson(valoresAnteriores);
@@ -482,7 +512,7 @@ public class PreparacaoBaseService {
                 lote,
                 numeroLinha,
                 versaoAntiga,
-                linha.getVersao(),
+                versaoNova,
                 linha.getOrigemUltimaEdicao(),
                 histAnteriorJson,
                 histNovosJson,
@@ -565,10 +595,11 @@ public class PreparacaoBaseService {
             EfetivarLotePreparacaoRequestDTO request) {
 
         Campanha campanha = buscarCampanha(campanhaId);
-        LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
+        LotePreparacao lote = lotePreparacaoRepository.findByIdAndCampanhaIdForUpdate(preparacaoId, campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lote de preparação não encontrado: " + preparacaoId));
 
         if (!"EM_PREPARACAO".equals(lote.getStatus())) {
-            throw new BusinessException("Apenas lotes com status EM_PREPARACAO podem ser efetivados.");
+            throw new ResourceConflictException("Apenas lotes com status EM_PREPARACAO podem ser efetivados.");
         }
 
         // 1. Revalidação de garantia imediata antes de efetivar
@@ -774,7 +805,7 @@ public class PreparacaoBaseService {
                     saleAlvo = saleRepository.findById(l.getRegistroAlvoId()).orElse(null);
                 }
                 if (saleAlvo == null) {
-                    saleAlvo = saleRepository.findByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValue(
+                    saleAlvo = saleRepository.findFirstByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValueOrderByIdAsc(
                             reg.getId(), l.getDataReferencia(), store.getId(), brand.getId(), l.getValorVenda()
                     ).orElse(null);
                 }
@@ -837,7 +868,7 @@ public class PreparacaoBaseService {
         }
 
         // 4. Criação do EnvioArquivo (Lote oficial)
-        long proximoReportId = Math.max(1000000L, envioArquivoRepository.findMaxReportId() + 1);
+        long proximoReportId = obterProximoReportId();
 
         EnvioArquivo novoEnvio = new EnvioArquivo();
         novoEnvio.setIdLote(idLoteGerado);
@@ -859,11 +890,14 @@ public class PreparacaoBaseService {
 
         if (lote.getEnvioArquivoOrigem() != null) {
             novoEnvio.setEnvioAnteriorId(lote.getEnvioArquivoOrigem().getId());
-            lote.getEnvioArquivoOrigem().setSubstituidoPorId(novoEnvio.getId());
-            envioArquivoRepository.save(lote.getEnvioArquivoOrigem());
         }
 
         novoEnvio = envioArquivoRepository.saveAndFlush(novoEnvio);
+
+        if (lote.getEnvioArquivoOrigem() != null) {
+            lote.getEnvioArquivoOrigem().setSubstituidoPorId(novoEnvio.getId());
+            envioArquivoRepository.save(lote.getEnvioArquivoOrigem());
+        }
 
         // Salva inconsistências remanescentes (ADVERTENCIA de vendas)
         if (!inconsistenciasParaLote.isEmpty()) {
@@ -934,10 +968,11 @@ public class PreparacaoBaseService {
     @Transactional
     public LotePreparacaoResponseDTO descartarLote(Long campanhaId, UUID preparacaoId, String motivo, String responsavel) {
         buscarCampanha(campanhaId);
-        LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
+        LotePreparacao lote = lotePreparacaoRepository.findByIdAndCampanhaIdForUpdate(preparacaoId, campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lote de preparação não encontrado: " + preparacaoId));
 
         if (!"EM_PREPARACAO".equals(lote.getStatus())) {
-            throw new BusinessException("Apenas lotes com status EM_PREPARACAO podem ser descartados.");
+            throw new ResourceConflictException("Apenas lotes com status EM_PREPARACAO podem ser descartados.");
         }
 
         String autor = usuarioAtualProvider.obterUsuarioAtual(responsavel);
@@ -954,10 +989,19 @@ public class PreparacaoBaseService {
      * Download do arquivo original preservado.
      */
     @Transactional(readOnly = true)
-    public ArquivoImportacao baixarArquivoOriginal(Long campanhaId, UUID preparacaoId) {
+    public ArquivoOriginalDownloadDTO baixarArquivoOriginal(Long campanhaId, UUID preparacaoId) {
         buscarCampanha(campanhaId);
         LotePreparacao lote = buscarLote(preparacaoId, campanhaId);
-        return lote.getArquivoImportacao();
+        ArquivoImportacao arq = lote.getArquivoImportacao();
+        if (arq == null) {
+            throw new ResourceNotFoundException("Arquivo original não encontrado para o lote " + preparacaoId);
+        }
+        return new ArquivoOriginalDownloadDTO(
+                arq.getNomeArquivo(),
+                arq.getContentType(),
+                arq.getTamanhoBytes(),
+                arq.getConteudo()
+        );
     }
 
     /**
@@ -1002,17 +1046,38 @@ public class PreparacaoBaseService {
     private void processarELerLinhasParaPreparacao(LotePreparacao lote, InputStream input) {
         List<LinhaLidaPreparacao> linhasLidas = excelReader.lerLinhas(input, lote.getTipoBase());
 
-        Set<String> matriculasNoArquivo = new HashSet<>();
-        for (LinhaLidaPreparacao l : linhasLidas) {
-            if (l.matricula() != null && !l.matricula().isBlank()) {
-                matriculasNoArquivo.add(l.matricula().trim().toUpperCase());
-            }
-        }
+        Map<String, Long> contagemMatriculas = linhasLidas.stream()
+                .map(LinhaLidaPreparacao::matricula)
+                .filter(m -> m != null && !m.isBlank())
+                .map(m -> m.trim().toUpperCase())
+                .collect(Collectors.groupingBy(java.util.function.Function.identity(), Collectors.counting()));
 
+        Set<String> matriculasDuplicadasNoArquivo = contagemMatriculas.entrySet().stream()
+                .filter(e -> e.getValue() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+
+        Set<String> matriculasNoArquivo = contagemMatriculas.keySet();
         Map<String, Registration> colaboradoresBanco = Collections.emptyMap();
         if (!matriculasNoArquivo.isEmpty()) {
             colaboradoresBanco = registrationRepository.findByRegistrationIn(matriculasNoArquivo).stream()
                     .collect(Collectors.toMap(r -> r.getRegistration().toUpperCase(), r -> r));
+        }
+
+        List<Sale> vendasOrigemDisponiveis = new ArrayList<>();
+        if (lote.getEnvioArquivoOrigem() != null && "SALES".equalsIgnoreCase(lote.getTipoBase())) {
+            String idLoteOrigem = lote.getEnvioArquivoOrigem().getIdLote();
+            if (idLoteOrigem != null) {
+                vendasOrigemDisponiveis.addAll(saleRepository.findByIdLoteOrigem(idLoteOrigem));
+            }
+        }
+
+        List<Registration> rhOrigemDisponiveis = new ArrayList<>();
+        if (lote.getEnvioArquivoOrigem() != null && "HR".equalsIgnoreCase(lote.getTipoBase())) {
+            String idLoteOrigem = lote.getEnvioArquivoOrigem().getIdLote();
+            if (idLoteOrigem != null) {
+                rhOrigemDisponiveis.addAll(registrationRepository.findByIdLoteOrigem(idLoteOrigem));
+            }
         }
 
         Set<String> chavesVendas = new HashSet<>();
@@ -1035,7 +1100,7 @@ public class PreparacaoBaseService {
                         l.dataAdmissao(), l.dataDemissao(),
                         l.codCargo(), l.descrCargo(), l.numeroLinha()
                 );
-                erros.addAll(hrRowValidator.validar(hrRow, matriculasNoArquivo, colaboradoresBanco));
+                erros.addAll(hrRowValidator.validar(hrRow, matriculasDuplicadasNoArquivo, colaboradoresBanco));
             } else if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
                 SalesFileRow salesRow = new SalesFileRow(
                         l.dataReferencia(), l.codMarca(), l.descrMarca(),
@@ -1062,7 +1127,53 @@ public class PreparacaoBaseService {
             if ("ADVERTENCIA".equals(severidadeMax)) advertencias++;
             if ("AVISO".equals(severidadeMax)) avisos++;
 
+            UUID registroAlvoId = null;
+            if (!vendasOrigemDisponiveis.isEmpty() && l.matricula() != null) {
+                String matUpper = l.matricula().trim().toUpperCase();
+                Iterator<Sale> it = vendasOrigemDisponiveis.iterator();
+                while (it.hasNext()) {
+                    Sale s = it.next();
+                    boolean match = (s.getRegistration() != null && s.getRegistration().getRegistration().equalsIgnoreCase(matUpper))
+                            && Objects.equals(s.getSaleDate(), l.dataReferencia())
+                            && (s.getStore() != null && Objects.equals(s.getStore().getCode(), l.codLoja()))
+                            && (s.getBrand() != null && Objects.equals(s.getBrand().getCode(), l.codMarca()))
+                            && (s.getValue() != null && l.valorVenda() != null && s.getValue().compareTo(l.valorVenda()) == 0);
+                    if (match) {
+                        registroAlvoId = s.getId();
+                        it.remove();
+                        break;
+                    }
+                }
+                if (registroAlvoId == null) {
+                    it = vendasOrigemDisponiveis.iterator();
+                    while (it.hasNext()) {
+                        Sale s = it.next();
+                        boolean match = (s.getRegistration() != null && s.getRegistration().getRegistration().equalsIgnoreCase(matUpper))
+                                && Objects.equals(s.getSaleDate(), l.dataReferencia())
+                                && (s.getStore() != null && Objects.equals(s.getStore().getCode(), l.codLoja()))
+                                && (s.getBrand() != null && Objects.equals(s.getBrand().getCode(), l.codMarca()));
+                        if (match) {
+                            registroAlvoId = s.getId();
+                            it.remove();
+                            break;
+                        }
+                    }
+                }
+            } else if (!rhOrigemDisponiveis.isEmpty() && l.matricula() != null) {
+                String matUpper = l.matricula().trim().toUpperCase();
+                Iterator<Registration> it = rhOrigemDisponiveis.iterator();
+                while (it.hasNext()) {
+                    Registration r = it.next();
+                    if (r.getRegistration() != null && r.getRegistration().equalsIgnoreCase(matUpper)) {
+                        registroAlvoId = r.getId();
+                        it.remove();
+                        break;
+                    }
+                }
+            }
+
             LinhaPreparacao linhaEntidade = new LinhaPreparacao(lote, l.numeroLinha(), l.conteudoOriginalJson());
+            linhaEntidade.setRegistroAlvoId(registroAlvoId);
             linhaEntidade.setDataReferencia(l.dataReferencia());
             linhaEntidade.setCodMarca(l.codMarca());
             linhaEntidade.setDescrMarca(l.descrMarca());
@@ -1141,6 +1252,17 @@ public class PreparacaoBaseService {
                 .map(m -> m.trim().toUpperCase())
                 .collect(Collectors.toSet());
 
+        Set<String> matriculasDuplicadas = linhas.stream()
+                .filter(l -> !l.isIgnorarNaEfetivacao())
+                .map(LinhaPreparacao::getMatricula)
+                .filter(Objects::nonNull)
+                .map(m -> m.trim().toUpperCase())
+                .collect(Collectors.groupingBy(m -> m, Collectors.counting()))
+                .entrySet().stream()
+                .filter(e -> e.getValue() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+
         Map<String, Registration> colaboradoresBanco = Collections.emptyMap();
         if (!matriculas.isEmpty()) {
             colaboradoresBanco = registrationRepository.findByRegistrationIn(matriculas).stream()
@@ -1171,7 +1293,7 @@ public class PreparacaoBaseService {
                         linha.getDataAdmissao(), linha.getDataDemissao(),
                         linha.getCodCargo(), linha.getDescrCargo(), linha.getNumeroLinha()
                 );
-                erros.addAll(hrRowValidator.validar(hrRow, matriculas, colaboradoresBanco));
+                erros.addAll(hrRowValidator.validar(hrRow, matriculasDuplicadas, colaboradoresBanco));
             } else if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
                 SalesFileRow salesRow = new SalesFileRow(
                         linha.getDataReferencia(), linha.getCodMarca(), linha.getDescrMarca(),

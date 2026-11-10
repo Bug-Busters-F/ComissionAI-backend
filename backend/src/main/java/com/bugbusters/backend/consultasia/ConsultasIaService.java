@@ -1,5 +1,17 @@
 package com.bugbusters.backend.consultasia;
 
+import java.util.function.Function;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bugbusters.backend.dto.basecomiss.ReferenciaFaltanteDTO;
+import com.bugbusters.backend.consultasia.ConsultasIaDTOs.PaginaDTO;
+import com.bugbusters.backend.consultasia.ConsultasIaDTOs.VendaSimulacaoDTO;
+import com.bugbusters.backend.sales.Sale;
+import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.sales.SaleSpecification;
+
+
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.time.LocalDate;
@@ -12,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,6 +60,8 @@ import com.bugbusters.backend.store.StoreRepository;
 @Transactional(readOnly = true)
 public class ConsultasIaService {
 
+    static final int TAMANHO_MAXIMO_PAGINA = 1000;
+
     private static final Long REGRA_BASE_ID = 1L;
 
     private final BrandRepository brandRepository;
@@ -55,16 +70,26 @@ public class ConsultasIaService {
     private final RegistrationRepository registrationRepository;
     private final CoberturaBaseService coberturaBaseService;
     private final RegraRepository regraRepository;
+    private final SaleRepository saleRepository;
 
+    @Autowired
     public ConsultasIaService(BrandRepository brandRepository, StoreRepository storeRepository,
                               PositionRepository positionRepository, RegistrationRepository registrationRepository,
-                              CoberturaBaseService coberturaBaseService, RegraRepository regraRepository) {
+                              CoberturaBaseService coberturaBaseService, RegraRepository regraRepository,
+                              SaleRepository saleRepository) {
         this.brandRepository = brandRepository;
         this.storeRepository = storeRepository;
         this.positionRepository = positionRepository;
         this.registrationRepository = registrationRepository;
         this.coberturaBaseService = coberturaBaseService;
         this.regraRepository = regraRepository;
+        this.saleRepository = saleRepository;
+    }
+
+    public ConsultasIaService(BrandRepository brandRepository, StoreRepository storeRepository,
+                              PositionRepository positionRepository, RegistrationRepository registrationRepository,
+                              CoberturaBaseService coberturaBaseService, RegraRepository regraRepository) {
+        this(brandRepository, storeRepository, positionRepository, registrationRepository, coberturaBaseService, regraRepository, null);
     }
 
     // ---------------------------------------------------------------- catálogos
@@ -248,6 +273,56 @@ public class ConsultasIaService {
     }
 
     // ---------------------------------------------------------------- utilitários
+
+    // ---------------------------------------------------------------- dados de simulação
+
+    public PaginaDTO<VendaSimulacaoDTO> buscarDadosSimulacao(String competencia, Integer marca, Integer loja,
+                                                              Integer cargo, String matricula, int page, int size) {
+        YearMonth ym = parseCompetencia(competencia);
+        if (page < 0) {
+            throw new BusinessException("O parâmetro page não pode ser negativo.");
+        }
+        int tamanho = Math.max(1, Math.min(size, TAMANHO_MAXIMO_PAGINA));
+
+        if (saleRepository == null) {
+            return new PaginaDTO<>(false, List.of(), page, tamanho, 0, 0L, true);
+        }
+
+        Page<Sale> pagina = saleRepository.findAll(
+                SaleSpecification.comFiltros(ym.atDay(1), ym.atEndOfMonth(), marca, loja, cargo,
+                        blankToNull(matricula)),
+                PageRequest.of(page, tamanho, Sort.by("saleDate").ascending().and(Sort.by("id").ascending())));
+
+        if (pagina.isEmpty()) {
+            return new PaginaDTO<>(false, List.of(), pagina.getNumber(), tamanho, pagina.getTotalPages(), pagina.getTotalElements(), pagina.isLast());
+        }
+
+        List<ReferenciaFaltanteDTO> faltantes = coberturaBaseService.verificarCobertura(pagina.getContent(), ym);
+        if (!faltantes.isEmpty()) {
+            return PaginaDTO.coberturaInsuficiente(pagina.getNumber(), tamanho);
+        }
+
+        Function<Sale, VendaSimulacaoDTO> mapper = s -> new VendaSimulacaoDTO(
+                s.getId() != null ? s.getId().toString() : null,
+                s.getRegistration() != null ? s.getRegistration().getRegistration() : null,
+                s.getStore() != null ? s.getStore().getCode() : null,
+                s.getBrand() != null ? s.getBrand().getCode() : null,
+                s.getRegistration() != null && s.getRegistration().getPosition() != null
+                        ? s.getRegistration().getPosition().getCode() : null,
+                s.getValue(),
+                s.getSaleDate(),
+                s.getSaleChannel()
+        );
+        return new PaginaDTO<>(
+                true,
+                pagina.getContent().stream().map(mapper).toList(),
+                pagina.getNumber(),
+                pagina.getSize(),
+                pagina.getTotalPages(),
+                pagina.getTotalElements(),
+                pagina.isLast()
+        );
+    }
 
     private YearMonth parseCompetencia(String competencia) {
         if (competencia == null || competencia.isBlank()) {

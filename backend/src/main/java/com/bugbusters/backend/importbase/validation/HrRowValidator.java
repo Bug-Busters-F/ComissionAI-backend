@@ -48,13 +48,14 @@ public class HrRowValidator {
         // 3. Validações contextuais adicionais para a área de preparação
         if (row.getRegistration() != null && !row.getRegistration().isBlank()) {
             String mat = row.getRegistration().trim();
+            String matNorm = mat.toUpperCase();
 
-            if (matriculasNoArquivo != null && matriculasNoArquivo.contains(mat)) {
+            if (matriculasNoArquivo != null && matriculasNoArquivo.contains(matNorm)) {
                 erros.add(ErroValidacaoLinhaDTO.aviso("matricula", "Matrícula repetida dentro do mesmo arquivo: " + mat));
             }
 
-            if (matriculasExistentesBanco != null && matriculasExistentesBanco.containsKey(mat)) {
-                Registration existente = matriculasExistentesBanco.get(mat);
+            Registration existente = matriculasExistentesBanco != null ? (matriculasExistentesBanco.get(matNorm) != null ? matriculasExistentesBanco.get(matNorm) : matriculasExistentesBanco.get(mat)) : null;
+            if (existente != null) {
                 boolean diverge = (row.getStoreCode() != null && (existente.getStore() == null || !row.getStoreCode().equals(existente.getStore().getCode())))
                         || (row.getPositionCode() != null && (existente.getPosition() == null || !row.getPositionCode().equals(existente.getPosition().getCode())))
                         || (row.getAdmissDate() != null && !row.getAdmissDate().equals(existente.getAdmissDate()))
