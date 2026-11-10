@@ -1,0 +1,20 @@
+CREATE TABLE tb_usuario (
+    id UUID PRIMARY KEY,
+    nome VARCHAR(150) NOT NULL,
+    email VARCHAR(150) NOT NULL UNIQUE,
+    senha_hash VARCHAR(100) NOT NULL,
+    papel VARCHAR(20) NOT NULL,
+    ativo BOOLEAN NOT NULL DEFAULT TRUE,
+    criado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tb_sessao_usuario (
+    id UUID PRIMARY KEY,
+    usuario_id UUID NOT NULL REFERENCES tb_usuario(id),
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    criada_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expira_em TIMESTAMP WITH TIME ZONE NOT NULL,
+    encerrada_em TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX idx_sessao_token_ativa ON tb_sessao_usuario(token_hash) WHERE encerrada_em IS NULL;

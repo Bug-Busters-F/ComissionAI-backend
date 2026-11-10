@@ -17,6 +17,13 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+        @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+        public ResponseEntity<ApiErrorResponse> handleAuthentication(
+                org.springframework.security.core.AuthenticationException ex, HttpServletRequest request) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiErrorResponse(
+                    OffsetDateTime.now(), 401, "Unauthorized", ex.getMessage(), request.getRequestURI(), List.of()));
+        }
+
 
         @ExceptionHandler(HttpMessageNotReadableException.class)
         public ResponseEntity<ApiErrorResponse> handleHttpMessageNotReadable(

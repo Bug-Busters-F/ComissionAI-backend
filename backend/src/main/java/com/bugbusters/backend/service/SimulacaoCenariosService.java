@@ -33,6 +33,8 @@ import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.SimulacaoVenda;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
+import com.bugbusters.backend.auth.Usuario;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.repository.CampanhaRepository;
@@ -466,7 +468,13 @@ public class SimulacaoCenariosService {
         if (campanha != null) simulacao.setCampanha(campanha);
         simulacao.setStatusAceite(StatusAceiteSimulacao.ACEITA);
         simulacao.setAceitoEm(agora);
-        simulacao.setAceitoPor(request != null && request.aceitoPor() != null && !request.aceitoPor().isBlank() ? request.aceitoPor() : "gestor");
+        Object principal = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getPrincipal() : null;
+        // A rota HTTP exige sessão autenticada. O fallback é exclusivo de chamadas
+        // internas legadas e preserva a compatibilidade dos fluxos assíncronos/testes.
+        simulacao.setAceitoPor(principal instanceof Usuario usuario ? usuario.getEmail()
+                : (request != null && request.aceitoPor() != null && !request.aceitoPor().isBlank()
+                        ? request.aceitoPor() : "SISTEMA"));
         simulacao.setMotivoAceite(request != null ? request.motivo() : null);
         simulacao.setInvalidadoEm(null);
         simulacao.setMotivoInvalidacao(null);

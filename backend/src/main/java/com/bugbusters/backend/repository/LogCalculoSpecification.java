@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 
 /**
  * Especificação JPA dinâmica para filtros combináveis de logs imutáveis de cálculo.
@@ -71,6 +72,10 @@ public class LogCalculoSpecification {
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    public static Specification<LogCalculoImutavel> perfisExecutores(Collection<String> perfis) {
+        return (root, query, cb) -> perfis == null ? cb.conjunction() : root.get("perfilExecutor").in(perfis);
     }
 
     public static Specification<LogCalculoImutavel> comFiltros(

@@ -8,6 +8,9 @@ spring:
 ai:
   service:
     url: ${AI_SERVICE_URL:http://host.docker.internal:8000}
+    auth:
+      header: ${AI_SERVICE_AUTH_HEADER:X-Internal-Api-Key}
+      key: ${AI_SERVICE_API_KEY:}
     endpoint: /api/v1/interpretar
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT:3000}
     # O agente da Sprint 2 pode fazer várias chamadas ao LLM e consultas ao backend;
@@ -80,3 +83,5 @@ spring:
 ai:
   service:
     url: http://localhost:8000
+    auth:
+      key: test-internal-ai-key
