@@ -64,6 +64,51 @@ public class AuthService {
         return UsuarioResponse.de(u);
     }
 
+    @Transactional(readOnly = true)
+    public UsuarioResponse buscar(UUID id) {
+        return UsuarioResponse.de(obter(id));
+    }
+
+    @Transactional
+    public UsuarioResponse atualizar(UUID id, AtualizarUsuarioRequest request) {
+        Usuario usuario = obter(id);
+        validarEmailDisponivel(request.email(), id);
+        usuario.setNome(request.nome());
+        usuario.setEmail(request.email());
+        return UsuarioResponse.de(usuario);
+    }
+
+    @Transactional
+    public UsuarioResponse alterarPerfil(UUID id, PapelUsuario papel) {
+        Usuario usuario = obter(id);
+        usuario.setPapel(papel);
+        return UsuarioResponse.de(usuario);
+    }
+
+    @Transactional
+    public void excluirLogicamente(UUID id) {
+        alterarAtivacao(id, false);
+    }
+
+    @Transactional
+    public UsuarioResponse atualizarMeuPerfil(Usuario atual, AtualizarUsuarioRequest request) {
+        Usuario usuario = obter(atual.getId());
+        validarEmailDisponivel(request.email(), usuario.getId());
+        usuario.setNome(request.nome());
+        usuario.setEmail(request.email());
+        return UsuarioResponse.de(usuario);
+    }
+
+    @Transactional
+    public void alterarMinhaSenha(Usuario atual, AlterarSenhaRequest request) {
+        Usuario usuario = obter(atual.getId());
+        if (!encoder.matches(request.senhaAtual(), usuario.getSenhaHash()))
+            throw new BusinessException("Senha atual inválida.");
+        usuario.setSenhaHash(encoder.encode(request.novaSenha()));
+        // Uma senha nova revoga outros acessos sem interromper a chamada atual.
+        sessoes.findByUsuarioIdAndEncerradaEmIsNull(usuario.getId()).forEach(SessaoUsuario::encerrar);
+    }
+
     public List<UsuarioResponse> listar() {
         return usuarios.findAll().stream().map(UsuarioResponse::de).toList();
     }
@@ -80,6 +125,20 @@ public class AuthService {
     @Transactional
     public void logout(String token) {
         sessoes.findByTokenHash(hash(token)).ifPresent(SessaoUsuario::encerrar);
+    }
+
+    public List<PerfilResponse> perfis() {
+        return Arrays.stream(PapelUsuario.values())
+                .map(p -> new PerfilResponse(p, p.getNome(), PerfilPermissoes.permissoes(p))).toList();
+    }
+
+    private Usuario obter(UUID id) {
+        return usuarios.findById(id).orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado."));
+    }
+
+    private void validarEmailDisponivel(String email, UUID idAtual) {
+        usuarios.findByEmailIgnoreCase(email).filter(u -> !u.getId().equals(idAtual))
+                .ifPresent(u -> { throw new ResourceConflictException("E-mail já cadastrado."); });
     }
 
     private static String hash(String value) {

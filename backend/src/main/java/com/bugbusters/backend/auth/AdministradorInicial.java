@@ -25,7 +25,7 @@ public class AdministradorInicial implements CommandLineRunner {
             u.setNome("Administrador inicial");
             u.setEmail(email);
             u.setSenhaHash(encoder.encode(senha));
-            u.setPapel(PapelUsuario.ADMIN);
+            u.setPapel(PapelUsuario.ADMINISTRADOR);
             repo.save(u);
         }
     }

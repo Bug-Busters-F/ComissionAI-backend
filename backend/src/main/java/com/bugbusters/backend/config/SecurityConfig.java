@@ -1,7 +1,9 @@
 package com.bugbusters.backend.config;
 
 import com.bugbusters.backend.auth.AuthFilter;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -13,18 +15,49 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
-    @Bean
-    PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
+    private static final String ADMIN = "ADMINISTRADOR";
+    private static final String NEGOCIOS = "ANALISTA_NEGOCIOS";
+    private static final String GERENTE = "GERENTE_VENDAS";
+    private static final String CODIGO = "ANALISTA_CODIGO";
+    private static final String AUDITOR = "AUDITOR";
+    private static final String[] TODOS = {ADMIN, NEGOCIOS, GERENTE, CODIGO, AUDITOR};
+
+    @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
 
     @Bean
-    SecurityFilterChain security(HttpSecurity h, AuthFilter f) throws Exception {
-        return h.csrf(c -> c.disable()).sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(a -> a
-                        .requestMatchers("/api/v1/auth/login", "/swagger-ui/**", "/v3/api-docs/**", "/h2-console/**")
-                        .permitAll().requestMatchers("/api/v1/usuarios/**").hasRole("ADMIN").anyRequest()
-                        .authenticated())
-                .addFilterBefore(f, UsernamePasswordAuthenticationFilter.class).build();
+    SecurityFilterChain security(HttpSecurity http, AuthFilter filter) throws Exception {
+        return http.csrf(csrf -> csrf.disable())
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/v1/auth/login", "/swagger-ui/**", "/v3/api-docs/**", "/h2-console/**").permitAll()
+                        .requestMatchers("/api/v1/usuarios/**").hasRole(ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/**").hasAnyRole(TODOS)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/auth/me/**").hasAnyRole(TODOS)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").hasAnyRole(TODOS)
+                        // Logs: somente administrador, gerente e auditor.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/logs-calculo/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
+                        // Importação/correção de bases e cálculos definitivos: administrador ou gerente.
+                        .requestMatchers("/api/v1/imports/**", "/api/v1/vendas/**", "/api/v1/matriculas/**",
+                                "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE)
+                        // Consulta de negócio é permitida a todos os perfis autenticados.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole(TODOS)
+                        // Etapa 4 e cálculo de competência: gerente publica e solicita cálculo.
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/estado", "/api/v1/campanhas/*/progresso")
+                            .hasAnyRole(ADMIN, GERENTE)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/ativar", "/api/v1/comissoes/calcular/**",
+                                "/api/v1/execucoes/**", "/api/v1/comissoes/fechamento/**").hasAnyRole(ADMIN, GERENTE)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/simulacoes/*/aceite").hasAnyRole(ADMIN, GERENTE)
+                        // Etapa 1 e 3: analista de negócios cria/ajusta campanha e simula.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/**", "/api/v1/simulacoes/**",
+                                "/api/v1/referencias/**", "/api/v1/regras/**").hasAnyRole(ADMIN, NEGOCIOS)
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/**").hasAnyRole(ADMIN, NEGOCIOS)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/campanhas/**", "/api/v1/regras/**").hasAnyRole(ADMIN, NEGOCIOS)
+                        // Etapa 2: revisão do programa e artefatos de código.
+                        .requestMatchers("/api/v1/interpretador/**").hasAnyRole(ADMIN, CODIGO, NEGOCIOS)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/consultas-ia/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO)
+                        .requestMatchers("/api/v1/**").hasRole(ADMIN)
+                        .anyRequest().denyAll())
+                .addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class)
+                .build();
     }
 }

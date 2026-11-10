@@ -5,6 +5,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import com.bugbusters.backend.auth.Usuario;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
  * Entidade de Log Imutável de Auditoria de Cálculo Financeiro (BUG-23 e BUG-24).
@@ -75,6 +77,9 @@ public class LogCalculoImutavel {
     @Column(name = "usuario_executor", length = 100, updatable = false)
     private String usuarioExecutor;
 
+    @Column(name = "perfil_executor", length = 30, updatable = false)
+    private String perfilExecutor;
+
     @Column(name = "tipo_venda", nullable = false, length = 50, updatable = false)
     private String tipoVenda = "INFORMADA";
 
@@ -102,6 +107,17 @@ public class LogCalculoImutavel {
         }
         if (this.tipoVenda == null || this.tipoVenda.isBlank()) {
             this.tipoVenda = "INFORMADA";
+        }
+        Object principal = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getPrincipal() : null;
+        if (principal instanceof Usuario usuario) {
+            this.usuarioExecutor = usuario.getEmail();
+            this.perfilExecutor = usuario.getPapel().name();
+        } else {
+            if (this.usuarioExecutor == null || this.usuarioExecutor.isBlank()) {
+                this.usuarioExecutor = "SISTEMA";
+            }
+            this.perfilExecutor = "SISTEMA";
         }
     }
 
@@ -206,6 +222,8 @@ public class LogCalculoImutavel {
     public void setOrigemExecucao(String origemExecucao) { this.origemExecucao = origemExecucao; }
 
     public String getUsuarioExecutor() { return usuarioExecutor; }
+
+    public String getPerfilExecutor() { return perfilExecutor; }
 
     public void setUsuarioExecutor(String usuarioExecutor) { this.usuarioExecutor = usuarioExecutor; }
 
