@@ -22,6 +22,8 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       AI_SERVICE_URL: http://host.docker.internal:8000
+      AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:-}
+      AI_SERVICE_AUTH_HEADER: ${AI_SERVICE_AUTH_HEADER:-X-Internal-Api-Key}
     ports:
       - "8080:8080"
     depends_on:

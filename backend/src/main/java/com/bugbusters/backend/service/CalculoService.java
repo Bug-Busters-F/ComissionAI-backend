@@ -28,8 +28,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
+import com.bugbusters.backend.auth.PapelUsuario;
+import com.bugbusters.backend.auth.Usuario;
 import com.bugbusters.backend.dto.calculo.CalculoComissaoResponse;
 import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoImpedimentoDTO;
@@ -1052,6 +1055,7 @@ public class CalculoService {
         Specification<LogCalculoImutavel> spec = LogCalculoSpecification.comFiltros(
                 idVenda, matricula, idRegra, dataInicio, dataFim, tipoVenda, idLoteOrigem
         );
+        spec = spec.and(LogCalculoSpecification.perfisExecutores(perfisPermitidosDaSessao()));
 
         Page<LogCalculoImutavel> page = logCalculoRepository.findAll(spec, pageable);
         return page.map(LogCalculoResponse::fromEntity);
@@ -1082,6 +1086,7 @@ public class CalculoService {
         LogCalculoImutavel log = logCalculoRepository.findById(id)
                 .or(() -> logCalculoRepository.findByProtocolo(id).stream().findFirst())
                 .orElseThrow(() -> new ResourceNotFoundException("Log de cálculo não encontrado com o identificador ou protocolo: " + id));
+        validarAcessoAoLog(log);
         return LogCalculoResponse.fromEntity(log);
     }
 
@@ -1091,10 +1096,43 @@ public class CalculoService {
      */
     @Transactional(readOnly = true)
     public List<LogCalculoResponse> listarLogs() {
-        return logCalculoRepository.findAllByOrderByExecutadoEmDesc()
+        if (!haUsuarioAutenticado()) {
+            return logCalculoRepository.findAllByOrderByExecutadoEmDesc()
+                    .stream()
+                    .map(LogCalculoResponse::fromEntity)
+                    .toList();
+        }
+        return logCalculoRepository.findAll(LogCalculoSpecification.perfisExecutores(perfisPermitidosDaSessao()))
                 .stream()
                 .map(LogCalculoResponse::fromEntity)
                 .toList();
+    }
+
+    private boolean haUsuarioAutenticado() {
+        Object principal = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getPrincipal() : null;
+        return principal instanceof Usuario;
+    }
+
+    private List<String> perfisPermitidosDaSessao() {
+        Object principal = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getPrincipal() : null;
+        // Chamadas HTTP já são protegidas pelo SecurityFilterChain. Sem principal,
+        // trata-se de execução interna (job/teste), que não deve ser bloqueada aqui.
+        if (!(principal instanceof Usuario usuario)) return null;
+        return switch (usuario.getPapel()) {
+            case ADMINISTRADOR -> null;
+            case GERENTE_VENDAS -> List.of(PapelUsuario.ANALISTA_NEGOCIOS.name(), PapelUsuario.ANALISTA_CODIGO.name());
+            case AUDITOR -> List.of(PapelUsuario.ANALISTA_NEGOCIOS.name(), PapelUsuario.ANALISTA_CODIGO.name(), PapelUsuario.GERENTE_VENDAS.name());
+            default -> throw new BusinessException("Profile is not permitted to view logs.");
+        };
+    }
+
+    private void validarAcessoAoLog(LogCalculoImutavel log) {
+        List<String> perfis = perfisPermitidosDaSessao();
+        if (perfis != null && !perfis.contains(log.getPerfilExecutor())) {
+            throw new ResourceNotFoundException("Log not found.");
+        }
     }
 
     private String montarSnapshotParametros(
