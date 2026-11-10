@@ -9,6 +9,8 @@ import java.util.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -29,11 +31,11 @@ public class AuthService {
     @Transactional
     public LoginResponse login(LoginRequest req) {
         Usuario u = usuarios.findByEmailIgnoreCase(req.email())
-                .orElseThrow(() -> new BusinessException("E-mail ou senha inválidos."));
+                .orElseThrow(() -> new BadCredentialsException("E-mail ou senha inválidos."));
         if (!u.isAtivo())
-            throw new BusinessException("Usuário desativado. Contate um administrador.");
+            throw new BadCredentialsException("Usuário desativado. Contate um administrador.");
         if (!encoder.matches(req.senha(), u.getSenhaHash()))
-            throw new BusinessException("E-mail ou senha inválidos.");
+            throw new BadCredentialsException("E-mail ou senha inválidos.");
         String token = UUID.randomUUID() + "." + UUID.randomUUID();
         SessaoUsuario s = new SessaoUsuario();
         s.setUsuario(u);
@@ -57,7 +59,9 @@ public class AuthService {
 
     @Transactional
     public UsuarioResponse alterarAtivacao(UUID id, boolean ativo) {
-        Usuario u = usuarios.findById(id).orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado."));
+        if (!ativo) usuarios.bloquearAdministradores();
+        Usuario u = obter(id);
+        if (!ativo) validarRetiradaDeAcesso(u);
         u.setAtivo(ativo);
         if (!ativo)
             sessoes.findByUsuarioIdAndEncerradaEmIsNull(id).forEach(SessaoUsuario::encerrar);
@@ -80,7 +84,12 @@ public class AuthService {
 
     @Transactional
     public UsuarioResponse alterarPerfil(UUID id, PapelUsuario papel) {
+        usuarios.bloquearAdministradores();
         Usuario usuario = obter(id);
+        if (usuario.getPapel() != papel) {
+            validarPropriaConta(usuario);
+            if (papel != PapelUsuario.ADMINISTRADOR) validarUltimoAdministrador(usuario);
+        }
         usuario.setPapel(papel);
         return UsuarioResponse.de(usuario);
     }
@@ -116,9 +125,9 @@ public class AuthService {
     @Transactional(readOnly = true)
     public Usuario usuarioDaSessao(String token) {
         SessaoUsuario s = sessoes.findByTokenHash(hash(token))
-                .orElseThrow(() -> new BusinessException("Sessão inválida."));
+                .orElseThrow(() -> new BadCredentialsException("Sessão inválida."));
         if (s.getEncerradaEm() != null || !s.getExpiraEm().isAfter(OffsetDateTime.now()) || !s.getUsuario().isAtivo())
-            throw new BusinessException("Sessão expirada ou encerrada.");
+            throw new BadCredentialsException("Sessão expirada ou encerrada.");
         return s.getUsuario();
     }
 
@@ -130,6 +139,26 @@ public class AuthService {
     public List<PerfilResponse> perfis() {
         return Arrays.stream(PapelUsuario.values())
                 .map(p -> new PerfilResponse(p, p.getNome(), PerfilPermissoes.permissoes(p))).toList();
+    }
+
+    private void validarRetiradaDeAcesso(Usuario usuario) {
+        validarPropriaConta(usuario);
+        validarUltimoAdministrador(usuario);
+    }
+
+    private void validarPropriaConta(Usuario usuario) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof Usuario atual
+                && atual.getId().equals(usuario.getId())) {
+            throw new ResourceConflictException("Não é permitido desativar ou alterar o perfil da própria conta.");
+        }
+    }
+
+    private void validarUltimoAdministrador(Usuario usuario) {
+        if (usuario.isAtivo() && usuario.getPapel() == PapelUsuario.ADMINISTRADOR
+                && usuarios.countByPapelAndAtivoTrue(PapelUsuario.ADMINISTRADOR) <= 1) {
+            throw new ResourceConflictException("Mantenha pelo menos um administrador ativo.");
+        }
     }
 
     private Usuario obter(UUID id) {

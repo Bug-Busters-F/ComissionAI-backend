@@ -28,33 +28,47 @@ public class SecurityConfig {
     SecurityFilterChain security(HttpSecurity http, AuthFilter filter) throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(errors -> errors
+                        .authenticationEntryPoint((request, response, exception) ->
+                                com.bugbusters.backend.auth.SecurityErrors.write(response, request, 401,
+                                        "Sessão inválida ou expirada. Entre novamente."))
+                        .accessDeniedHandler((request, response, exception) ->
+                                com.bugbusters.backend.auth.SecurityErrors.write(response, request, 403,
+                                        "Seu perfil não tem permissão para esta operação.")))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/auth/login", "/swagger-ui/**", "/v3/api-docs/**", "/h2-console/**").permitAll()
                         .requestMatchers("/api/v1/usuarios/**").hasRole(ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/**").hasAnyRole(TODOS)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/auth/me/**").hasAnyRole(TODOS)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").hasAnyRole(TODOS)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/consultas-ia/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE, AUDITOR, "SERVICO_IA")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/consultas-ia/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE, AUDITOR, "SERVICO_IA")
+                        .requestMatchers("/api/v1/consultas-ia/**").denyAll()
                         // Logs: somente administrador, gerente e auditor.
                         .requestMatchers(HttpMethod.GET, "/api/v1/logs-calculo/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
+                        // Auditor consulta as bases; nenhuma escrita é liberada por esta regra.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/imports/**", "/api/v1/vendas/**", "/api/v1/matriculas/**",
+                                "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
                         // Importação/correção de bases e cálculos definitivos: administrador ou gerente.
                         .requestMatchers("/api/v1/imports/**", "/api/v1/vendas/**", "/api/v1/matriculas/**",
                                 "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE)
                         // Consulta de negócio é permitida a todos os perfis autenticados.
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole(TODOS)
                         // Etapa 4 e cálculo de competência: gerente publica e solicita cálculo.
-                        .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/estado", "/api/v1/campanhas/*/progresso")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/estado")
                             .hasAnyRole(ADMIN, GERENTE)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/progresso").hasAnyRole(ADMIN, GERENTE, NEGOCIOS, CODIGO)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/ativar", "/api/v1/comissoes/calcular/**",
                                 "/api/v1/execucoes/**", "/api/v1/comissoes/fechamento/**").hasAnyRole(ADMIN, GERENTE)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/simulacoes/*/aceite").hasAnyRole(ADMIN, GERENTE)
+                        // O aceite da simulação pertence à etapa 3; publicação continua gerencial.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/simulacoes/*/aceite").hasAnyRole(ADMIN, NEGOCIOS, GERENTE)
                         // Etapa 1 e 3: analista de negócios cria/ajusta campanha e simula.
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/**", "/api/v1/simulacoes/**",
                                 "/api/v1/referencias/**", "/api/v1/regras/**").hasAnyRole(ADMIN, NEGOCIOS)
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/**").hasAnyRole(ADMIN, NEGOCIOS)
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO)
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/campanhas/**", "/api/v1/regras/**").hasAnyRole(ADMIN, NEGOCIOS)
                         // Etapa 2: revisão do programa e artefatos de código.
                         .requestMatchers("/api/v1/interpretador/**").hasAnyRole(ADMIN, CODIGO, NEGOCIOS)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/consultas-ia/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO)
                         .requestMatchers("/api/v1/**").hasRole(ADMIN)
                         .anyRequest().denyAll())
                 .addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class)
