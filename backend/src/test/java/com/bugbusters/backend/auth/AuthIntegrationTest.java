@@ -116,6 +116,18 @@ class AuthIntegrationTest {
         mvc.perform(post("/api/v1/campanhas").header("Authorization", "Bearer " + t)
                 .contentType("application/json").content("{}" )).andExpect(status().isForbidden());
     }
+    @Test void auditorConsultaAlertasMasNaoPodeReprocessar() throws Exception {
+        String auditor = token(user("auditor-alertas@teste.local", PapelUsuario.AUDITOR));
+        mvc.perform(get("/api/v1/alertas-estatisticos").header("Authorization", "Bearer " + auditor))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/alertas-estatisticos/reprocessar").header("Authorization", "Bearer " + auditor)
+                .contentType("application/json").content("{\"lotePreparacaoId\":\"00000000-0000-0000-0000-000000000001\"}"))
+                .andExpect(status().isForbidden());
+        String gerente = token(user("gerente-alertas@teste.local", PapelUsuario.GERENTE_VENDAS));
+        mvc.perform(post("/api/v1/alertas-estatisticos/reprocessar").header("Authorization", "Bearer " + gerente)
+                .contentType("application/json").content("{\"lotePreparacaoId\":\"00000000-0000-0000-0000-000000000001\"}"))
+                .andExpect(status().isNotFound());
+    }
     @Test void codigoSalvaENegociosRegistraProgressoSemPublicar() throws Exception {
         for (PapelUsuario papel : new PapelUsuario[]{PapelUsuario.ANALISTA_CODIGO, PapelUsuario.ANALISTA_NEGOCIOS}) {
             String t = token(user(papel.name() + "@teste.local", papel));
