@@ -33,13 +33,16 @@ import com.bugbusters.backend.repository.*;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
 import com.bugbusters.backend.service.RelatorioFechamentoService;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.bugbusters.backend.service.pendencia.AceitePendenciaProvider;
 import com.bugbusters.backend.service.pendencia.CampanhaAceitePendenciaProvider;
 import com.bugbusters.backend.service.pendencia.StatusAceitePendenciaDTO;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
+import com.bugbusters.backend.support.PythonSandboxMockSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,6 +56,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
@@ -89,8 +93,11 @@ class Pr34ReviewFixesIntegrationTest {
 
     @Autowired private AceitePendenciaProvider aceitePendenciaProvider;
     @Autowired private RelatorioFechamentoService relatorioFechamentoService;
+    @Autowired private RestClient.Builder aiRestClientBuilder;
+    @Autowired private AiServiceClient aiServiceClient;
 
     private MockMvc secureMvc;
+    private PythonSandboxMockSupport sandboxMock;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     private Brand brand;
@@ -103,6 +110,8 @@ class Pr34ReviewFixesIntegrationTest {
         secureMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
+        sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarExecucaoPadrao();
 
         brand = brandRepository.findByCode(10).orElseGet(() -> {
             Brand b = new Brand();
@@ -150,6 +159,13 @@ class Pr34ReviewFixesIntegrationTest {
         sale.setSaleDate(LocalDate.of(2026, 7, 15));
         sale.setValue(new BigDecimal("10000.00"));
         saleRepository.save(sale);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sandboxMock != null) {
+            sandboxMock.restaurar();
+        }
     }
 
     private String loginComo(String email, PapelUsuario papel) {
@@ -304,7 +320,7 @@ class Pr34ReviewFixesIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new SimulacaoPythonRequest("2026-07", null, 50, 0, false, false))))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.executadoViaPython").value(false))
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
                 .andReturn();
         UUID simId = UUID.fromString(objectMapper.readTree(simRes.getResponse().getContentAsString()).get("id").asText());
 
@@ -335,7 +351,7 @@ class Pr34ReviewFixesIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new CalculoDefinitivoCampanhaRequest("2026-07", null, null, "forjado", "Liquidação", false))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.executadoViaPython").value(false))
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
                 .andExpect(jsonPath("$.executadoPor").value("gerente.pr34@teste.local"));
 
         secureMvc.perform(get("/api/v1/campanhas/{id}/apuracao-definitiva/relatorio", campanhaId)

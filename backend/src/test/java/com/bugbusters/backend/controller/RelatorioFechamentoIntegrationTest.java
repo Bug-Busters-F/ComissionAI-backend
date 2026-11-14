@@ -28,10 +28,13 @@ import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.repository.*;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
+import com.bugbusters.backend.support.PythonSandboxMockSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,6 +45,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
@@ -105,7 +109,14 @@ public class RelatorioFechamentoIntegrationTest {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
 
+    @Autowired
+    private RestClient.Builder aiRestClientBuilder;
+
+    @Autowired
+    private AiServiceClient aiServiceClient;
+
     private MockMvc mockMvc;
+    private PythonSandboxMockSupport sandboxMock;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     private Brand testBrand;
@@ -116,6 +127,8 @@ public class RelatorioFechamentoIntegrationTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+        sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarExecucaoPadrao();
 
         cleanupJdbc.update("DELETE FROM tb_log_calculo_imutavel");
         cleanupJdbc.update("DELETE FROM tb_resultado_calculo");
@@ -165,6 +178,13 @@ public class RelatorioFechamentoIntegrationTest {
                     bc.setReferenceMonth(mesRef);
                     return baseComissRepository.save(bc);
                 });
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sandboxMock != null) {
+            sandboxMock.restaurar();
+        }
     }
 
     @Test

@@ -19,7 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 @Service
 public class SimulacaoPythonOrquestradorService {
@@ -74,10 +78,11 @@ public class SimulacaoPythonOrquestradorService {
             throw new BusinessException("A versão da campanha está devolvida e precisa ser ajustada antes de executar uma nova simulação.");
         }
 
-        // 1. Resolve o programa Python homologado
+        // 1. Resolve e valida integridade SHA-256 do programa Python homologado
         CampanhaProgramaPython programa = resolverProgramaPython(campanhaId, versao, request.versaoPrograma());
-        if (programa == null) {
-            throw new BusinessException("Nenhum programa Python executável foi encontrado para esta campanha.");
+        CampanhaProgramaPythonService.validarIntegridadePrograma(programa);
+        if (aiServiceClient == null) {
+            throw new BusinessException("Cliente do serviço de IA não configurado para executar o programa Python no sandbox.");
         }
 
         int etapaOrigem = versao.getUltimaEtapa();
@@ -112,22 +117,60 @@ public class SimulacaoPythonOrquestradorService {
                 request.apenasComMudancaFaixa()
         );
 
-        // 4. Executa e persiste a simulação base
-        SimulacaoCenariosResponse resp = simulacaoCenariosService.simularEPersistir(cenariosRequest);
+        // 4. Executa os cálculos no sandbox Python e persiste a simulação
+        AtomicReference<AiServiceClient.ExecutarProgramaPythonResponse> pyRespRef = new AtomicReference<>();
+        SimulacaoCenariosResponse resp = simulacaoCenariosService.simularEPersistirComMotorExterno(
+                cenariosRequest,
+                itens -> {
+                    List<Map<String, Object>> payloadItens = new ArrayList<>(itens.size());
+                    for (SimulacaoCenariosService.VendaCenarioParaCalculo item : itens) {
+                        Map<String, Object> entry = new LinkedHashMap<>();
+                        entry.put("id", item.itemId());
+                        entry.put("venda", CampanhaProgramaPythonService.montarVendaParaPython(
+                                item.sale(), item.valorEscalado(), item.taxaBaseContratual(), true
+                        ));
+                        Map<String, Object> ctxItem = new LinkedHashMap<>();
+                        ctxItem.put("cenario", item.nomeCenario());
+                        ctxItem.put("fator", item.fatorEscala().doubleValue());
+                        entry.put("contexto", ctxItem);
+                        payloadItens.add(entry);
+                    }
 
-        // 5. Enriquece a simulação persistida com os metadados do programa validado (motor Java atual)
+                    Map<String, Object> ctxRaiz = new LinkedHashMap<>();
+                    ctxRaiz.put("modo", "SIMULACAO");
+                    ctxRaiz.put("campanhaId", campanhaId);
+                    ctxRaiz.put("versaoCampanha", versao.getNumero());
+                    ctxRaiz.put("versaoProgramaPython", programa.getVersaoPrograma());
+                    ctxRaiz.put("competencia", request.competencia());
+
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("codigoFonte", programa.getCodigoFonte());
+                    payload.put("contexto", ctxRaiz);
+                    payload.put("itens", payloadItens);
+
+                    AiServiceClient.ExecutarProgramaPythonResponse pyResp = aiServiceClient.executarProgramaPython(payload);
+                    pyRespRef.set(pyResp);
+                    return pyResp.resultados().stream()
+                            .collect(Collectors.toMap(
+                                    AiServiceClient.ItemExecucaoPython::id,
+                                    java.util.function.Function.identity(),
+                                    (a, b) -> b
+                            ));
+                }
+        );
+
+        AiServiceClient.ExecutarProgramaPythonResponse pyResp = pyRespRef.get();
+        String saidaRaw = serializarSaidaPython(programa, pyResp);
+
+        // 5. Enriquece a simulação persistida com os metadados da execução real no sandbox Python
         if (resp.id() != null) {
             Simulacao sim = simulacaoRepository.findById(resp.id()).orElse(null);
             if (sim != null) {
-                sim.setExecutadoViaPython(false);
+                sim.setExecutadoViaPython(true);
                 sim.setCodigoPythonExecutado(programa.getCodigoFonte());
                 sim.setChecksumPython(programa.getChecksumSha256());
                 sim.setVersaoProgramaPython(programa.getVersaoPrograma());
-                sim.setSaidaPythonRaw(String.format(
-                        "{\"motor\": \"JAVA_CENARIOS_ENGINE\", \"sandboxConectado\": false, \"versaoProgramaValidado\": %d, \"checksum\": \"%s\"}",
-                        programa.getVersaoPrograma(),
-                        programa.getChecksumSha256() != null ? programa.getChecksumSha256() : ""
-                ));
+                sim.setSaidaPythonRaw(saidaRaw);
                 simulacaoRepository.save(sim);
             }
         }
@@ -154,7 +197,7 @@ public class SimulacaoPythonOrquestradorService {
                     estadoDestino,
                     TipoAcaoEsteira.AVANCO_ETAPA,
                     ator,
-                    String.format("Simulação orquestrada no motor Java com programa Python validado (v%d - %s) para competência %s",
+                    String.format("Simulação executada no sandbox com programa Python homologado (v%d - %s) para competência %s",
                             programa.getVersaoPrograma(),
                             programa.getChecksumSha256() != null && programa.getChecksumSha256().length() >= 8
                                     ? programa.getChecksumSha256().substring(0, 8) : "hash",
@@ -169,17 +212,17 @@ public class SimulacaoPythonOrquestradorService {
                     TipoEntidadeAuditoria.SIMULACAO,
                     String.valueOf(campanhaId),
                     versao.getNumero(),
-                    String.format("Simulação orquestrada no motor Java (programa validado v%d) com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
+                    String.format("Simulação executada no sandbox Python (programa v%d) com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
                             programa.getVersaoPrograma(), resp.protocolo(), resp.totalVendasRecortadas(), resp.valorTotalRecortado()),
-                    String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"vendas\": %d, \"motor\": \"JAVA_CENARIOS_ENGINE\"}",
+                    String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"vendas\": %d, \"motor\": \"PYTHON_SANDBOX\"}",
                             resp.protocolo(), request.competencia(), resp.totalVendasRecortadas())
             );
         }
 
-        log.info("Simulação orquestrada no motor Java (programa validado v{}) concluída e persistida para campanha {} versão {}. Protocolo: {}",
+        log.info("Simulação executada no sandbox Python (programa v{}) concluída e persistida para campanha {} versão {}. Protocolo: {}",
                 programa.getVersaoPrograma(), campanhaId, versao.getNumero(), resp.protocolo());
 
-        // 8. Retorna a resposta completa enriquecida com os metadados do programa validado
+        // 8. Retorna a resposta completa com os metadados da execução Python
         return new SimulacaoCenariosResponse(
                 resp.id(),
                 resp.protocolo(),
@@ -201,10 +244,25 @@ public class SimulacaoPythonOrquestradorService {
                 resp.avisosGerais(),
                 resp.memoriaCalculoConsolidada(),
                 resp.enquadramentoOrcamento(),
-                false,
+                true,
                 programa.getVersaoPrograma(),
                 programa.getChecksumSha256()
         );
+    }
+
+    private String serializarSaidaPython(CampanhaProgramaPython programa, AiServiceClient.ExecutarProgramaPythonResponse pyResp) {
+        try {
+            Map<String, Object> resumo = new LinkedHashMap<>();
+            resumo.put("motor", pyResp != null ? pyResp.motor() : "PYTHON_SANDBOX");
+            resumo.put("sandboxConectado", true);
+            resumo.put("versaoPrograma", programa.getVersaoPrograma());
+            resumo.put("checksum", programa.getChecksumSha256());
+            resumo.put("totalItens", pyResp != null ? pyResp.totalItens() : 0);
+            resumo.put("sucesso", pyResp == null || pyResp.sucesso());
+            return OBJECT_MAPPER.writeValueAsString(resumo);
+        } catch (Exception e) {
+            return "{\"motor\":\"PYTHON_SANDBOX\",\"sandboxConectado\":true}";
+        }
     }
 
     private CampanhaProgramaPython resolverProgramaPython(Long campanhaId, CampanhaVersao versao, Integer versaoDesejada) {

@@ -11,6 +11,8 @@ import com.bugbusters.backend.repository.CampanhaProgramaPythonRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.registration.Registration;
+import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -376,7 +378,7 @@ public class CampanhaProgramaPythonService {
         py.append("    \"\"\"Calcula a comissão para um registro de venda segundo as regras da campanha.\"\"\"\n");
         py.append("    data_raw = venda.get('data_venda') if venda.get('data_venda') is not None else venda.get('dataVenda', '')\n");
         py.append("    data_venda = str(data_raw)[:10]\n");
-        py.append("    if not ('").append(versao.getDataInicio()).append("' <= data_venda <= '").append(versao.getDataFim()).append("'):\n");
+        py.append("    if not venda.get('ignorar_vigencia') and not ('").append(versao.getDataInicio()).append("' <= data_venda <= '").append(versao.getDataFim()).append("'):\n");
         py.append("        return None\n\n");
         py.append("    valor_raw = venda.get('valor_venda')\n");
         py.append("    if valor_raw is None:\n");
@@ -505,6 +507,55 @@ public class CampanhaProgramaPythonService {
                     .replace("\r", "\\r");
             return "\"" + escaped + "\"";
         }
+    }
+
+    /**
+     * Garante antes de executar que o código-fonte do programa aprovado não sofreu adulteração
+     * comparando seu SHA-256 atual com o hash homologado na revisão técnica.
+     */
+    public static void validarIntegridadePrograma(CampanhaProgramaPython programa) {
+        if (programa == null || programa.getCodigoFonte() == null || programa.getCodigoFonte().isBlank()) {
+            throw new BusinessException("O código-fonte do programa Python aprovado está vazio ou ausente.");
+        }
+        String checksumAtual = CampanhaProgramaPython.calcularChecksum(programa.getCodigoFonte());
+        if (programa.getChecksumSha256() == null
+                || !checksumAtual.equalsIgnoreCase(programa.getChecksumSha256().trim())) {
+            throw new BusinessException(
+                    "Divergência de integridade SHA-256 detectada no programa Python v"
+                            + programa.getVersaoPrograma() + ". Reapprove o código antes de executar."
+            );
+        }
+    }
+
+    /**
+     * Serializa uma venda para o dicionário consumido por `calcular_comissao(venda, contexto)`.
+     */
+    public static Map<String, Object> montarVendaParaPython(
+            Sale sale,
+            BigDecimal valorVenda,
+            BigDecimal taxaBaseContratual,
+            boolean ignorarVigencia
+    ) {
+        Map<String, Object> venda = new LinkedHashMap<>();
+        venda.put("id_venda", sale != null && sale.getId() != null ? sale.getId().toString() : null);
+        String dataStr = (sale != null && sale.getSaleDate() != null) ? sale.getSaleDate().toString() : "";
+        venda.put("data_venda", dataStr);
+        venda.put("dataVenda", dataStr);
+        double valorNum = valorVenda != null ? valorVenda.doubleValue() : 0.0;
+        venda.put("valor_venda", valorNum);
+        venda.put("valor", valorNum);
+        String canal = (sale != null && sale.getSaleChannel() != null && !sale.getSaleChannel().isBlank())
+                ? sale.getSaleChannel()
+                : "PADRAO";
+        venda.put("canal", canal);
+        venda.put("cod_marca", (sale != null && sale.getBrand() != null) ? sale.getBrand().getCode() : null);
+        venda.put("cod_loja", (sale != null && sale.getStore() != null) ? sale.getStore().getCode() : null);
+        Registration reg = sale != null ? sale.getRegistration() : null;
+        venda.put("cod_cargo", (reg != null && reg.getPosition() != null) ? reg.getPosition().getCode() : null);
+        venda.put("matricula", reg != null ? reg.getRegistration() : null);
+        venda.put("taxa_base", taxaBaseContratual != null ? taxaBaseContratual.doubleValue() : null);
+        venda.put("ignorar_vigencia", ignorarVigencia);
+        return venda;
     }
 }
 

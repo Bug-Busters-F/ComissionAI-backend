@@ -22,20 +22,25 @@ import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.SimulacaoRepository;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.bugbusters.backend.store.StoreRepository;
+import com.bugbusters.backend.support.PythonSandboxMockSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
@@ -83,9 +88,19 @@ class SimulacaoPythonIntegrationTest {
     @Autowired
     private SimulacaoRepository simulacaoRepository;
 
+    @Autowired
+    private RestClient.Builder aiRestClientBuilder;
+
+    @Autowired
+    private AiServiceClient aiServiceClient;
+
+    private PythonSandboxMockSupport sandboxMock;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+        sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarExecucaoPadrao();
 
         Brand brand = brandRepository.findByCode(10).orElseGet(() -> {
             Brand b = new Brand();
@@ -133,6 +148,13 @@ class SimulacaoPythonIntegrationTest {
         sale.setSaleDate(LocalDate.of(2026, 7, 15));
         sale.setValue(new BigDecimal("10000.00"));
         saleRepository.save(sale);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sandboxMock != null) {
+            sandboxMock.restaurar();
+        }
     }
 
     private Long criarCampanhaComRegra() throws Exception {
@@ -209,7 +231,7 @@ class SimulacaoPythonIntegrationTest {
     }
 
     @Test
-    @DisplayName("Deve orquestrar e persistir simulação no motor Java com programa Python validado (BUG-106 / BACK-11)")
+    @DisplayName("Deve executar simulação no sandbox Python com programa homologado (BUG-106 / BACK-11)")
     void deveOrquestrarEPersistirSimulacaoPythonComSucesso() throws Exception {
         Long campanhaId = criarCampanhaComRegra();
         aprovarProgramaPython(campanhaId);
@@ -223,7 +245,7 @@ class SimulacaoPythonIntegrationTest {
                 .andExpect(jsonPath("$.id").isNotEmpty())
                 .andExpect(jsonPath("$.protocolo").isNotEmpty())
                 .andExpect(jsonPath("$.competencia").value("2026-07"))
-                .andExpect(jsonPath("$.executadoViaPython").value(false))
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
                 .andExpect(jsonPath("$.versaoProgramaPython").value(1))
                 .andExpect(jsonPath("$.checksumPython").isNotEmpty())
                 .andExpect(jsonPath("$.totalVendasRecortadas").value(greaterThanOrEqualTo(1)))
@@ -238,10 +260,57 @@ class SimulacaoPythonIntegrationTest {
 
         // Validação da persistência relacional em tb_simulacao
         Simulacao simPersistida = simulacaoRepository.findById(simulacaoId).orElseThrow();
-        assertThat(simPersistida.isExecutadoViaPython()).isFalse();
+        assertThat(simPersistida.isExecutadoViaPython()).isTrue();
         assertThat(simPersistida.getVersaoProgramaPython()).isEqualTo(1);
         assertThat(simPersistida.getChecksumPython()).isNotBlank();
         assertThat(simPersistida.getCodigoPythonExecutado()).contains("def calcular_comissao");
+        assertThat(simPersistida.getSaidaPythonRaw()).contains("PYTHON_SANDBOX");
+    }
+
+    @Test
+    @DisplayName("Deve refletir edição do código Python no resultado da simulação e falhar fechado se sandbox rejeitar")
+    void deveRefletirCodigoPythonEditadoNaSimulacaoEFalharFechadoEmErroSandbox() throws Exception {
+        Long campanhaId = criarCampanhaComRegra();
+        String codigoEditado = """
+                def calcular_comissao(venda, contexto):
+                    taxa = 0.10
+                    return venda.get("valor", 0.0) * taxa
+                """;
+        mockMvc.perform(put("/api/v1/campanhas/{id}/programa-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new com.bugbusters.backend.dto.programapython.AtualizarProgramaPythonRequest(
+                                codigoEditado, "revisor.python", "Sobrescreve taxa para 10% em Python"
+                        ))))
+                .andExpect(status().isOk());
+        aprovarProgramaPython(campanhaId);
+
+        SimulacaoPythonRequest req = new SimulacaoPythonRequest("2026-07", null, 50, 0, false, false);
+        mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
+                .andExpect(jsonPath("$.cenario100.totalComissaoProposta").value(1000.00));
+
+        assertThat(sandboxMock.getCodigosExecutados()).isNotEmpty();
+        assertThat(sandboxMock.getCodigosExecutados().get(sandboxMock.getCodigosExecutados().size() - 1))
+                .contains("taxa = 0.10");
+
+        // Fail-closed quando sandbox rejeita código com erro de validação (422)
+        sandboxMock.restaurar();
+        PythonSandboxMockSupport mockErro = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarErroSandbox(HttpStatus.UNPROCESSABLE_ENTITY, "Import não permitido: os", List.of("Import não permitido: os"));
+        try {
+            mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(req)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message", containsString("sandbox")));
+        } finally {
+            mockErro.restaurar();
+            sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                    .registrarExecucaoPadrao();
+        }
     }
 
     @Test
@@ -274,7 +343,7 @@ class SimulacaoPythonIntegrationTest {
         Campanha c = campanhaRepository.findById(campanhaId).orElseThrow();
         assertThat(c.getSimulacaoAceita()).isNotNull();
         assertThat(c.getSimulacaoAceita().getId()).isEqualTo(simId);
-        assertThat(c.getSimulacaoAceita().isExecutadoViaPython()).isFalse();
+        assertThat(c.getSimulacaoAceita().isExecutadoViaPython()).isTrue();
     }
 
     @Test

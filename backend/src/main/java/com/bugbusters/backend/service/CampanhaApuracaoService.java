@@ -17,6 +17,7 @@ import com.bugbusters.backend.repository.*;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
 import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +69,9 @@ public class CampanhaApuracaoService {
 
     @Autowired(required = false)
     private SnapshotResultadoCalculoRepository snapshotResultadoCalculoRepository;
+
+    @Autowired(required = false)
+    private AiServiceClient aiServiceClient;
 
     @Autowired
     public CampanhaApuracaoService(
@@ -138,6 +142,10 @@ public class CampanhaApuracaoService {
 
         if (programa == null || !programa.isAprovado()) {
             throw new BusinessException("A campanha não possui um programa Python homologado e aprovado tecnicamente para o cálculo definitivo.");
+        }
+        CampanhaProgramaPythonService.validarIntegridadePrograma(programa);
+        if (aiServiceClient == null) {
+            throw new BusinessException("Cliente do serviço de IA não configurado para executar o programa Python na apuração definitiva.");
         }
 
         // 4. Validação de Pendências e Riscos (BUG-102)
@@ -224,8 +232,49 @@ public class CampanhaApuracaoService {
                     .collect(Collectors.toMap(ResultadoCalculo::getIdVenda, java.util.function.Function.identity(), (a, b) -> a));
         }
 
+        List<PreValidacaoVenda> preValidacoes = new ArrayList<>(vendasCampanha.size());
+        List<Map<String, Object>> itensPython = new ArrayList<>();
         for (Sale sale : vendasCampanha) {
-            ItemProcessamentoVenda processamento = processarVenda(sale, regrasRequest, basesComissao, idsPorRegra);
+            PreValidacaoVenda pre = preValidarVenda(sale, basesComissao);
+            preValidacoes.add(pre);
+            if (pre.valida()) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("id", sale.getId().toString());
+                entry.put("venda", CampanhaProgramaPythonService.montarVendaParaPython(
+                        sale, sale.getValue(), pre.taxaBaseContratual(), false
+                ));
+                itensPython.add(entry);
+            }
+        }
+
+        Map<String, Object> ctxRaiz = new LinkedHashMap<>();
+        ctxRaiz.put("modo", "APURACAO");
+        ctxRaiz.put("campanhaId", campanha.getId());
+        ctxRaiz.put("versaoCampanha", versao.getNumero());
+        ctxRaiz.put("versaoProgramaPython", programa.getVersaoPrograma());
+        ctxRaiz.put("competencia", competenciaStr);
+        ctxRaiz.put("dataInicio", dataInicio.toString());
+        ctxRaiz.put("dataFim", dataFim.toString());
+
+        Map<String, Object> payloadPython = new LinkedHashMap<>();
+        payloadPython.put("codigoFonte", programa.getCodigoFonte());
+        payloadPython.put("contexto", ctxRaiz);
+        payloadPython.put("itens", itensPython);
+
+        AiServiceClient.ExecutarProgramaPythonResponse pyResponse = aiServiceClient.executarProgramaPython(payloadPython);
+        Map<String, AiServiceClient.ItemExecucaoPython> resultadosPython = pyResponse.resultados().stream()
+                .collect(Collectors.toMap(
+                        AiServiceClient.ItemExecucaoPython::id,
+                        java.util.function.Function.identity(),
+                        (a, b) -> b
+                ));
+
+        for (PreValidacaoVenda pre : preValidacoes) {
+            Sale sale = pre.sale();
+            ItemProcessamentoVenda processamento = montarProcessamentoComPython(
+                    pre,
+                    resultadosPython.get(sale.getId() != null ? sale.getId().toString() : null)
+            );
 
             if (!processamento.valida()) {
                 String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
@@ -357,7 +406,7 @@ public class CampanhaApuracaoService {
         apuracao.setVersaoCampanhaNumero(versao.getNumero());
         apuracao.setVersaoProgramaPython(programa.getVersaoPrograma());
         apuracao.setChecksumPython(programa.getChecksumSha256());
-        apuracao.setExecutadoViaPython(false);
+        apuracao.setExecutadoViaPython(true);
         apuracao.setTotalVendasProcessadas(vendasCampanha.size());
         apuracao.setTotalCalculados(resultadosParaSalvar.size());
         apuracao.setTotalImpedimentos(impedimentos.size());
@@ -394,7 +443,7 @@ public class CampanhaApuracaoService {
                     versao.getEstadoEsteira(),
                     TipoAcaoEsteira.AVANCO_ETAPA,
                     executadoPor,
-                    String.format("Apuração definitiva executada no motor Java com programa validado (v%d - %s). Protocolo: %s",
+                    String.format("Apuração definitiva executada no sandbox Python com programa homologado (v%d - %s). Protocolo: %s",
                             programa.getVersaoPrograma(),
                             programa.getChecksumSha256() != null && programa.getChecksumSha256().length() >= 8
                                     ? programa.getChecksumSha256().substring(0, 8) : "hash",
@@ -411,7 +460,7 @@ public class CampanhaApuracaoService {
                     versao.getNumero(),
                     String.format("Apuração definitiva executada com sucesso. Protocolo: %s, Total Vendas: %d, Sucessos: %d, Impedimentos: %d",
                             apuracao.getProtocolo(), vendasCampanha.size(), resultadosParaSalvar.size(), impedimentos.size()),
-                    String.format("{\"protocolo\": \"%s\", \"totalVendas\": %d, \"totalComissao\": \"%s\", \"motor\": \"JAVA_APURACAO_ENGINE\"}",
+                    String.format("{\"protocolo\": \"%s\", \"totalVendas\": %d, \"totalComissao\": \"%s\", \"motor\": \"PYTHON_SANDBOX\"}",
                             apuracao.getProtocolo(), vendasCampanha.size(), totalComissao)
             );
         }
@@ -580,12 +629,14 @@ public class CampanhaApuracaoService {
             List<String> impedimentos
     ) {}
 
-    private ItemProcessamentoVenda processarVenda(
+    private record PreValidacaoVenda(
             Sale sale,
-            List<RegraItemRequest> regras,
-            List<BaseComiss> basesComissao,
-            Map<RegraItemRequest, Long> idsPorRegra
-    ) {
+            boolean valida,
+            BigDecimal taxaBaseContratual,
+            List<String> impedimentos
+    ) {}
+
+    private PreValidacaoVenda preValidarVenda(Sale sale, List<BaseComiss> basesComissao) {
         List<String> impedimentos = new ArrayList<>();
         Registration reg = sale.getRegistration();
         Position pos = (reg != null) ? reg.getPosition() : null;
@@ -628,31 +679,37 @@ public class CampanhaApuracaoService {
             }
         }
 
-        if (!impedimentos.isEmpty()) {
+        return new PreValidacaoVenda(sale, impedimentos.isEmpty(), taxaBaseContratual, impedimentos);
+    }
+
+    private ItemProcessamentoVenda montarProcessamentoComPython(
+            PreValidacaoVenda pre,
+            AiServiceClient.ItemExecucaoPython pyItem
+    ) {
+        if (!pre.valida()) {
             return new ItemProcessamentoVenda(
                     false,
                     null,
-                    taxaBaseContratual,
+                    pre.taxaBaseContratual(),
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
                     null,
                     null,
-                    impedimentos
+                    pre.impedimentos()
             );
         }
 
-        // Filtra regras que cobrem o público e a faixa de valor da venda
-        List<RegraItemRequest> regrasPublico = regras.stream()
-                .filter(r -> referenciaPublicoService.atendePublico(r, sale))
-                .toList();
+        if (pyItem == null) {
+            throw new BusinessException("Resposta incompleta do sandbox Python: resultado não retornado para a venda "
+                    + (pre.sale().getId() != null ? pre.sale().getId() : "sem ID"));
+        }
 
-        List<RegraItemRequest> regrasFaixa = regrasPublico.stream()
-                .filter(r -> referenciaPublicoService.atendeFaixaValor(r, valor))
-                .toList();
+        BigDecimal valor = pre.sale().getValue() != null ? pre.sale().getValue() : BigDecimal.ZERO;
+        BigDecimal taxaBaseContratual = pre.taxaBaseContratual();
 
-        if (regrasFaixa.isEmpty()) {
+        if (!pyItem.aplicada() || pyItem.comissao() == null) {
             BigDecimal comissaoFallback = valor.multiply(taxaBaseContratual).setScale(2, RoundingMode.HALF_UP);
             return new ItemProcessamentoVenda(
                     true,
@@ -668,88 +725,23 @@ public class CampanhaApuracaoService {
             );
         }
 
-        // Seleção pela regra mais específica (especificidade das dimensões de público)
-        int maxEsp = regrasFaixa.stream()
-                .mapToInt(referenciaPublicoService::calcularEspecificidade)
-                .max()
-                .orElse(0);
-
-        List<RegraItemRequest> maisEspecificas = regrasFaixa.stream()
-                .filter(r -> referenciaPublicoService.calcularEspecificidade(r) == maxEsp)
-                .toList();
-
-        if (maisEspecificas.size() > 1) {
-            List<RegraItemRequest> comFaixa = maisEspecificas.stream()
-                    .filter(r -> r.valorMinimo() != null || r.valorMaximo() != null)
-                    .toList();
-            if (!comFaixa.isEmpty() && comFaixa.size() < maisEspecificas.size()) {
-                maisEspecificas = comFaixa;
-            }
-        }
-
-        RegraItemRequest vencedora = maisEspecificas.get(0);
-        BigDecimal taxaFinal = calcularTaxaFinal(vencedora, taxaBaseContratual);
-
-        BigDecimal parcelaBase = valor.multiply(taxaFinal).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal parcelaBonusPerc = (vencedora.bonusPercentual() != null && vencedora.bonusPercentual().compareTo(BigDecimal.ZERO) > 0)
-                ? valor.multiply(vencedora.bonusPercentual()).setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-        BigDecimal parcelaBonusFixo = (vencedora.bonusValorFixo() != null && vencedora.bonusValorFixo().compareTo(BigDecimal.ZERO) > 0)
-                ? vencedora.bonusValorFixo().setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-
-        BigDecimal valorComissao = parcelaBase.add(parcelaBonusPerc).add(parcelaBonusFixo);
-        Long regraId = idsPorRegra != null && idsPorRegra.containsKey(vencedora)
-                ? idsPorRegra.get(vencedora)
-                : extrairIdNumerico(vencedora.blocoId());
+        BigDecimal valorComissao = pyItem.comissao().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxaEfetiva = valor.compareTo(BigDecimal.ZERO) > 0
+                ? valorComissao.divide(valor, 4, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
 
         return new ItemProcessamentoVenda(
                 true,
-                vencedora,
-                taxaFinal,
-                parcelaBase,
-                parcelaBonusPerc,
-                parcelaBonusFixo,
+                null,
+                taxaEfetiva,
                 valorComissao,
-                regraId,
-                "REGRA_CAMPANHA",
+                BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                valorComissao,
+                null,
+                "PYTHON_SANDBOX",
                 List.of()
         );
-    }
-
-    private BigDecimal calcularTaxaFinal(RegraItemRequest regra, BigDecimal taxaBase) {
-        TipoOperacaoBase operacao = regra.tipoOperacao() != null
-                ? regra.tipoOperacao()
-                : TipoOperacaoBase.DEFINIR_TAXA;
-
-        BigDecimal taxaCalculada;
-        if (operacao == TipoOperacaoBase.DEFINIR_TAXA) {
-            taxaCalculada = regra.taxa() != null ? regra.taxa() : regra.valorAjuste();
-        } else {
-            BigDecimal valorAjuste = regra.valorAjuste();
-            if (valorAjuste == null || taxaBase == null) {
-                return taxaBase != null ? taxaBase : BigDecimal.ZERO;
-            }
-            switch (operacao) {
-                case ACRESCIMO_PONTOS -> taxaCalculada = taxaBase.add(valorAjuste);
-                case DESCONTO_PONTOS -> taxaCalculada = taxaBase.subtract(valorAjuste);
-                case MULTIPLICADOR_BASE -> taxaCalculada = taxaBase.multiply(valorAjuste);
-                case DIVISOR_BASE -> {
-                    if (valorAjuste.compareTo(BigDecimal.ZERO) == 0) {
-                        taxaCalculada = taxaBase;
-                    } else {
-                        taxaCalculada = taxaBase.divide(valorAjuste, 4, RoundingMode.HALF_UP);
-                    }
-                }
-                default -> taxaCalculada = taxaBase;
-            }
-        }
-
-        if (taxaCalculada == null) {
-            taxaCalculada = taxaBase != null ? taxaBase : BigDecimal.ZERO;
-        }
-
-        return taxaCalculada.setScale(4, RoundingMode.HALF_UP);
     }
 
     private Optional<BigDecimal> buscarTaxaBase(Brand brand, Position position, LocalDate saleDate, List<BaseComiss> bases) {
@@ -808,6 +800,8 @@ public class CampanhaApuracaoService {
             map.put("valorBonusPercentual", resultado.getValorBonusPercentual());
             map.put("valorBonusFixo", resultado.getValorBonusFixo());
             map.put("origemTaxa", resultado.getOrigemTaxa());
+            map.put("executadoViaPython", true);
+            map.put("motor", "PYTHON_SANDBOX");
             map.put("regraId", resultado.getRegraId());
             if (processamento.regraVencedora() != null) {
                 map.put("regraNome", processamento.regraVencedora().nome());

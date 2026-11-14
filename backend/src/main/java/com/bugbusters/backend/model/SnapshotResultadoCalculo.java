@@ -112,7 +112,7 @@ public class SnapshotResultadoCalculo {
         this.codMarca = resultado.getCodMarca();
         this.codLoja = resultado.getCodLoja();
         this.codCargo = resultado.getCodCargo();
-        this.regraId = resultado.getRegraId();
+        this.regraId = resultado.getRegraId() != null ? resultado.getRegraId() : 0L;
         this.origemTaxa = resultado.getOrigemTaxa();
         this.dataVenda = resultado.getDataVenda();
         this.valorVenda = resultado.getValorVenda();

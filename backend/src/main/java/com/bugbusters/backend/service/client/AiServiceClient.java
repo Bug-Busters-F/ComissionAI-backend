@@ -1,6 +1,11 @@
 package com.bugbusters.backend.service.client;
 
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -18,9 +23,26 @@ import com.bugbusters.backend.dto.interpretador.InterpretacaoRegraResponse;
 import com.bugbusters.backend.exception.AiInvalidResponseException;
 import com.bugbusters.backend.exception.AiServiceUnavailableException;
 import com.bugbusters.backend.exception.AiTimeoutException;
+import com.bugbusters.backend.exception.BusinessException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Component 
 public class AiServiceClient {
+    private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
+
+    public record ItemExecucaoPython(String id, boolean aplicada, BigDecimal comissao) {}
+
+    public record ExecutarProgramaPythonResponse(
+            boolean sucesso,
+            String motor,
+            int totalItens,
+            List<ItemExecucaoPython> resultados,
+            String erro,
+            String detalhe,
+            List<String> violacoes
+    ) {}
+
     private RestClient aiRestClient;
     private final String endpoint;
 
@@ -38,6 +60,9 @@ public class AiServiceClient {
 
     @Value("${ai.service.v2.atualizar-artefatos-endpoint:/api/v2/atualizar-artefatos}")
     private String v2AtualizarArtefatosEndpoint;
+
+    @Value("${ai.service.v2.executar-programa-endpoint:/api/v2/executar-programa}")
+    private String v2ExecutarProgramaEndpoint;
 
     public AiServiceClient(RestClient aiRestClient, @Value("${ai.service.endpoint:/api/v1/interpretar}") String endpoint) {
         this.aiRestClient = aiRestClient;
@@ -97,6 +122,80 @@ public class AiServiceClient {
      */
     public Map<String, Object> atualizarArtefatosV2(Map<String, Object> payload) {
         return postarV2(v2AtualizarArtefatosEndpoint, payload);
+    }
+
+    /**
+     * Executa o programa Python aprovado (`calcular_comissao`) em lote dentro do sandbox isolado (/api/v2/executar-programa).
+     * Opera em fail-closed: erros de sintaxe, AST, runtime ou indisponibilidade interrompem a execução sem fallback para Java.
+     */
+    public ExecutarProgramaPythonResponse executarProgramaPython(Map<String, Object> payload) {
+        try {
+            validarChaveInterna();
+            ExecutarProgramaPythonResponse response = aiRestClient.post()
+                    .uri(v2ExecutarProgramaEndpoint)
+                    .header(authHeader, authKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
+                        String mensagem = extrairMensagemErroSandbox(res.getBody().readAllBytes(), res.getStatusCode().value());
+                        throw new BusinessException("Falha na execução do programa Python no sandbox: " + mensagem);
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, res) -> {
+                        throw new AiServiceUnavailableException("O serviço de sandbox Python retornou erro HTTP " + res.getStatusCode().value());
+                    })
+                    .body(ExecutarProgramaPythonResponse.class);
+
+            if (response == null || !response.sucesso() || response.resultados() == null) {
+                String detalhe = response != null && response.detalhe() != null
+                        ? response.detalhe()
+                        : "Resposta inválida ou vazia do sandbox Python.";
+                throw new BusinessException("Execução no sandbox Python falhou: " + detalhe);
+            }
+            return response;
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (ResourceAccessException ex) {
+            if (ex.getCause() instanceof SocketTimeoutException) {
+                throw new AiTimeoutException("A execução do programa Python no sandbox excedeu o tempo limite configurado.");
+            }
+            throw new AiServiceUnavailableException("Não foi possível conectar ao serviço de IA para executar o programa Python. Verifique se o módulo Python está ativo.");
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().is4xxClientError()) {
+                String mensagem = extrairMensagemErroSandbox(ex.getResponseBodyAsByteArray(), ex.getStatusCode().value());
+                throw new BusinessException("Falha na execução do programa Python no sandbox: " + mensagem);
+            }
+            throw new AiServiceUnavailableException("Erro retornado pelo sandbox Python: " + ex.getStatusText());
+        } catch (RestClientException ex) {
+            throw new AiInvalidResponseException("O sandbox Python retornou uma resposta em formato inválido.", ex);
+        }
+    }
+
+    private String extrairMensagemErroSandbox(byte[] bodyBytes, int statusCode) {
+        if (bodyBytes == null || bodyBytes.length == 0) {
+            return "HTTP " + statusCode;
+        }
+        String raw = new String(bodyBytes, StandardCharsets.UTF_8);
+        try {
+            JsonNode json = ERROR_MAPPER.readTree(raw);
+            List<String> partes = new ArrayList<>();
+            if (json.hasNonNull("detalhe") && !json.get("detalhe").asText().isBlank()) {
+                partes.add(json.get("detalhe").asText());
+            } else if (json.hasNonNull("detail") && !json.get("detail").asText().isBlank()) {
+                partes.add(json.get("detail").asText());
+            }
+            if (json.has("violacoes") && json.get("violacoes").isArray() && !json.get("violacoes").isEmpty()) {
+                List<String> vs = new ArrayList<>();
+                json.get("violacoes").forEach(v -> vs.add(v.asText()));
+                String vStr = String.join("; ", vs);
+                if (partes.isEmpty() || !partes.get(0).equals(vStr)) {
+                    partes.add("Violações: " + vStr);
+                }
+            }
+            return partes.isEmpty() ? raw : String.join(" | ", partes);
+        } catch (IOException ignored) {
+            return raw;
+        }
     }
 
     private Map<String, Object> postarV2(String uri, Map<String, Object> payload) {

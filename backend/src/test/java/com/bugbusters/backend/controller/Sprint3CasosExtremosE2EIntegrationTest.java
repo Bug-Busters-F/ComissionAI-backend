@@ -29,10 +29,13 @@ import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.repository.*;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
+import com.bugbusters.backend.support.PythonSandboxMockSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
@@ -47,6 +50,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
@@ -112,7 +116,14 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
     @Autowired
     private AuditoriaGeralRepository auditoriaRepository;
 
+    @Autowired
+    private RestClient.Builder aiRestClientBuilder;
+
+    @Autowired
+    private AiServiceClient aiServiceClient;
+
     private MockMvc mockMvc;
+    private PythonSandboxMockSupport sandboxMock;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     private Brand testBrand;
@@ -123,6 +134,8 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+        sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarExecucaoPadrao();
 
         cleanupJdbc.update("UPDATE tb_campanha_versao SET programa_python_aprovado_id = NULL");
         cleanupJdbc.update("DELETE FROM tb_campanha_programa_python");
@@ -174,6 +187,13 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
                     bc.setReferenceMonth(mesRef);
                     return baseComissRepository.save(bc);
                 });
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sandboxMock != null) {
+            sandboxMock.restaurar();
+        }
     }
 
     private Long criarCampanhaValida(String competencia, BigDecimal taxa) throws Exception {
@@ -378,7 +398,7 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
                         .content(objectMapper.writeValueAsString(simRequest)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.protocolo", notNullValue()))
-                .andExpect(jsonPath("$.executadoViaPython").value(false))
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
                 .andExpect(jsonPath("$.versaoProgramaPython").value(2))
                 .andExpect(jsonPath("$.checksumPython").isNotEmpty())
                 .andReturn();

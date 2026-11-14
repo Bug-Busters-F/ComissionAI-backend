@@ -27,10 +27,13 @@ import com.bugbusters.backend.repository.LogCalculoRepository;
 import com.bugbusters.backend.repository.ResultadoCalculoRepository;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.bugbusters.backend.store.Store;
 import com.bugbusters.backend.store.StoreRepository;
+import com.bugbusters.backend.support.PythonSandboxMockSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,6 +45,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
@@ -96,6 +100,14 @@ class CampanhaApuracaoIntegrationTest {
     @Autowired
     private FechamentoCompetenciaRepository fechamentoCompetenciaRepository;
 
+    @Autowired
+    private RestClient.Builder aiRestClientBuilder;
+
+    @Autowired
+    private AiServiceClient aiServiceClient;
+
+    private PythonSandboxMockSupport sandboxMock;
+
     private Brand testBrand;
     private Store testStore;
     private Position testPosition;
@@ -104,6 +116,8 @@ class CampanhaApuracaoIntegrationTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+        sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarExecucaoPadrao();
 
         testBrand = brandRepository.findByCode(10).orElseGet(() -> {
             Brand b = new Brand();
@@ -151,6 +165,13 @@ class CampanhaApuracaoIntegrationTest {
         sale.setSaleDate(LocalDate.of(2026, 8, 15));
         sale.setValue(new BigDecimal("10000.00"));
         saleRepository.save(sale);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sandboxMock != null) {
+            sandboxMock.restaurar();
+        }
     }
 
     private Long criarCampanhaTeste(String titulo) throws Exception {
@@ -344,7 +365,7 @@ class CampanhaApuracaoIntegrationTest {
                 .andExpect(jsonPath("$.protocolo").isNotEmpty())
                 .andExpect(jsonPath("$.campanhaId").value(campanhaId))
                 .andExpect(jsonPath("$.competencia").value("2026-08"))
-                .andExpect(jsonPath("$.executadoViaPython").value(false))
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
                 .andExpect(jsonPath("$.versaoProgramaPython").value(1))
                 .andExpect(jsonPath("$.checksumPython").value(checksum))
                 .andExpect(jsonPath("$.totalCalculados").value(1))
@@ -365,7 +386,7 @@ class CampanhaApuracaoIntegrationTest {
         assertThat(apuracaoSalva).isNotNull();
         assertThat(apuracaoSalva.getStatus()).isEqualTo("CONCLUIDO");
         assertThat(apuracaoSalva.getValorTotalComissao()).isEqualByComparingTo("500.00");
-        assertThat(apuracaoSalva.isExecutadoViaPython()).isFalse();
+        assertThat(apuracaoSalva.isExecutadoViaPython()).isTrue();
 
         // Verificação em banco: tb_resultado_calculo com vínculo e tipo CAMPANHA_DEFINITIVO
         List<ResultadoCalculo> resultados = resultadoCalculoRepository.findAllByApuracaoCampanhaIdOrderByDataVendaAsc(apuracaoId);
@@ -471,6 +492,68 @@ class CampanhaApuracaoIntegrationTest {
                         .content(objectMapper.writeValueAsString(reqForcado)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalCalculados").value(1));
+    }
+
+    @Test
+    @DisplayName("Deve aplicar exatamente a lógica do programa Python editado na apuração definitiva e falhar fechado em erro do sandbox")
+    void deveExecutarCodigoPythonEditadoNaApuracaoEFalharFechadoEmErro() throws Exception {
+        Long campanhaId = criarCampanhaTeste("Campanha Edição Python Apuração");
+        String codigoEditado = """
+                def calcular_comissao(venda, contexto):
+                    taxa = 0.10
+                    return venda.get("valor", 0.0) * taxa
+                """;
+        mockMvc.perform(put("/api/v1/campanhas/{id}/programa-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AtualizarProgramaPythonRequest(
+                                codigoEditado, "revisor.python", "Sobrescreve taxa para 10% no script aprovado"
+                        ))))
+                .andExpect(status().isOk());
+
+        aprovarGerencialmente(campanhaId);
+
+        CalculoDefinitivoCampanhaRequest calcReq = new CalculoDefinitivoCampanhaRequest(
+                "2026-08",
+                LocalDate.of(2026, 8, 1),
+                LocalDate.of(2026, 8, 31),
+                "auditor.financeiro",
+                "Apuração com script customizado",
+                false
+        );
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/calcular-definitivo", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(calcReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.executadoViaPython").value(true))
+                .andExpect(jsonPath("$.valorTotalComissao").value(1000.00))
+                .andExpect(jsonPath("$.itens[0].taxaAplicada").value(0.10))
+                .andExpect(jsonPath("$.itens[0].valorComissao").value(1000.00))
+                .andExpect(jsonPath("$.itens[0].origemTaxa").value("PYTHON_SANDBOX"));
+
+        // Fail-closed: erro retornado pelo sandbox bloqueia cálculo definitivo sem fallback para Java
+        sandboxMock.restaurar();
+        PythonSandboxMockSupport mockErro = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                .registrarErroSandbox(org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY, "ZeroDivisionError: division by zero", List.of());
+        try {
+            CalculoDefinitivoCampanhaRequest reqErro = new CalculoDefinitivoCampanhaRequest(
+                    "2026-08",
+                    LocalDate.of(2026, 8, 1),
+                    LocalDate.of(2026, 8, 31),
+                    "auditor.financeiro",
+                    "Tentativa com falha no sandbox",
+                    true
+            );
+            mockMvc.perform(post("/api/v1/campanhas/{id}/calcular-definitivo", campanhaId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqErro)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message", containsString("sandbox")));
+        } finally {
+            mockErro.restaurar();
+            sandboxMock = PythonSandboxMockSupport.instalar(aiRestClientBuilder, aiServiceClient)
+                    .registrarExecucaoPadrao();
+        }
     }
 }
 
