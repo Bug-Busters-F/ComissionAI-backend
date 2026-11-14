@@ -44,8 +44,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/consultas-ia/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE, AUDITOR, "SERVICO_IA")
                         .requestMatchers(HttpMethod.POST, "/api/v1/consultas-ia/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE, AUDITOR, "SERVICO_IA")
                         .requestMatchers("/api/v1/consultas-ia/**").denyAll()
-                        // Logs: somente administrador, gerente e auditor.
-                        .requestMatchers(HttpMethod.GET, "/api/v1/logs-calculo/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
+                        // Logs e Auditoria Geral: somente administrador, gerente e auditor.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/logs-calculo/**", "/api/v1/auditoria/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auditoria/**").hasRole(ADMIN)
+                        // Apuração definitiva de campanha e relatórios financeiros de apuração:
+                        .requestMatchers(HttpMethod.GET, "/api/v1/campanhas/*/apuracao-definitiva/**", "/api/v1/campanhas/*/apuracoes/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/calcular-definitivo").hasAnyRole(ADMIN, GERENTE)
                         // Auditor consulta as bases; nenhuma escrita é liberada por esta regra.
                         .requestMatchers(HttpMethod.GET, "/api/v1/imports/**", "/api/v1/vendas/**", "/api/v1/matriculas/**",
                                 "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
@@ -54,6 +58,19 @@ public class SecurityConfig {
                                 "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE)
                         // Consulta de negócio é permitida a todos os perfis autenticados.
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole(TODOS)
+                        // Esteira de aprovação e governança (BACK-4):
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/aprovar", "/api/v1/campanhas/*/versoes/*/esteira/aprovar").hasAnyRole(ADMIN, GERENTE)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/devolver", "/api/v1/campanhas/*/versoes/*/esteira/devolver").hasAnyRole(ADMIN, GERENTE, CODIGO)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/avancar", "/api/v1/campanhas/*/versoes/*/esteira/avancar").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE)
+                        // Programa Python versionado e homologação técnica na Etapa 2 (BACK-9):
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/*/programa-python", "/api/v1/campanhas/*/versoes/*/programa-python").hasAnyRole(ADMIN, CODIGO)
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/campanhas/*/programa-python/aprovar", "/api/v1/campanhas/*/versoes/*/programa-python/aprovar",
+                                "/api/v1/campanhas/*/programa-python/rejeitar", "/api/v1/campanhas/*/versoes/*/programa-python/rejeitar").hasAnyRole(ADMIN, CODIGO)
+                        // Simulação orquestrada na Etapa 3 (BACK-11):
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/simulacao-python", "/api/v1/campanhas/*/versoes/*/simulacao-python").hasAnyRole(ADMIN, NEGOCIOS, GERENTE)
+                        // Pendências e riscos (BACK-7):
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/pendencias/**").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
                         // Etapa 4 e cálculo de competência: gerente publica e solicita cálculo.
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/estado")
                             .hasAnyRole(ADMIN, GERENTE)

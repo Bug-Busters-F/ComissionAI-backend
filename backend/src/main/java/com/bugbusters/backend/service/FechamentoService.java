@@ -7,6 +7,8 @@ import com.bugbusters.backend.dto.fechamento.FechamentoStatusDTO;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.FechamentoCompetencia;
 import com.bugbusters.backend.model.StatusFechamento;
+import com.bugbusters.backend.model.TipoAcaoAuditoria;
+import com.bugbusters.backend.model.TipoEntidadeAuditoria;
 import com.bugbusters.backend.repository.FechamentoCompetenciaRepository;
 import com.bugbusters.backend.service.lock.TravaCompetencia;
 import org.slf4j.Logger;
@@ -45,14 +47,23 @@ public class FechamentoService {
     private final CalculoService calculoService;
     private final TravaCompetencia travaCompetencia;
     private final TransactionTemplate transacaoIsolada;
+    private final AuditoriaGeralService auditoriaService;
 
     public FechamentoService(FechamentoCompetenciaRepository repository, CalculoService calculoService,
                              TravaCompetencia travaCompetencia, PlatformTransactionManager transactionManager) {
+        this(repository, calculoService, travaCompetencia, transactionManager, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public FechamentoService(FechamentoCompetenciaRepository repository, CalculoService calculoService,
+                             TravaCompetencia travaCompetencia, PlatformTransactionManager transactionManager,
+                             @org.springframework.beans.factory.annotation.Autowired(required = false) AuditoriaGeralService auditoriaService) {
         this.fechamentoCompetenciaRepository = repository;
         this.calculoService = calculoService;
         this.travaCompetencia = travaCompetencia;
         this.transacaoIsolada = new TransactionTemplate(transactionManager);
         this.transacaoIsolada.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.auditoriaService = auditoriaService;
     }
 
     /** Persist the processing marker before calculating; rollback calculations independently from audit status. */
@@ -90,6 +101,21 @@ public class FechamentoService {
                 fechamento.setStatus(StatusFechamento.CONCLUIDO);
                 fechamento.setConcluidoEm(OffsetDateTime.now());
                 fechamentoCompetenciaRepository.save(fechamento);
+
+                if (auditoriaService != null) {
+                    auditoriaService.registrarAcao(
+                            fechamento.getExecutadoPor(),
+                            TipoAcaoAuditoria.FECHAMENTO_COMPETENCIA,
+                            TipoEntidadeAuditoria.FECHAMENTO,
+                            competencia,
+                            null,
+                            String.format("Fechamento oficial de competência %s concluído com sucesso. Protocolo: %s, Vendas: %d",
+                                    competencia, fechamento.getProtocolo(), fechamento.getTotalVendasProcessadas()),
+                            String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"totalVendas\": %d}",
+                                    fechamento.getProtocolo(), competencia, fechamento.getTotalVendasProcessadas())
+                    );
+                }
+
                 return new FechamentoResponseDTO(fechamento.getId(), fechamento.getProtocolo(), competencia,
                         fechamento.getStatus(), fechamento.getTipo(), fechamento.getTotalVendasProcessadas(),
                         fechamento.getTotalCalculados(), fechamento.getTotalImpedimentos(), fechamento.getValorTotalVendas(),

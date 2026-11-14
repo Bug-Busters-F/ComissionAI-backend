@@ -42,6 +42,7 @@ import com.bugbusters.backend.repository.SimulacaoRepository;
 import com.bugbusters.backend.repository.SimulacaoVendaRepository;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.client.AiServiceClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.persistence.criteria.Predicate;
@@ -137,12 +138,26 @@ public class SimulacaoCenariosService {
             List<RegraItemRequest> regrasAvaliadas
     ) {}
 
+    public record VendaCenarioParaCalculo(
+            String itemId,
+            Sale sale,
+            String nomeCenario,
+            BigDecimal fatorEscala,
+            BigDecimal valorEscalado,
+            BigDecimal taxaBaseContratual
+    ) {}
+
+    @FunctionalInterface
+    public interface MotorCalculoExterno {
+        Map<String, AiServiceClient.ItemExecucaoPython> calcularEmLote(List<VendaCenarioParaCalculo> itens);
+    }
+
     /**
      * Executa a simulação completa em memória (sandbox puro).
      */
     @Transactional(readOnly = true)
     public SimulacaoCenariosResponse simularCenarios(SimulacaoCenariosRequest request) {
-        return executarSimulacao(request).response();
+        return executarSimulacao(request, null).response();
     }
 
     /**
@@ -151,7 +166,26 @@ public class SimulacaoCenariosService {
      */
     @Transactional
     public SimulacaoCenariosResponse simularEPersistir(SimulacaoCenariosRequest request) {
-        ResultadoSimulacaoInterna resultado = executarSimulacao(request);
+        return simularEPersistirInterno(request, null);
+    }
+
+    /**
+     * Executa a simulação delegando o cálculo das comissões elegíveis ao motor externo (Python Sandbox)
+     * e persiste os resultados completos em tb_simulacao e tb_simulacao_venda.
+     */
+    @Transactional
+    public SimulacaoCenariosResponse simularEPersistirComMotorExterno(
+            SimulacaoCenariosRequest request,
+            MotorCalculoExterno motorExterno
+    ) {
+        return simularEPersistirInterno(request, motorExterno);
+    }
+
+    private SimulacaoCenariosResponse simularEPersistirInterno(
+            SimulacaoCenariosRequest request,
+            MotorCalculoExterno motorExterno
+    ) {
+        ResultadoSimulacaoInterna resultado = executarSimulacao(request, motorExterno);
         SimulacaoCenariosResponse resp = resultado.response();
 
         if (simulacaoRepository == null || simulacaoVendaRepository == null) {
@@ -386,7 +420,10 @@ public class SimulacaoCenariosService {
                 resp.vendas(),
                 resp.avisosGerais(),
                 resp.memoriaCalculoConsolidada(),
-                resp.enquadramentoOrcamento()
+                resp.enquadramentoOrcamento(),
+                resp.executadoViaPython(),
+                resp.versaoProgramaPython(),
+                resp.checksumPython()
         );
     }
 
@@ -483,6 +520,9 @@ public class SimulacaoCenariosService {
 
         if (campanha != null) {
             campanha.setSimulacaoAceita(salva);
+            if (campanha.versaoParaRevisao() != null) {
+                campanha.versaoParaRevisao().setSimulacaoAceita(salva);
+            }
             // O aceite não publica. A ativação exige a confirmação final após a revisão.
             campanhaRepository.save(campanha);
         }
@@ -635,7 +675,10 @@ public class SimulacaoCenariosService {
                 vendasDTO,
                 avisos,
                 s.getMemoriaCalculoConsolidada(),
-                resumoEnquadramento
+                resumoEnquadramento,
+                s.isExecutadoViaPython(),
+                s.getVersaoProgramaPython(),
+                s.getChecksumPython()
         );
     }
 
@@ -716,7 +759,7 @@ public class SimulacaoCenariosService {
     // MÉTODOS DE CÁLCULO INTERNO E SANDBOX
     // =========================================================================
 
-    private ResultadoSimulacaoInterna executarSimulacao(SimulacaoCenariosRequest request) {
+    private ResultadoSimulacaoInterna executarSimulacao(SimulacaoCenariosRequest request, MotorCalculoExterno motorExterno) {
         if (request == null) {
             throw new BusinessException("A requisição de simulação de cenários não pode ser nula.");
         }
@@ -794,6 +837,9 @@ public class SimulacaoCenariosService {
 
         List<String> avisosGerais = new ArrayList<>();
         if (vendasDoMes.isEmpty()) {
+            if (motorExterno != null) {
+                motorExterno.calcularEmLote(List.of());
+            }
             avisosGerais.add(String.format("A competência '%s' não possui nenhuma transação de venda registrada.", competenciaStr));
             SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha,
                     diasInclusivos, fatorProjecao, avisosGerais, orcamentoEfetivo, orcamentoConfirmado, origemOrcamento);
@@ -816,6 +862,9 @@ public class SimulacaoCenariosService {
         }
 
         if (vendasRecortadas.isEmpty()) {
+            if (motorExterno != null) {
+                motorExterno.calcularEmLote(List.of());
+            }
             avisosGerais.add(String.format("Nenhuma venda da competência '%s' pertence ao público-alvo das regras avaliadas.", competenciaStr));
             SimulacaoCenariosResponse vazia = construirRespostaVazia(competenciaStr, campanha, dataInicioCampanha, dataFimCampanha,
                     diasInclusivos, fatorProjecao, avisosGerais, orcamentoEfetivo, orcamentoConfirmado, origemOrcamento);
@@ -826,11 +875,42 @@ public class SimulacaoCenariosService {
         List<VendaSimuladaDetalheDTO> todasVendasSimuladas = new ArrayList<>();
         int countVendasComImpedimento = 0;
 
-        for (Sale sale : vendasRecortadas) {
-            VendaSimuladaDetalheDTO detalhe = processarVendaSimulada(sale, regrasAvaliadas, basesComissao, competenciaStr);
-            todasVendasSimuladas.add(detalhe);
-            if (!detalhe.valida()) {
-                countVendasComImpedimento++;
+        if (motorExterno != null) {
+            List<PreAvaliacaoVenda> preAvaliacoes = new ArrayList<>(vendasRecortadas.size());
+            List<VendaCenarioParaCalculo> lotePython = new ArrayList<>();
+            for (Sale sale : vendasRecortadas) {
+                PreAvaliacaoVenda pre = preAvaliarVenda(sale, basesComissao);
+                preAvaliacoes.add(pre);
+                if (pre.impedimentos().isEmpty()) {
+                    BigDecimal v100 = pre.valorOriginal();
+                    BigDecimal v80 = pre.valorOriginal().multiply(FATOR_80).setScale(2, RoundingMode.HALF_UP);
+                    BigDecimal v120 = pre.valorOriginal().multiply(FATOR_120).setScale(2, RoundingMode.HALF_UP);
+                    BigDecimal v150 = pre.valorOriginal().multiply(FATOR_150).setScale(2, RoundingMode.HALF_UP);
+                    String baseKey = sale.getId() != null ? sale.getId().toString() : ("IDX-" + preAvaliacoes.size());
+                    lotePython.add(new VendaCenarioParaCalculo(baseKey + "#100", sale, "100%", FATOR_100, v100, pre.taxaBaseContratual()));
+                    lotePython.add(new VendaCenarioParaCalculo(baseKey + "#80", sale, "80%", FATOR_80, v80, pre.taxaBaseContratual()));
+                    lotePython.add(new VendaCenarioParaCalculo(baseKey + "#120", sale, "120%", FATOR_120, v120, pre.taxaBaseContratual()));
+                    lotePython.add(new VendaCenarioParaCalculo(baseKey + "#150", sale, "150%", FATOR_150, v150, pre.taxaBaseContratual()));
+                }
+            }
+
+            Map<String, AiServiceClient.ItemExecucaoPython> resultadosPython = motorExterno.calcularEmLote(lotePython);
+            for (int i = 0; i < preAvaliacoes.size(); i++) {
+                PreAvaliacaoVenda pre = preAvaliacoes.get(i);
+                String baseKey = pre.sale().getId() != null ? pre.sale().getId().toString() : ("IDX-" + (i + 1));
+                VendaSimuladaDetalheDTO detalhe = montarDetalheComPython(pre, baseKey, resultadosPython);
+                todasVendasSimuladas.add(detalhe);
+                if (!detalhe.valida()) {
+                    countVendasComImpedimento++;
+                }
+            }
+        } else {
+            for (Sale sale : vendasRecortadas) {
+                VendaSimuladaDetalheDTO detalhe = processarVendaSimulada(sale, regrasAvaliadas, basesComissao, competenciaStr);
+                todasVendasSimuladas.add(detalhe);
+                if (!detalhe.valida()) {
+                    countVendasComImpedimento++;
+                }
             }
         }
 
@@ -939,19 +1019,21 @@ public class SimulacaoCenariosService {
         return new ResultadoSimulacaoInterna(response, campanha, todasVendasSimuladas, regrasAvaliadas);
     }
 
-    private VendaSimuladaDetalheDTO processarVendaSimulada(
+    private record PreAvaliacaoVenda(
             Sale sale,
-            List<RegraItemRequest> regrasAvaliadas,
-            List<BaseComiss> basesComissao,
-            String competenciaStr) {
+            BigDecimal valorOriginal,
+            BigDecimal taxaBaseContratual,
+            BigDecimal comissaoBase100,
+            List<String> impedimentos
+    ) {}
 
+    private PreAvaliacaoVenda preAvaliarVenda(Sale sale, List<BaseComiss> basesComissao) {
         List<String> impedimentos = new ArrayList<>();
         Registration reg = sale.getRegistration();
         Position pos = (reg != null) ? reg.getPosition() : null;
         Brand brand = sale.getBrand();
         BigDecimal valorOriginal = sale.getValue() != null ? sale.getValue() : BigDecimal.ZERO;
 
-        // 1. Validações cadastrais essenciais
         if (reg == null || reg.getRegistration() == null || reg.getRegistration().isBlank()) {
             impedimentos.add("Colaborador não identificado ou sem vínculo com o RH");
         }
@@ -976,7 +1058,6 @@ public class SimulacaoCenariosService {
             }
         }
 
-        // 2. Resolução da taxa base contratual (tb_basecomiss) para a venda
         Optional<BigDecimal> baseRateOpt = Optional.empty();
         if (brand != null && pos != null) {
             baseRateOpt = buscarTaxaBase(brand, pos, sale.getSaleDate(), basesComissao);
@@ -989,6 +1070,149 @@ public class SimulacaoCenariosService {
 
         BigDecimal taxaBaseContratual = baseRateOpt.orElse(BigDecimal.ZERO).setScale(4, RoundingMode.HALF_UP);
         BigDecimal comissaoBase100 = valorOriginal.multiply(taxaBaseContratual).setScale(2, RoundingMode.HALF_UP);
+        return new PreAvaliacaoVenda(sale, valorOriginal, taxaBaseContratual, comissaoBase100, impedimentos);
+    }
+
+    private VendaSimuladaDetalheDTO montarDetalheComPython(
+            PreAvaliacaoVenda pre,
+            String baseKey,
+            Map<String, AiServiceClient.ItemExecucaoPython> resultadosPython
+    ) {
+        Sale sale = pre.sale();
+        Registration reg = sale.getRegistration();
+        Position pos = reg != null ? reg.getPosition() : null;
+        Brand brand = sale.getBrand();
+        BigDecimal valorOriginal = pre.valorOriginal();
+        BigDecimal taxaBaseContratual = pre.taxaBaseContratual();
+        BigDecimal comissaoBase100 = pre.comissaoBase100();
+
+        BigDecimal v100 = valorOriginal;
+        BigDecimal v80 = valorOriginal.multiply(FATOR_80).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal v120 = valorOriginal.multiply(FATOR_120).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal v150 = valorOriginal.multiply(FATOR_150).setScale(2, RoundingMode.HALF_UP);
+
+        boolean temImpedimento = !pre.impedimentos().isEmpty();
+        VendaSimuladaCenarioItemDTO item100 = temImpedimento
+                ? montarItemImpedimentoPython(FATOR_100, v100, taxaBaseContratual)
+                : resolverCenarioComPython(v100, FATOR_100, taxaBaseContratual, resultadosPython.get(baseKey + "#100"), null);
+        VendaSimuladaCenarioItemDTO item80 = temImpedimento
+                ? montarItemImpedimentoPython(FATOR_80, v80, taxaBaseContratual)
+                : resolverCenarioComPython(v80, FATOR_80, taxaBaseContratual, resultadosPython.get(baseKey + "#80"), item100);
+        VendaSimuladaCenarioItemDTO item120 = temImpedimento
+                ? montarItemImpedimentoPython(FATOR_120, v120, taxaBaseContratual)
+                : resolverCenarioComPython(v120, FATOR_120, taxaBaseContratual, resultadosPython.get(baseKey + "#120"), item100);
+        VendaSimuladaCenarioItemDTO item150 = temImpedimento
+                ? montarItemImpedimentoPython(FATOR_150, v150, taxaBaseContratual)
+                : resolverCenarioComPython(v150, FATOR_150, taxaBaseContratual, resultadosPython.get(baseKey + "#150"), item100);
+
+        BigDecimal deltaComissao100 = item100.valorComissao().subtract(comissaoBase100).setScale(2, RoundingMode.HALF_UP);
+        String memoriaCalculo = gerarMemoriaCalculoItem(
+                sale, item100, item80, item120, item150,
+                taxaBaseContratual, comissaoBase100, deltaComissao100, pre.impedimentos()
+        );
+
+        return new VendaSimuladaDetalheDTO(
+                sale.getId(),
+                reg != null ? reg.getRegistration() : null,
+                pos != null ? pos.getCode() : null,
+                pos != null ? pos.getDescription() : null,
+                sale.getStore() != null ? sale.getStore().getCode() : null,
+                brand != null ? brand.getCode() : null,
+                brand != null ? brand.getDescription() : null,
+                sale.getSaleChannel() != null ? sale.getSaleChannel() : "PADRAO",
+                sale.getSaleDate(),
+                valorOriginal,
+                taxaBaseContratual,
+                comissaoBase100,
+                item100,
+                item80,
+                item120,
+                item150,
+                deltaComissao100,
+                !temImpedimento,
+                pre.impedimentos(),
+                memoriaCalculo
+        );
+    }
+
+    private VendaSimuladaCenarioItemDTO montarItemImpedimentoPython(
+            BigDecimal fatorEscala, BigDecimal valorEscalado, BigDecimal taxaBaseContratual) {
+        BigDecimal comissaoZero = valorEscalado.multiply(taxaBaseContratual).setScale(2, RoundingMode.HALF_UP);
+        return new VendaSimuladaCenarioItemDTO(
+                fatorEscala, valorEscalado, null, "Fallback Taxa Base Contratual",
+                "BASE_COMISS", false, taxaBaseContratual,
+                BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                comissaoZero, false
+        );
+    }
+
+    private VendaSimuladaCenarioItemDTO resolverCenarioComPython(
+            BigDecimal valorVendaEscalado,
+            BigDecimal fatorEscala,
+            BigDecimal taxaBaseContratual,
+            AiServiceClient.ItemExecucaoPython pyItem,
+            VendaSimuladaCenarioItemDTO cenario100Referencia
+    ) {
+        if (pyItem == null) {
+            throw new BusinessException("Resposta incompleta do sandbox Python: cenário não retornado.");
+        }
+        if (!pyItem.aplicada() || pyItem.comissao() == null) {
+            BigDecimal comissaoFallback = valorVendaEscalado.multiply(taxaBaseContratual).setScale(2, RoundingMode.HALF_UP);
+            boolean mudouFaixa = cenario100Referencia != null && !"BASE_COMISS".equals(cenario100Referencia.origemTaxa());
+            return new VendaSimuladaCenarioItemDTO(
+                    fatorEscala,
+                    valorVendaEscalado,
+                    null,
+                    "Fallback Taxa Base Contratual",
+                    "BASE_COMISS",
+                    false,
+                    taxaBaseContratual,
+                    BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                    BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                    comissaoFallback,
+                    mudouFaixa
+            );
+        }
+
+        BigDecimal valorComissao = pyItem.comissao().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxaAplicada = valorVendaEscalado.compareTo(BigDecimal.ZERO) > 0
+                ? valorComissao.divide(valorVendaEscalado, 4, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
+        boolean mudouFaixa = cenario100Referencia != null && (
+                !"PYTHON_SANDBOX".equals(cenario100Referencia.origemTaxa())
+                        || taxaAplicada.compareTo(cenario100Referencia.taxaAplicada()) != 0
+        );
+
+        return new VendaSimuladaCenarioItemDTO(
+                fatorEscala,
+                valorVendaEscalado,
+                null,
+                "Programa Python Sandbox",
+                "PYTHON_SANDBOX",
+                true,
+                taxaAplicada,
+                BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                valorComissao,
+                mudouFaixa
+        );
+    }
+
+    private VendaSimuladaDetalheDTO processarVendaSimulada(
+            Sale sale,
+            List<RegraItemRequest> regrasAvaliadas,
+            List<BaseComiss> basesComissao,
+            String competenciaStr) {
+
+        PreAvaliacaoVenda pre = preAvaliarVenda(sale, basesComissao);
+        List<String> impedimentos = pre.impedimentos();
+        Registration reg = sale.getRegistration();
+        Position pos = (reg != null) ? reg.getPosition() : null;
+        Brand brand = sale.getBrand();
+        BigDecimal valorOriginal = pre.valorOriginal();
+        BigDecimal taxaBaseContratual = pre.taxaBaseContratual();
+        BigDecimal comissaoBase100 = pre.comissaoBase100();
 
         // 3. Regras da proposta que cobrem as dimensões do público desta venda
         List<RegraItemRequest> regrasQueCobremPublico = regrasAvaliadas.stream()
