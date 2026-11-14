@@ -81,6 +81,9 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
 
     List<Sale> findByIdLoteOrigem(String idLoteOrigem);
 
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    List<Sale> findByIdLoteUltimaAlteracao(String idLoteUltimaAlteracao);
+
     long countByIdLoteOrigem(String idLoteOrigem);
 
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)

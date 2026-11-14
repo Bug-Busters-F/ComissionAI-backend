@@ -36,6 +36,8 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
 
     java.util.List<Registration> findByIdLoteOrigem(String idLoteOrigem);
 
+    java.util.List<Registration> findByIdLoteUltimaAlteracao(String idLoteUltimaAlteracao);
+
     long countByIdLoteOrigem(String idLoteOrigem);
 
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
