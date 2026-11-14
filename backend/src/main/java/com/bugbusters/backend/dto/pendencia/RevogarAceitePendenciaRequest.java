@@ -10,7 +10,6 @@ import jakarta.validation.constraints.NotBlank;
 public record RevogarAceitePendenciaRequest(
 
         @Schema(description = "Identificação do responsável pela revogação", example = "compliance.comissoes@empresa.com")
-        @NotBlank(message = "A identificação do responsável pela revogação é obrigatória.")
         String revogadoPor,
 
         @Schema(description = "Justificativa formal da revogação", example = "Revisão de risco reprovada pelo comitê de compliance.")

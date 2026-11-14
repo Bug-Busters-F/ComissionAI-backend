@@ -28,4 +28,5 @@ public interface ExecucaoCalculoRepository extends JpaRepository<ExecucaoCalculo
 
     Optional<ExecucaoCalculo> findByChaveIdempotencia(String chaveIdempotencia);
     Optional<ExecucaoCalculo> findFirstByCompetenciaAndStatusInOrderBySolicitadoEmDesc(String competencia, Collection<StatusExecucaoCalculo> status);
+    List<ExecucaoCalculo> findByCompetenciaOrderBySolicitadoEmDesc(String competencia);
 }

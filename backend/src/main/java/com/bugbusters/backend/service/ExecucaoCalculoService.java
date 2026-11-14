@@ -114,7 +114,8 @@ public class ExecucaoCalculoService {
         int percentual=e.getStatus()==StatusExecucaoCalculo.CONCLUIDA ? 100 : e.getTotalItens()==0 ? 0 :
             (int)Math.min(99,((long)e.getItensProcessados()*100)/e.getTotalItens());
         return new ExecucaoCalculoResponse(e.getId(),e.getCompetencia(),e.isRecalcular(),e.getStatus(),e.getTotalItens(),e.getItensProcessados(),
-            percentual,e.getReferenciaDados(),e.getReferenciaRegras(),e.getSolicitadoEm(),e.getIniciadoEm(),e.getConcluidoEm(),e.getFalha(),e.getResultado());
+            percentual,e.getReferenciaDados(),e.getReferenciaRegras(),e.getSolicitadoEm(),e.getIniciadoEm(),e.getConcluidoEm(),e.getFalha(),e.getResultado(),
+            e.getOrcamentoTotalCampanhas(),e.getComissaoTotalApurada(),e.getStatusEnquadramentoExecucao(),e.getResumoOrcamentoJson());
     }
     private record Envio(ExecucaoCalculoResponse resposta,UUID tentativa,boolean enfileirar) {}
 }

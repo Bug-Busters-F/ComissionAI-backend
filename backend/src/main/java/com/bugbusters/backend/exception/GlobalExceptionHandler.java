@@ -17,6 +17,13 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+        @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+        public ResponseEntity<ApiErrorResponse> handleAuthentication(
+                org.springframework.security.core.AuthenticationException ex, HttpServletRequest request) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiErrorResponse(
+                    OffsetDateTime.now(), 401, "Unauthorized", ex.getMessage(), request.getRequestURI(), List.of()));
+        }
+
 
         @ExceptionHandler(HttpMessageNotReadableException.class)
         public ResponseEntity<ApiErrorResponse> handleHttpMessageNotReadable(
@@ -43,6 +50,19 @@ public class GlobalExceptionHandler {
                         OffsetDateTime.now(), HttpStatus.BAD_REQUEST.value(), "Bad Request",
                         "Parâmetro obrigatório ausente ou em formato inválido.", request.getRequestURI(),
                         List.of(new CampoInvalidoDTO(campo, "Informe um valor válido para este parâmetro.")));
+                return ResponseEntity.badRequest().body(error);
+        }
+
+        @ExceptionHandler(java.time.format.DateTimeParseException.class)
+        public ResponseEntity<ApiErrorResponse> handleDateTimeParseException(
+                        java.time.format.DateTimeParseException ex, HttpServletRequest request) {
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                "Bad Request",
+                                "Data em formato inválido. Utilize o formato AAAA-MM-DD.",
+                                request.getRequestURI(),
+                                List.of(new CampoInvalidoDTO("data", ex.getMessage())));
                 return ResponseEntity.badRequest().body(error);
         }
 
@@ -132,6 +152,36 @@ public class GlobalExceptionHandler {
                                 validacoes);
 
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+
+        @ExceptionHandler(CoberturaFechamentoIncompletaException.class)
+        public ResponseEntity<ApiErrorResponse> handleCoberturaIncompleta(
+                        CoberturaFechamentoIncompletaException ex, HttpServletRequest request) {
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                                "Unprocessable Entity",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
+
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
+        }
+
+        @ExceptionHandler(RecortePopulacaoIncompletoException.class)
+        public ResponseEntity<ApiErrorResponse> handleRecorteIncompleto(
+                        RecortePopulacaoIncompletoException ex, HttpServletRequest request) {
+
+                ApiErrorResponse error = new ApiErrorResponse(
+                                OffsetDateTime.now(),
+                                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                                "Unprocessable Entity",
+                                ex.getMessage(),
+                                request.getRequestURI(),
+                                ex.getValidacoes() != null ? ex.getValidacoes() : List.of());
+
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
         }
 
         @ExceptionHandler(BusinessException.class)

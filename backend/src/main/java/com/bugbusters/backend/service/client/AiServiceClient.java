@@ -24,6 +24,12 @@ public class AiServiceClient {
     private RestClient aiRestClient;
     private final String endpoint;
 
+    @Value("${ai.service.auth.header:X-Internal-Api-Key}")
+    private String authHeader;
+
+    @Value("${ai.service.auth.key:}")
+    private String authKey;
+
     @Value("${ai.service.v2.endpoint:/api/v2/interpretar}")
     private String v2Endpoint;
 
@@ -48,8 +54,10 @@ public class AiServiceClient {
 
     public InterpretacaoRegraResponse chamarServicoPython(InterpretacaoRegraRequest request) {
         try {
+            validarChaveInterna();
             return aiRestClient.post()
                     .uri(endpoint)
+                    .header(authHeader, authKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
@@ -93,8 +101,10 @@ public class AiServiceClient {
 
     private Map<String, Object> postarV2(String uri, Map<String, Object> payload) {
         try {
+            validarChaveInterna();
             return aiRestClient.post()
                     .uri(uri)
+                    .header(authHeader, authKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(payload)
                     .retrieve()
@@ -111,6 +121,12 @@ public class AiServiceClient {
             throw new AiServiceUnavailableException("Erro retornado pelo orquestrador de IA: " + ex.getStatusText());
         } catch (RestClientException ex) {
             throw new AiInvalidResponseException("O serviço de IA retornou uma resposta em formato inválido.", ex);
+        }
+    }
+
+    private void validarChaveInterna() {
+        if (authKey == null || authKey.isBlank()) {
+            throw new AiServiceUnavailableException("Chave interna do serviço de IA não configurada.");
         }
     }
 }

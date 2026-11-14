@@ -187,6 +187,9 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
               "estado": "DRAFT",
               "dataInicio": "%s",
               "dataFim": "%s",
+              "orcamento": 50000.00,
+              "orcamentoConfirmado": true,
+              "orcamentoConfirmadoPor": "gestor@empresa.com",
               "regras": [
                 {
                   "blocoId": "bloco-regra-extrema",
@@ -226,6 +229,9 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
               "estado": "DRAFT",
               "dataInicio": "%s",
               "dataFim": "%s",
+              "orcamento": 50000.00,
+              "orcamentoConfirmado": true,
+              "orcamentoConfirmadoPor": "gestor@empresa.com",
               "regras": [
                 {
                   "blocoId": "regra-pendente-extrema",
@@ -372,7 +378,9 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
                         .content(objectMapper.writeValueAsString(simRequest)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.protocolo", notNullValue()))
-                .andExpect(jsonPath("$.executadoViaPython").value(true))
+                .andExpect(jsonPath("$.executadoViaPython").value(false))
+                .andExpect(jsonPath("$.versaoProgramaPython").value(2))
+                .andExpect(jsonPath("$.checksumPython").isNotEmpty())
                 .andReturn();
 
         JsonNode simTree = objectMapper.readTree(simResult.getResponse().getContentAsString());
@@ -593,7 +601,7 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(saltoInvalido)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message", containsString("aprovação técnica prévia do programa Python")));
+                .andExpect(jsonPath("$.message", containsString("sequencialmente")));
     }
 
     // =========================================================================
@@ -859,6 +867,26 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
         s.setSaleChannel("ECOMMERCE");
         saleRepository.save(s);
 
+        // Simular, aceitar e aprovar gerencialmente antes do fechamento
+        MvcResult sim12Res = mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new SimulacaoPythonRequest(comp, null, 50, 0, false, false))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID sim12Id = UUID.fromString(objectMapper.readTree(sim12Res.getResponse().getContentAsString()).get("id").asText());
+        mockMvc.perform(post("/api/v1/simulacoes/{id}/aceite", sim12Id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("gestor", "Aceite"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/avancar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AvancarEsteiraRequest(4, "negocios"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/aprovar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AprovarGerenteRequest("gerente", "Aprovado"))))
+                .andExpect(status().isOk());
+
         // 1. Fechar a competência antes da apuração
         mockMvc.perform(post("/api/v1/comissoes/fechamento")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -918,12 +946,30 @@ public class Sprint3CasosExtremosE2EIntegrationTest {
         s.setSaleChannel("ECOMMERCE");
         saleRepository.save(s);
 
-        // Aprova o Python para permitir apuração
+        // Aprova o Python, simula, aceita e aprova gerencialmente para permitir apuração
         MvcResult pRes = mockMvc.perform(get("/api/v1/campanhas/{id}/programa-python", campanhaId)).andReturn();
         String hash = objectMapper.readTree(pRes.getResponse().getContentAsString()).get("checksumSha256").asText();
         mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("val", hash, "aprovado"))))
+                .andExpect(status().isOk());
+        MvcResult sim13Res = mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new SimulacaoPythonRequest(comp, null, 50, 0, false, false))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID sim13Id = UUID.fromString(objectMapper.readTree(sim13Res.getResponse().getContentAsString()).get("id").asText());
+        mockMvc.perform(post("/api/v1/simulacoes/{id}/aceite", sim13Id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("gestor", "Aceite"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/avancar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AvancarEsteiraRequest(4, "negocios"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/aprovar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AprovarGerenteRequest("gerente", "Aprovado"))))
                 .andExpect(status().isOk());
 
         // Executa apuração definitiva

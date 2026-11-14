@@ -80,6 +80,22 @@ public class ResultadoCalculo {
     @Column(name = "apuracao_campanha_id")
     private UUID apuracaoCampanhaId;
 
+    @Column(name = "desatualizado_por_correcao", nullable = false)
+    private boolean desatualizadoPorCorrecao = false;
+
+    @Column(name = "desatualizado_em")
+    private OffsetDateTime desatualizadoEm;
+
+    @Column(name = "motivo_desatualizacao", columnDefinition = "TEXT")
+    private String motivoDesatualizacao;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "lote_correcao_id")
+    private LotePreparacao loteCorrecao;
+
+    @Column(name = "protocolo_anterior")
+    private UUID protocoloAnterior;
+
     public ResultadoCalculo() {}
 
     @PrePersist
@@ -303,5 +319,45 @@ public class ResultadoCalculo {
 
     public void setApuracaoCampanhaId(UUID apuracaoCampanhaId) {
         this.apuracaoCampanhaId = apuracaoCampanhaId;
+    }
+
+    public boolean isDesatualizadoPorCorrecao() {
+        return desatualizadoPorCorrecao;
+    }
+
+    public void setDesatualizadoPorCorrecao(boolean desatualizadoPorCorrecao) {
+        this.desatualizadoPorCorrecao = desatualizadoPorCorrecao;
+    }
+
+    public OffsetDateTime getDesatualizadoEm() {
+        return desatualizadoEm;
+    }
+
+    public void setDesatualizadoEm(OffsetDateTime desatualizadoEm) {
+        this.desatualizadoEm = desatualizadoEm;
+    }
+
+    public String getMotivoDesatualizacao() {
+        return motivoDesatualizacao;
+    }
+
+    public void setMotivoDesatualizacao(String motivoDesatualizacao) {
+        this.motivoDesatualizacao = motivoDesatualizacao;
+    }
+
+    public LotePreparacao getLoteCorrecao() {
+        return loteCorrecao;
+    }
+
+    public void setLoteCorrecao(LotePreparacao loteCorrecao) {
+        this.loteCorrecao = loteCorrecao;
+    }
+
+    public UUID getProtocoloAnterior() {
+        return protocoloAnterior;
+    }
+
+    public void setProtocoloAnterior(UUID protocoloAnterior) {
+        this.protocoloAnterior = protocoloAnterior;
     }
 }

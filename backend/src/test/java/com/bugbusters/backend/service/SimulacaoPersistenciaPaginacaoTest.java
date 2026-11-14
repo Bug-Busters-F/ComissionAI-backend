@@ -139,6 +139,8 @@ class SimulacaoPersistenciaPaginacaoTest {
         c.setTextoOriginal("Campanha para teste BACK-7");
         c.setDataInicio(LocalDate.of(2026, 11, 1));
         c.setDataFim(LocalDate.of(2026, 11, 15));
+        c.setOrcamento(new BigDecimal("100000.00"));
+        c.setOrcamentoConfirmado(true);
         campanha = campanhaRepository.save(c);
 
         // Venda 1: R$ 5.000,00 no canal ECOMMERCE

@@ -8,8 +8,11 @@ import com.bugbusters.backend.repository.CampanhaEsteiraTransicaoRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.dto.pendencia.ResumoPendenciasCampanhaResponse;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +30,12 @@ public class CampanhaEsteiraService {
     private final RegraRepository regraRepository;
     private final FechamentoService fechamentoService;
     private final AuditoriaGeralService auditoriaService;
+
+    @Autowired(required = false)
+    private CampanhaPendenciaService pendenciaService;
+
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
 
     public CampanhaEsteiraService(
             CampanhaRepository campanhaRepository,
@@ -61,6 +70,13 @@ public class CampanhaEsteiraService {
         int etapaOrigem = versao.getUltimaEtapa();
         EstadoEsteiraCampanha estadoOrigem = versao.getEstadoEsteira() != null ? versao.getEstadoEsteira() : EstadoEsteiraCampanha.EM_ELABORACAO;
 
+        if (etapaAlvo > etapaOrigem + 1) {
+            throw new BusinessException(String.format(
+                    "Transição inválida na esteira: as etapas devem ser avançadas sequencialmente (atual: %d, alvo solicitada: %d).",
+                    etapaOrigem, etapaAlvo
+            ));
+        }
+
         // Validações de pré-requisitos para cada etapa
         validarPreRequisitosParaAvanco(versao, etapaAlvo);
 
@@ -87,8 +103,8 @@ public class CampanhaEsteiraService {
 
         versao = campanhaVersaoRepository.save(versao);
 
-        String responsavel = (request.responsavel() != null && !request.responsavel().isBlank())
-                ? request.responsavel() : "analista";
+        String responsavel = usuarioAtualProvider.obterUsuarioAtual(
+                (request.responsavel() != null && !request.responsavel().isBlank()) ? request.responsavel() : "analista");
 
         TipoAcaoEsteira tipoAcao = etapaAlvo > etapaOrigem ? TipoAcaoEsteira.AVANCO_ETAPA : TipoAcaoEsteira.RETORNO_ETAPA;
 
@@ -141,11 +157,15 @@ public class CampanhaEsteiraService {
         if (request.motivo() == null || request.motivo().trim().isBlank()) {
             throw new BusinessException("A justificativa formal de devolução é obrigatória.");
         }
+        String devolvidoPor = usuarioAtualProvider.obterUsuarioAtual(request.devolvidoPor());
+        if (devolvidoPor == null || devolvidoPor.isBlank() || ("SISTEMA".equals(devolvidoPor) && (request.devolvidoPor() == null || request.devolvidoPor().isBlank()))) {
+            throw new BusinessException("O identificador do responsável pela devolução é obrigatório.");
+        }
 
         EstadoEsteiraCampanha estadoOrigem = versao.getEstadoEsteira() != null ? versao.getEstadoEsteira() : EstadoEsteiraCampanha.EM_ELABORACAO;
 
         versao.setEstadoEsteira(EstadoEsteiraCampanha.DEVOLVIDA);
-        versao.setDevolvidoPor(request.devolvidoPor());
+        versao.setDevolvidoPor(devolvidoPor);
         versao.setDevolvidoEm(OffsetDateTime.now());
         versao.setMotivoDevolucao(request.motivo().trim());
         versao.setEtapaDevolucao(etapaDestino);
@@ -165,14 +185,14 @@ public class CampanhaEsteiraService {
                 estadoOrigem,
                 EstadoEsteiraCampanha.DEVOLVIDA,
                 TipoAcaoEsteira.DEVOLUCAO_GERENCIAL,
-                request.devolvidoPor(),
+                devolvidoPor,
                 request.motivo().trim()
         );
         transicaoRepository.save(transicao);
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    request.devolvidoPor(),
+                    devolvidoPor,
                     TipoAcaoAuditoria.DEVOLUCAO_ESTEIRA,
                     TipoEntidadeAuditoria.ESTEIRA,
                     String.valueOf(campanhaId),
@@ -183,7 +203,7 @@ public class CampanhaEsteiraService {
         }
 
         log.warn("Campanha {} versão {} devolvida pelo gerente {} da etapa {} para etapa {}. Motivo: {}",
-                campanhaId, versao.getNumero(), request.devolvidoPor(), etapaOrigem, etapaDestino, request.motivo());
+                campanhaId, versao.getNumero(), devolvidoPor, etapaOrigem, etapaDestino, request.motivo());
 
         return EstadoEsteiraResponse.de(versao);
     }
@@ -208,10 +228,19 @@ public class CampanhaEsteiraService {
             throw new BusinessException("Aprovação gerencial bloqueada: a campanha não possui simulação aceita (Etapa 3).");
         }
 
+        // Valida pendências impeditivas em aberto (BUG-102)
+        validarPendenciasAbertasParaEsteira(versao, "aprovação gerencial");
+
+        String aprovadoPor = usuarioAtualProvider.obterUsuarioAtual(request.aprovadoPor());
+        if (aprovadoPor == null || aprovadoPor.isBlank() || ("SISTEMA".equals(aprovadoPor) && (request.aprovadoPor() == null || request.aprovadoPor().isBlank()))) {
+            throw new BusinessException("O identificador do gerente aprovador é obrigatório.");
+        }
+
+        int etapaOrigem = versao.getUltimaEtapa();
         EstadoEsteiraCampanha estadoOrigem = versao.getEstadoEsteira() != null ? versao.getEstadoEsteira() : EstadoEsteiraCampanha.EM_ELABORACAO;
 
         versao.setEstadoEsteira(EstadoEsteiraCampanha.APROVADA);
-        versao.setGerenteAprovador(request.aprovadoPor());
+        versao.setGerenteAprovador(aprovadoPor);
         versao.setGerenteAprovadoEm(OffsetDateTime.now());
         versao.setParecerGerente(request.parecer() != null && !request.parecer().isBlank() ? request.parecer().trim() : "Aprovação gerencial concedida.");
         versao.setUltimaEtapa(4);
@@ -227,18 +256,18 @@ public class CampanhaEsteiraService {
 
         CampanhaEsteiraTransicao transicao = new CampanhaEsteiraTransicao(
                 versao,
-                4,
+                etapaOrigem,
                 4,
                 estadoOrigem,
                 EstadoEsteiraCampanha.APROVADA,
                 TipoAcaoEsteira.APROVACAO_GERENCIAL,
-                request.aprovadoPor(),
+                aprovadoPor,
                 request.parecer() != null ? request.parecer().trim() : "Aprovado pelo gerente."
         );
         transicaoRepository.save(transicao);
 
         log.info("Campanha {} versão {} aprovada formalmente pelo gerente {}.",
-                campanhaId, versao.getNumero(), request.aprovadoPor());
+                campanhaId, versao.getNumero(), aprovadoPor);
 
         return EstadoEsteiraResponse.de(versao);
     }
@@ -247,7 +276,7 @@ public class CampanhaEsteiraService {
     public List<EsteiraTransicaoResponse> listarHistorico(Long campanhaId, Integer versaoNumero) {
         Campanha campanha = buscarCampanha(campanhaId);
         CampanhaVersao versao = resolverVersao(campanha, versaoNumero);
-        return transicaoRepository.findAllByCampanhaVersaoIdOrderByCriadoEmDesc(versao.getId())
+        return transicaoRepository.findAllByCampanhaVersaoIdOrderByCriadoEmDescIdDesc(versao.getId())
                 .stream()
                 .map(EsteiraTransicaoResponse::de)
                 .toList();
@@ -261,6 +290,7 @@ public class CampanhaEsteiraService {
             }
         }
         if (etapaAlvo >= 3) {
+            validarPendenciasAbertasParaEsteira(versao, "avanço para a Etapa " + etapaAlvo);
             List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
             boolean temIncompleta = regras.stream().anyMatch(r -> !Boolean.TRUE.equals(r.getCompleta()) || r.getTaxa() == null);
             if (temIncompleta) {
@@ -274,6 +304,19 @@ public class CampanhaEsteiraService {
             if (versao.getSimulacaoAceita() == null) {
                 throw new BusinessException("A conferência gerencial (Etapa 4) exige uma simulação formalmente aceita para a proposta atual.");
             }
+        }
+    }
+
+    private void validarPendenciasAbertasParaEsteira(CampanhaVersao versao, String operacao) {
+        if (pendenciaService == null || versao.getCampanha() == null) {
+            return;
+        }
+        ResumoPendenciasCampanhaResponse resumo = pendenciaService.listarPendencias(versao.getCampanha().getId(), versao.getNumero());
+        if (resumo != null && !resumo.aptaParaAvanco()) {
+            throw new BusinessException(String.format(
+                    "Bloqueio de %s: existem %d pendência(s) impeditiva(s) sem aceite formal registrado.",
+                    operacao, resumo.totalPendentesImpeditivas()
+            ));
         }
     }
 

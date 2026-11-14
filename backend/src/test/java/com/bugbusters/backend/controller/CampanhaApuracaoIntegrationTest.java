@@ -7,11 +7,15 @@ import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.dto.apuracao.CalculoDefinitivoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
+import com.bugbusters.backend.dto.esteira.AprovarGerenteRequest;
+import com.bugbusters.backend.dto.esteira.AvancarEsteiraRequest;
 import com.bugbusters.backend.dto.esteira.DevolverCampanhaRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.pendencia.AceitarPendenciaRequest;
 import com.bugbusters.backend.dto.programapython.AprovarProgramaPythonRequest;
 import com.bugbusters.backend.dto.programapython.AtualizarProgramaPythonRequest;
+import com.bugbusters.backend.dto.simulacao.AceiteSimulacaoRequest;
+import com.bugbusters.backend.dto.simulacao.SimulacaoPythonRequest;
 import com.bugbusters.backend.model.*;
 import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.position.PositionRepository;
@@ -176,7 +180,12 @@ class CampanhaApuracaoIntegrationTest {
                 LocalDate.of(2026, 8, 31),
                 EstadoCampanha.DRAFT,
                 List.of(regra),
-                null
+                null,
+                new BigDecimal("50000.00"),
+                null,
+                true,
+                "gestor.comissoes",
+                "Orçamento aprovado para apuração"
         );
 
         MvcResult result = mockMvc.perform(post("/api/v1/campanhas")
@@ -206,6 +215,35 @@ class CampanhaApuracaoIntegrationTest {
         mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(aprovRequest)))
+                .andExpect(status().isOk());
+
+        return checksum;
+    }
+
+    private String aprovarGerencialmente(Long campanhaId) throws Exception {
+        String checksum = aprovarProgramaPython(campanhaId);
+
+        SimulacaoPythonRequest simReq = new SimulacaoPythonRequest("2026-08", null, 50, 0, false, false);
+        MvcResult simRes = mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(simReq)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        UUID simId = UUID.fromString(objectMapper.readTree(simRes.getResponse().getContentAsString()).get("id").asText());
+        mockMvc.perform(post("/api/v1/simulacoes/{id}/aceite", simId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("gestor", "Aceite da simulação"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/avancar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AvancarEsteiraRequest(4, "negocios"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/aprovar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AprovarGerenteRequest("gerente.comercial", "Aprovação gerencial"))))
                 .andExpect(status().isOk());
 
         return checksum;
@@ -262,10 +300,32 @@ class CampanhaApuracaoIntegrationTest {
     }
 
     @Test
+    @DisplayName("Deve rejeitar apuração definitiva se campanha não estiver aprovada gerencialmente nem publicada/ativa")
+    void deveRejeitarApuracaoDefinitivaSemAprovacaoGerencial() throws Exception {
+        Long campanhaId = criarCampanhaTeste("Campanha Sem Aprovacao Gerencial");
+        aprovarProgramaPython(campanhaId);
+
+        CalculoDefinitivoCampanhaRequest calcReq = new CalculoDefinitivoCampanhaRequest(
+                "2026-08",
+                LocalDate.of(2026, 8, 1),
+                LocalDate.of(2026, 8, 31),
+                "gestor.financeiro",
+                "Tentativa sem aprovação gerencial",
+                false
+        );
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/calcular-definitivo", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(calcReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("aprovada gerencialmente")));
+    }
+
+    @Test
     @DisplayName("Deve executar cálculo definitivo com sucesso, atualizar esteira e persistir resultados e logs")
     void deveExecutarApuracaoDefinitivaComSucessoEPersistirResultadosELogs() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Liquidação Definitiva");
-        String checksum = aprovarProgramaPython(campanhaId);
+        String checksum = aprovarGerencialmente(campanhaId);
 
         CalculoDefinitivoCampanhaRequest calcReq = new CalculoDefinitivoCampanhaRequest(
                 "2026-08",
@@ -284,7 +344,7 @@ class CampanhaApuracaoIntegrationTest {
                 .andExpect(jsonPath("$.protocolo").isNotEmpty())
                 .andExpect(jsonPath("$.campanhaId").value(campanhaId))
                 .andExpect(jsonPath("$.competencia").value("2026-08"))
-                .andExpect(jsonPath("$.executadoViaPython").value(true))
+                .andExpect(jsonPath("$.executadoViaPython").value(false))
                 .andExpect(jsonPath("$.versaoProgramaPython").value(1))
                 .andExpect(jsonPath("$.checksumPython").value(checksum))
                 .andExpect(jsonPath("$.totalCalculados").value(1))
@@ -305,7 +365,7 @@ class CampanhaApuracaoIntegrationTest {
         assertThat(apuracaoSalva).isNotNull();
         assertThat(apuracaoSalva.getStatus()).isEqualTo("CONCLUIDO");
         assertThat(apuracaoSalva.getValorTotalComissao()).isEqualByComparingTo("500.00");
-        assertThat(apuracaoSalva.isExecutadoViaPython()).isTrue();
+        assertThat(apuracaoSalva.isExecutadoViaPython()).isFalse();
 
         // Verificação em banco: tb_resultado_calculo com vínculo e tipo CAMPANHA_DEFINITIVO
         List<ResultadoCalculo> resultados = resultadoCalculoRepository.findAllByApuracaoCampanhaIdOrderByDataVendaAsc(apuracaoId);
@@ -328,7 +388,7 @@ class CampanhaApuracaoIntegrationTest {
     @DisplayName("Deve consultar última apuração definitiva e listar histórico da campanha")
     void deveConsultarUltimaApuracaoEHistorico() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Historico Apuracoes");
-        aprovarProgramaPython(campanhaId);
+        aprovarGerencialmente(campanhaId);
 
         CalculoDefinitivoCampanhaRequest calcReq = new CalculoDefinitivoCampanhaRequest(
                 "2026-08",
@@ -372,7 +432,7 @@ class CampanhaApuracaoIntegrationTest {
     @DisplayName("Deve respeitar trava de fechamento formal se competência estiver concluída a menos que seja forçado")
     void deveRespeitarTravaDeFechamentoFormalSeCompetenciaConcluida() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha com Trava Fechamento");
-        aprovarProgramaPython(campanhaId);
+        aprovarGerencialmente(campanhaId);
 
         // Insere fechamento prévio concluído para competência 2026-08
         FechamentoCompetencia fechamento = new FechamentoCompetencia("2026-08", UUID.randomUUID(), "controladoria", "Fechamento contábil");

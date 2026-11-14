@@ -9,6 +9,7 @@ import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.*;
 import com.bugbusters.backend.repository.*;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import com.bugbusters.backend.service.client.AiServiceClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -36,6 +37,9 @@ public class SimulacaoPythonOrquestradorService {
     private final CampanhaEsteiraTransicaoRepository transicaoRepository;
     private final AiServiceClient aiServiceClient;
     private final AuditoriaGeralService auditoriaService;
+
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider;
 
     public SimulacaoPythonOrquestradorService(
             CampanhaRepository campanhaRepository,
@@ -66,11 +70,23 @@ public class SimulacaoPythonOrquestradorService {
         Campanha campanha = buscarCampanha(campanhaId);
         CampanhaVersao versao = resolverVersao(campanha, versaoNumero);
 
-        // 1. Resolve o programa Python
+        if (versao.getEstadoEsteira() == EstadoEsteiraCampanha.DEVOLVIDA) {
+            throw new BusinessException("A versão da campanha está devolvida e precisa ser ajustada antes de executar uma nova simulação.");
+        }
+
+        // 1. Resolve o programa Python homologado
         CampanhaProgramaPython programa = resolverProgramaPython(campanhaId, versao, request.versaoPrograma());
         if (programa == null) {
             throw new BusinessException("Nenhum programa Python executável foi encontrado para esta campanha.");
         }
+
+        int etapaOrigem = versao.getUltimaEtapa();
+        EstadoEsteiraCampanha estadoOrigem = versao.getEstadoEsteira() != null
+                ? versao.getEstadoEsteira()
+                : EstadoEsteiraCampanha.EM_ELABORACAO;
+        String ator = usuarioAtualProvider != null
+                ? usuarioAtualProvider.obterUsuarioAtual("orquestrador-python")
+                : "orquestrador-python";
 
         // 2. Resolve as regras da versão
         List<Regra> regrasEntidade = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
@@ -99,16 +115,19 @@ public class SimulacaoPythonOrquestradorService {
         // 4. Executa e persiste a simulação base
         SimulacaoCenariosResponse resp = simulacaoCenariosService.simularEPersistir(cenariosRequest);
 
-        // 5. Enriquece a simulação persistida com os metadados do programa Python executado
+        // 5. Enriquece a simulação persistida com os metadados do programa validado (motor Java atual)
         if (resp.id() != null) {
             Simulacao sim = simulacaoRepository.findById(resp.id()).orElse(null);
             if (sim != null) {
-                sim.setExecutadoViaPython(true);
+                sim.setExecutadoViaPython(false);
                 sim.setCodigoPythonExecutado(programa.getCodigoFonte());
                 sim.setChecksumPython(programa.getChecksumSha256());
                 sim.setVersaoProgramaPython(programa.getVersaoPrograma());
-                sim.setSaidaPythonRaw("{\"motor\": \"PYTHON_XAI_SANDBOX\", \"versaoPrograma\": " + programa.getVersaoPrograma() +
-                        ", \"checksum\": \"" + programa.getChecksumSha256() + "\"}");
+                sim.setSaidaPythonRaw(String.format(
+                        "{\"motor\": \"JAVA_CENARIOS_ENGINE\", \"sandboxConectado\": false, \"versaoProgramaValidado\": %d, \"checksum\": \"%s\"}",
+                        programa.getVersaoPrograma(),
+                        programa.getChecksumSha256() != null ? programa.getChecksumSha256() : ""
+                ));
                 simulacaoRepository.save(sim);
             }
         }
@@ -123,17 +142,19 @@ public class SimulacaoPythonOrquestradorService {
         }
         campanhaVersaoRepository.save(versao);
 
+        EstadoEsteiraCampanha estadoDestino = versao.getEstadoEsteira();
+
         // 7. Registra transição na esteira
         if (transicaoRepository != null) {
             transicaoRepository.save(new CampanhaEsteiraTransicao(
                     versao,
+                    etapaOrigem,
                     versao.getUltimaEtapa(),
-                    3,
-                    versao.getEstadoEsteira(),
-                    EstadoEsteiraCampanha.EM_SIMULACAO,
+                    estadoOrigem,
+                    estadoDestino,
                     TipoAcaoEsteira.AVANCO_ETAPA,
-                    "orquestrador-python",
-                    String.format("Simulação executada via programa Python (v%d - %s) para competência %s",
+                    ator,
+                    String.format("Simulação orquestrada no motor Java com programa Python validado (v%d - %s) para competência %s",
                             programa.getVersaoPrograma(),
                             programa.getChecksumSha256() != null && programa.getChecksumSha256().length() >= 8
                                     ? programa.getChecksumSha256().substring(0, 8) : "hash",
@@ -143,22 +164,22 @@ public class SimulacaoPythonOrquestradorService {
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    "orquestrador-python",
+                    ator,
                     TipoAcaoAuditoria.EXECUCAO_SIMULACAO,
                     TipoEntidadeAuditoria.SIMULACAO,
                     String.valueOf(campanhaId),
                     versao.getNumero(),
-                    String.format("Simulação Python executada com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
-                            resp.protocolo(), resp.totalVendasRecortadas(), resp.valorTotalRecortado()),
-                    String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"vendas\": %d}",
+                    String.format("Simulação orquestrada no motor Java (programa validado v%d) com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
+                            programa.getVersaoPrograma(), resp.protocolo(), resp.totalVendasRecortadas(), resp.valorTotalRecortado()),
+                    String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"vendas\": %d, \"motor\": \"JAVA_CENARIOS_ENGINE\"}",
                             resp.protocolo(), request.competencia(), resp.totalVendasRecortadas())
             );
         }
 
-        log.info("Simulação orquestrada via Python (v{}) concluída e persistida para campanha {} versão {}. Protocolo: {}",
+        log.info("Simulação orquestrada no motor Java (programa validado v{}) concluída e persistida para campanha {} versão {}. Protocolo: {}",
                 programa.getVersaoPrograma(), campanhaId, versao.getNumero(), resp.protocolo());
 
-        // 8. Retorna a resposta completa enriquecida com os dados do programa Python
+        // 8. Retorna a resposta completa enriquecida com os metadados do programa validado
         return new SimulacaoCenariosResponse(
                 resp.id(),
                 resp.protocolo(),
@@ -179,28 +200,38 @@ public class SimulacaoPythonOrquestradorService {
                 resp.vendas(),
                 resp.avisosGerais(),
                 resp.memoriaCalculoConsolidada(),
-                true,
+                resp.enquadramentoOrcamento(),
+                false,
                 programa.getVersaoPrograma(),
                 programa.getChecksumSha256()
         );
     }
 
     private CampanhaProgramaPython resolverProgramaPython(Long campanhaId, CampanhaVersao versao, Integer versaoDesejada) {
+        CampanhaProgramaPython programa;
         if (versaoDesejada != null) {
-            return programaPythonRepository.findByCampanhaVersaoIdAndVersaoPrograma(versao.getId(), versaoDesejada)
+            programa = programaPythonRepository.findByCampanhaVersaoIdAndVersaoPrograma(versao.getId(), versaoDesejada)
                     .orElseThrow(() -> new ResourceNotFoundException(String.format(
                             "Versão %d do programa Python não encontrada para a versão %d da campanha %d.",
                             versaoDesejada, versao.getNumero(), campanhaId
                     )));
+        } else if (versao.getProgramaPythonAprovado() != null) {
+            programa = versao.getProgramaPythonAprovado();
+        } else {
+            programa = programaPythonRepository.findFirstByCampanhaVersaoIdOrderByVersaoProgramaDesc(versao.getId())
+                    .orElseThrow(() -> new BusinessException(
+                            "Nenhum programa Python homologado e aprovado foi encontrado para esta campanha/versão. Homologue um programa antes de simular."
+                    ));
         }
-        if (versao.getProgramaPythonAprovado() != null) {
-            return versao.getProgramaPythonAprovado();
+
+        if (!programa.isAprovado()) {
+            throw new BusinessException(String.format(
+                    "O programa Python v%d não está aprovado tecnicamente (status atual: %s). Aprove-o antes de executar a simulação.",
+                    programa.getVersaoPrograma(),
+                    programa.getStatusAprovacao()
+            ));
         }
-        return programaPythonRepository.findFirstByCampanhaVersaoIdOrderByVersaoProgramaDesc(versao.getId())
-                .orElseGet(() -> {
-                    ProgramaPythonResponse r = programaPythonService.obterOuGerarProgramaAtual(campanhaId, versao.getNumero());
-                    return programaPythonRepository.findById(r.id()).orElse(null);
-                });
+        return programa;
     }
 
     private RegraItemRequest converterRegraParaItemRequest(Regra r) {

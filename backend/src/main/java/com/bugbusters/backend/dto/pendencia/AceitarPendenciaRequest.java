@@ -31,12 +31,29 @@ public record AceitarPendenciaRequest(
         SeveridadePendencia severidade,
 
         @Schema(description = "Identificação do responsável ou gestor que assume o aceite do risco", example = "gestor.comissoes@empresa.com")
-        @NotBlank(message = "A identificação do responsável pelo aceite é obrigatória.")
         String aceitoPor,
 
         @Schema(description = "Justificativa formal do aceite e medidas de mitigação", example = "Loja inaugurada na semana corrente; inclusão formal em andamento no ERP.")
         @NotBlank(message = "A justificativa formal do aceite é obrigatória.")
-        String motivo
+        String motivo,
+
+        @Schema(description = "ID interno opcional do lote de envio associado à pendência de importação")
+        Long envioArquivoId,
+
+        @Schema(description = "ID opcional da inconsistência de importação aceita")
+        Long inconsistenciaImportacaoId
 ) {
+    public AceitarPendenciaRequest(
+            Long regraId,
+            String pendenciaIdentificador,
+            String codigo,
+            String campo,
+            String mensagem,
+            SeveridadePendencia severidade,
+            String aceitoPor,
+            String motivo
+    ) {
+        this(regraId, pendenciaIdentificador, codigo, campo, mensagem, severidade, aceitoPor, motivo, null, null);
+    }
 }
 

@@ -4,6 +4,7 @@ import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.model.EstadoEsteiraCampanha;
+import com.bugbusters.backend.model.OrigemOrcamentoCampanha;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -39,7 +40,40 @@ public record CampanhaResponse(
         String devolvidoPor,
         OffsetDateTime devolvidoEm,
         String motivoDevolucao,
-        Integer etapaDevolucao
+        Integer etapaDevolucao,
+
+        @Schema(description = "Teto orçamentário monetário da campanha (BACK-8)", example = "50000.00")
+        BigDecimal orcamento,
+
+        @Schema(description = "Orçamento monetário extraído pela IA", example = "45000.00")
+        BigDecimal orcamentoExtraidoIa,
+
+        @Schema(description = "Origem do orçamento cadastrado", example = "CONFIRMADO_USUARIO")
+        OrigemOrcamentoCampanha origemOrcamento,
+
+        @Schema(description = "Indica se o orçamento foi confirmado explicitamente", example = "true")
+        Boolean orcamentoConfirmado,
+
+        @Schema(description = "Responsável pela confirmação do orçamento", example = "analista.comissoes@empresa.com")
+        String orcamentoConfirmadoPor,
+
+        @Schema(description = "Data e hora da confirmação do orçamento")
+        OffsetDateTime orcamentoConfirmadoEm,
+
+        @Schema(description = "Justificativa informada na confirmação/alteração do orçamento")
+        String justificativaOrcamento,
+
+        @Schema(description = "Indica se a campanha foi encaminhada ao gerente para aprovação", example = "false")
+        Boolean encaminhadaGerente,
+
+        @Schema(description = "Responsável pelo encaminhamento ao gerente")
+        String encaminhadaGerentePor,
+
+        @Schema(description = "Data e hora do encaminhamento ao gerente")
+        OffsetDateTime encaminhadaGerenteEm,
+
+        @Schema(description = "Observação de encaminhamento ao gerente")
+        String observacaoEncaminhamento
 ) {
     public CampanhaResponse(
             Long id,
@@ -53,7 +87,10 @@ public record CampanhaResponse(
             OffsetDateTime criadoEm,
             OffsetDateTime atualizadoEm
     ) {
-        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, null, null, null, null, 1, 1, null, null, null, null, false, null, null, null, null);
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm,
+                null, null, null, null, 1, 1, null, null, null,
+                null, false, null, null, null, null,
+                null, null, null, false, null, null, null, false, null, null, null);
     }
 
     public CampanhaResponse(
@@ -77,7 +114,10 @@ public record CampanhaResponse(
             Integer versaoOrigem,
             String motivoBloqueioEdicao
     ) {
-        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm, simulacaoAceitaId, statusAceite, versaoVigente, versaoProposta, ultimaEtapa, etapaMaisAvancada, revisaoControle, versaoOrigem, motivoBloqueioEdicao, null, false, null, null, null, null);
+        this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm,
+                simulacaoAceitaId, statusAceite, versaoVigente, versaoProposta, ultimaEtapa, etapaMaisAvancada, revisaoControle, versaoOrigem, motivoBloqueioEdicao,
+                null, false, null, null, null, null,
+                null, null, null, false, null, null, null, false, null, null, null);
     }
 
     public record RegraVinculadaDTO(

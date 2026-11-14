@@ -11,6 +11,7 @@ import com.bugbusters.backend.repository.CampanhaPendenciaAceiteRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,9 @@ public class CampanhaPendenciaService {
     private final CampanhaPendenciaAceiteRepository aceiteRepository;
     private final AuditoriaGeralService auditoriaService;
 
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
+
     public CampanhaPendenciaService(
             CampanhaRepository campanhaRepository,
             CampanhaVersaoRepository campanhaVersaoRepository,
@@ -58,7 +62,8 @@ public class CampanhaPendenciaService {
         CampanhaVersao versao = resolverVersao(campanha, versaoNumero);
         validarImutabilidadeVersao(versao);
 
-        if (request.aceitoPor() == null || request.aceitoPor().trim().isBlank()) {
+        String aceitoPor = usuarioAtualProvider.obterUsuarioAtual(request.aceitoPor());
+        if (aceitoPor == null || aceitoPor.isBlank() || ("SISTEMA".equals(aceitoPor) && (request.aceitoPor() == null || request.aceitoPor().isBlank()))) {
             throw new BusinessException("A identificação do responsável pelo aceite da pendência é obrigatória.");
         }
         if (request.motivo() == null || request.motivo().trim().isBlank()) {
@@ -89,9 +94,11 @@ public class CampanhaPendenciaService {
         CampanhaPendenciaAceite aceite;
         if (existente.isPresent()) {
             aceite = existente.get();
-            aceite.setAceitoPor(request.aceitoPor().trim());
+            aceite.setAceitoPor(aceitoPor);
             aceite.setMotivoAceite(request.motivo().trim());
             if (regra != null) aceite.setRegra(regra);
+            if (request.envioArquivoId() != null) aceite.setEnvioArquivoId(request.envioArquivoId());
+            if (request.inconsistenciaImportacaoId() != null) aceite.setInconsistenciaImportacaoId(request.inconsistenciaImportacaoId());
             if (request.campo() != null) aceite.setCampo(request.campo().trim());
             if (request.mensagem() != null) aceite.setMensagem(request.mensagem().trim());
             if (request.severidade() != null) aceite.setSeveridade(request.severidade());
@@ -105,9 +112,11 @@ public class CampanhaPendenciaService {
                     request.campo() != null ? request.campo().trim() : null,
                     request.mensagem() != null ? request.mensagem().trim() : null,
                     request.severidade() != null ? request.severidade() : SeveridadePendencia.IMPEDIMENTO,
-                    request.aceitoPor().trim(),
+                    aceitoPor,
                     request.motivo().trim()
             );
+            aceite.setEnvioArquivoId(request.envioArquivoId());
+            aceite.setInconsistenciaImportacaoId(request.inconsistenciaImportacaoId());
         }
 
         aceite = aceiteRepository.save(aceite);
@@ -117,7 +126,7 @@ public class CampanhaPendenciaService {
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    request.aceitoPor(),
+                    aceitoPor,
                     TipoAcaoAuditoria.ACEITE_PENDENCIA,
                     TipoEntidadeAuditoria.PENDENCIA,
                     String.valueOf(campanhaId),
@@ -130,7 +139,7 @@ public class CampanhaPendenciaService {
         }
 
         log.info("Aceite rastreável registrado para pendência '{}' (Código: {}) da campanha {} por '{}'.",
-                identificador, request.codigo(), campanhaId, request.aceitoPor());
+                identificador, request.codigo(), campanhaId, aceitoPor);
 
         return PendenciaAceiteResponse.de(aceite);
     }
@@ -150,7 +159,8 @@ public class CampanhaPendenciaService {
         if (StatusAceitePendencia.REVOGADA.equals(aceite.getStatus())) {
             throw new BusinessException("O aceite de pendência ID " + aceiteId + " já se encontra revogado.");
         }
-        if (request.revogadoPor() == null || request.revogadoPor().trim().isBlank()) {
+        String revogadoPor = usuarioAtualProvider.obterUsuarioAtual(request.revogadoPor());
+        if (revogadoPor == null || revogadoPor.isBlank() || ("SISTEMA".equals(revogadoPor) && (request.revogadoPor() == null || request.revogadoPor().isBlank()))) {
             throw new BusinessException("A identificação do responsável pela revogação é obrigatória.");
         }
         if (request.motivo() == null || request.motivo().trim().isBlank()) {
@@ -162,7 +172,7 @@ public class CampanhaPendenciaService {
             validarImutabilidadeVersao(versao);
         }
 
-        aceite.revogar(request.revogadoPor().trim(), request.motivo().trim());
+        aceite.revogar(revogadoPor, request.motivo().trim());
         aceite = aceiteRepository.save(aceite);
 
         // Reavalia a completude das regras caso algum impedimento volte a ficar em aberto
@@ -172,7 +182,7 @@ public class CampanhaPendenciaService {
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    request.revogadoPor(),
+                    revogadoPor,
                     TipoAcaoAuditoria.REVOGACAO_ACEITE_PENDENCIA,
                     TipoEntidadeAuditoria.PENDENCIA,
                     String.valueOf(campanhaId),
@@ -184,7 +194,7 @@ public class CampanhaPendenciaService {
         }
 
         log.warn("Aceite de pendência {} da campanha {} revogado por '{}'. Motivo: {}",
-                aceiteId, campanhaId, request.revogadoPor(), request.motivo());
+                aceiteId, campanhaId, revogadoPor, request.motivo());
 
         return PendenciaAceiteResponse.de(aceite);
     }
@@ -208,13 +218,6 @@ public class CampanhaPendenciaService {
                         (existente, substituto) -> existente
                 ));
 
-        Map<String, CampanhaPendenciaAceite> aceitesPorCodigo = aceitesAtivos.stream()
-                .collect(Collectors.toMap(
-                        CampanhaPendenciaAceite::getCodigo,
-                        a -> a,
-                        (existente, substituto) -> existente
-                ));
-
         List<ItemPendenciaResumoDTO> itens = new ArrayList<>();
         List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
 
@@ -226,7 +229,7 @@ public class CampanhaPendenciaService {
                 for (PendenciaRastreabilidadeDTO p : rastreabilidade.pendencias()) {
                     String pid = (p.id() != null && !p.id().isBlank()) ? p.id() : ("regra:" + r.getId() + ":" + p.codigo() + ":" + (p.campo() != null ? p.campo() : ""));
                     if (idsProcessados.add(pid)) {
-                        CampanhaPendenciaAceite ace = aceitesPorIdentificador.getOrDefault(pid, aceitesPorCodigo.get(p.codigo()));
+                        CampanhaPendenciaAceite ace = aceitesPorIdentificador.get(pid);
                         itens.add(new ItemPendenciaResumoDTO(
                                 pid,
                                 r.getId(),
@@ -243,7 +246,7 @@ public class CampanhaPendenciaService {
                 for (PendenciaRastreabilidadeDTO p : rastreabilidade.pendenciasCampanha()) {
                     String pid = (p.id() != null && !p.id().isBlank()) ? p.id() : ("campanha:" + p.codigo());
                     if (idsProcessados.add(pid)) {
-                        CampanhaPendenciaAceite ace = aceitesPorIdentificador.getOrDefault(pid, aceitesPorCodigo.get(p.codigo()));
+                        CampanhaPendenciaAceite ace = aceitesPorIdentificador.get(pid);
                         itens.add(new ItemPendenciaResumoDTO(
                                 pid,
                                 null,
@@ -264,7 +267,7 @@ public class CampanhaPendenciaService {
                 if (semPublico && !Boolean.TRUE.equals(rastreabilidade.publicoTodasVendas())) {
                     String pid = "regra:" + r.getId() + ":PUBLICO_GERAL";
                     if (idsProcessados.add(pid)) {
-                        CampanhaPendenciaAceite ace = aceitesPorIdentificador.getOrDefault(pid, aceitesPorCodigo.get("PUBLICO_GERAL"));
+                        CampanhaPendenciaAceite ace = aceitesPorIdentificador.get(pid);
                         itens.add(new ItemPendenciaResumoDTO(
                                 pid,
                                 r.getId(),
@@ -281,7 +284,7 @@ public class CampanhaPendenciaService {
             } else if (r.getPendencias() != null && !r.getPendencias().isBlank()) {
                 String pid = "regra:" + r.getId() + ":PENDENCIA_REGRA";
                 if (idsProcessados.add(pid)) {
-                    CampanhaPendenciaAceite ace = aceitesPorIdentificador.getOrDefault(pid, aceitesPorCodigo.get("PENDENCIA_REGRA"));
+                    CampanhaPendenciaAceite ace = aceitesPorIdentificador.get(pid);
                     itens.add(new ItemPendenciaResumoDTO(
                             pid,
                             r.getId(),
@@ -359,20 +362,43 @@ public class CampanhaPendenciaService {
                 versao.getId(), StatusAceitePendencia.ACEITA
         );
 
-        Set<String> codigosEIdentificadoresAceitos = new HashSet<>();
-        for (CampanhaPendenciaAceite ace : aceitesAtivos) {
-            codigosEIdentificadoresAceitos.add(ace.getPendenciaIdentificador());
-            codigosEIdentificadoresAceitos.add(ace.getCodigo());
-            if (ace.getCampo() != null && !ace.getCampo().isBlank()) {
-                codigosEIdentificadoresAceitos.add(ace.getCampo() + ":" + ace.getCodigo());
-            }
-        }
+        Map<String, CampanhaPendenciaAceite> aceitesPorIdentificador = aceitesAtivos.stream()
+                .collect(Collectors.toMap(
+                        CampanhaPendenciaAceite::getPendenciaIdentificador,
+                        a -> a,
+                        (existente, substituto) -> existente
+                ));
 
         List<Regra> regras = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
         for (Regra r : regras) {
             RastreabilidadeRegraDTO rastreabilidade = RastreabilidadeRegraService.ler(r);
             if (rastreabilidade != null) {
-                RastreabilidadeRegraService.aplicar(r, rastreabilidade, codigosEIdentificadoresAceitos);
+                Set<String> identAceitosDaRegra = new HashSet<>();
+                for (CampanhaPendenciaAceite ace : aceitesAtivos) {
+                    if (ace.getRegra() == null || Objects.equals(ace.getRegra().getId(), r.getId())) {
+                        identAceitosDaRegra.add(ace.getPendenciaIdentificador());
+                    }
+                }
+                for (PendenciaRastreabilidadeDTO p : rastreabilidade.pendencias()) {
+                    if (p.id() == null || p.id().isBlank()) {
+                        String pidSintetico = "regra:" + r.getId() + ":" + p.codigo() + ":" + (p.campo() != null ? p.campo() : "");
+                        if (aceitesPorIdentificador.containsKey(pidSintetico) && p.codigo() != null) {
+                            identAceitosDaRegra.add(p.codigo());
+                        }
+                    }
+                }
+                for (PendenciaRastreabilidadeDTO p : rastreabilidade.pendenciasCampanha()) {
+                    if (p.id() == null || p.id().isBlank()) {
+                        String pidSintetico = "campanha:" + p.codigo();
+                        if (aceitesPorIdentificador.containsKey(pidSintetico) && p.codigo() != null) {
+                            identAceitosDaRegra.add(p.codigo());
+                        }
+                    }
+                }
+                if (aceitesPorIdentificador.containsKey("regra:" + r.getId() + ":PUBLICO_GERAL")) {
+                    identAceitosDaRegra.add("PUBLICO_GERAL");
+                }
+                RastreabilidadeRegraService.aplicar(r, rastreabilidade, identAceitosDaRegra);
             } else {
                 // Para regras legadas, se tem taxa válida e não tem impedimentos abertos
                 if (r.getTaxa() != null) {

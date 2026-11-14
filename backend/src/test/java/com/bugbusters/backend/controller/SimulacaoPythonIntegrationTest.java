@@ -7,6 +7,7 @@ import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
+import com.bugbusters.backend.dto.programapython.AprovarProgramaPythonRequest;
 import com.bugbusters.backend.dto.simulacao.AceiteSimulacaoRequest;
 import com.bugbusters.backend.dto.simulacao.SimulacaoPythonRequest;
 import com.bugbusters.backend.model.Campanha;
@@ -161,7 +162,12 @@ class SimulacaoPythonIntegrationTest {
                 LocalDate.of(2026, 6, 30),
                 EstadoCampanha.DRAFT,
                 List.of(regra1),
-                null
+                null,
+                new BigDecimal("50000.00"),
+                null,
+                true,
+                "gestor.comissoes",
+                "Orçamento aprovado para simulação"
         );
 
         MvcResult res = mockMvc.perform(post("/api/v1/campanhas")
@@ -174,10 +180,39 @@ class SimulacaoPythonIntegrationTest {
         return json.get("id").asLong();
     }
 
+    private void aprovarProgramaPython(Long campanhaId) throws Exception {
+        MvcResult resProg = mockMvc.perform(get("/api/v1/campanhas/{id}/programa-python", campanhaId))
+                .andExpect(status().isOk())
+                .andReturn();
+        String checksum = objectMapper.readTree(resProg.getResponse().getContentAsString()).get("checksumSha256").asText();
+        AprovarProgramaPythonRequest aprovReq = new AprovarProgramaPythonRequest(
+                "revisor.tecnico",
+                checksum,
+                "Programa homologado"
+        );
+        mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(aprovReq)))
+                .andExpect(status().isOk());
+    }
+
     @Test
-    @DisplayName("Deve orquestrar e persistir simulação executada via programa Python com sucesso (BUG-106 / BACK-11)")
+    @DisplayName("Deve rejeitar simulação orquestrada caso não exista programa Python aprovado (400 Bad Request)")
+    void deveRejeitarSimulacaoSemProgramaPythonAprovado() throws Exception {
+        Long campanhaId = criarCampanhaComRegra();
+        SimulacaoPythonRequest req = new SimulacaoPythonRequest("2026-07", null, 50, 0, false, false);
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Deve orquestrar e persistir simulação no motor Java com programa Python validado (BUG-106 / BACK-11)")
     void deveOrquestrarEPersistirSimulacaoPythonComSucesso() throws Exception {
         Long campanhaId = criarCampanhaComRegra();
+        aprovarProgramaPython(campanhaId);
 
         SimulacaoPythonRequest req = new SimulacaoPythonRequest("2026-07", null, 50, 0, false, false);
 
@@ -188,7 +223,7 @@ class SimulacaoPythonIntegrationTest {
                 .andExpect(jsonPath("$.id").isNotEmpty())
                 .andExpect(jsonPath("$.protocolo").isNotEmpty())
                 .andExpect(jsonPath("$.competencia").value("2026-07"))
-                .andExpect(jsonPath("$.executadoViaPython").value(true))
+                .andExpect(jsonPath("$.executadoViaPython").value(false))
                 .andExpect(jsonPath("$.versaoProgramaPython").value(1))
                 .andExpect(jsonPath("$.checksumPython").isNotEmpty())
                 .andExpect(jsonPath("$.totalVendasRecortadas").value(greaterThanOrEqualTo(1)))
@@ -203,18 +238,19 @@ class SimulacaoPythonIntegrationTest {
 
         // Validação da persistência relacional em tb_simulacao
         Simulacao simPersistida = simulacaoRepository.findById(simulacaoId).orElseThrow();
-        assertThat(simPersistida.isExecutadoViaPython()).isTrue();
+        assertThat(simPersistida.isExecutadoViaPython()).isFalse();
         assertThat(simPersistida.getVersaoProgramaPython()).isEqualTo(1);
         assertThat(simPersistida.getChecksumPython()).isNotBlank();
         assertThat(simPersistida.getCodigoPythonExecutado()).contains("def calcular_comissao");
     }
 
     @Test
-    @DisplayName("Deve permitir aceite formal da simulação orquestrada via Python")
+    @DisplayName("Deve permitir aceite formal da simulação orquestrada")
     void devePermitirAceiteFormalDaSimulacaoPython() throws Exception {
         Long campanhaId = criarCampanhaComRegra();
+        aprovarProgramaPython(campanhaId);
 
-        // 1. Executa simulação Python
+        // 1. Executa simulação orquestrada
         SimulacaoPythonRequest req = new SimulacaoPythonRequest("2026-07", null, null, null, null, null);
         MvcResult simRes = mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -226,7 +262,7 @@ class SimulacaoPythonIntegrationTest {
         UUID simId = UUID.fromString(simJson.get("id").asText());
 
         // 2. Aceita a simulação
-        AceiteSimulacaoRequest aceiteReq = new AceiteSimulacaoRequest("gestor.vendas@empresa.com", "Simulação orçamentária aprovada em Python");
+        AceiteSimulacaoRequest aceiteReq = new AceiteSimulacaoRequest("gestor.vendas@empresa.com", "Simulação orçamentária aprovada");
         mockMvc.perform(post("/api/v1/simulacoes/{id}/aceite", simId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(aceiteReq)))
@@ -238,13 +274,14 @@ class SimulacaoPythonIntegrationTest {
         Campanha c = campanhaRepository.findById(campanhaId).orElseThrow();
         assertThat(c.getSimulacaoAceita()).isNotNull();
         assertThat(c.getSimulacaoAceita().getId()).isEqualTo(simId);
-        assertThat(c.getSimulacaoAceita().isExecutadoViaPython()).isTrue();
+        assertThat(c.getSimulacaoAceita().isExecutadoViaPython()).isFalse();
     }
 
     @Test
-    @DisplayName("Deve atualizar a esteira e registrar histórico de transição ao simular em Python")
+    @DisplayName("Deve atualizar a esteira e registrar histórico de transição ao simular")
     void deveAtualizarEsteiraERegistrarHistorico() throws Exception {
         Long campanhaId = criarCampanhaComRegra();
+        aprovarProgramaPython(campanhaId);
 
         SimulacaoPythonRequest req = new SimulacaoPythonRequest("2026-07", null, null, null, null, null);
         mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)

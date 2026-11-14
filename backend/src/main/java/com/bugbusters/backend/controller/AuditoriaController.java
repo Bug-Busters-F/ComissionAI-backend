@@ -1,5 +1,6 @@
 package com.bugbusters.backend.controller;
 
+import com.bugbusters.backend.auth.Usuario;
 import com.bugbusters.backend.dto.auditoria.AuditoriaResponseDTO;
 import com.bugbusters.backend.dto.auditoria.FiltroAuditoriaDTO;
 import com.bugbusters.backend.dto.auditoria.RegistroAuditoriaDTO;
@@ -7,6 +8,7 @@ import com.bugbusters.backend.dto.auditoria.ResumoAuditoriaDTO;
 import com.bugbusters.backend.model.TipoAcaoAuditoria;
 import com.bugbusters.backend.model.TipoEntidadeAuditoria;
 import com.bugbusters.backend.service.AuditoriaGeralService;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -23,6 +25,8 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -37,6 +41,9 @@ import java.util.UUID;
 public class AuditoriaController {
 
     private final AuditoriaGeralService auditoriaService;
+
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
 
     @Autowired
     public AuditoriaController(AuditoriaGeralService auditoriaService) {
@@ -58,10 +65,12 @@ public class AuditoriaController {
     ) {
         String ip = servletRequest != null ? servletRequest.getRemoteAddr() : null;
         String userAgent = servletRequest != null ? servletRequest.getHeader("User-Agent") : null;
+        String usuarioAutenticado = usuarioAtualProvider.obterUsuarioAtual(request.usuario());
+        String perfilAutenticado = resolverPerfilAutenticado(request.perfilUsuario());
 
         RegistroAuditoriaDTO enriched = new RegistroAuditoriaDTO(
-                request.usuario(),
-                request.perfilUsuario(),
+                usuarioAutenticado,
+                perfilAutenticado,
                 request.tipoAcao(),
                 request.tipoEntidade(),
                 request.entidadeId(),
@@ -77,6 +86,14 @@ public class AuditoriaController {
 
         AuditoriaResponseDTO response = auditoriaService.registrarAcao(enriched);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    private String resolverPerfilAutenticado(String perfilPaliativo) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof Usuario u && u.getPapel() != null) {
+            return u.getPapel().name();
+        }
+        return perfilPaliativo;
     }
 
     @GetMapping

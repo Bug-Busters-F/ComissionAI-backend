@@ -49,6 +49,7 @@ class CampanhaHistoricoIntegrationTest {
         ObjectNode c = json.createObjectNode();
         c.put("titulo", titulo); c.put("textoOriginal", "Campanha de teste " + titulo);
         c.put("estado", "DRAFT"); c.put("dataInicio", "2038-01-01"); c.put("dataFim", "2038-01-31");
+        c.put("orcamento", 100000.0); c.put("orcamentoConfirmado", true);
         var collection = c.putArray("regras"); for (var r : regras) collection.add(r);
         return c;
     }

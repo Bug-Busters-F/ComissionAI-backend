@@ -1,6 +1,7 @@
 package com.bugbusters.backend.model;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -23,6 +24,20 @@ public class ExecucaoCalculo {
     @Column(name = "resultado", columnDefinition = "TEXT") private String resultado;
 
     @Column(nullable = false) private UUID tentativa = UUID.randomUUID();
+
+    @Column(name = "orcamento_total_campanhas", precision = 18, scale = 2)
+    private BigDecimal orcamentoTotalCampanhas;
+
+    @Column(name = "comissao_total_apurada", precision = 18, scale = 2)
+    private BigDecimal comissaoTotalApurada;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_enquadramento_execucao", length = 30)
+    private StatusEnquadramentoOrcamento statusEnquadramentoExecucao;
+
+    @Column(name = "resumo_orcamento_json", columnDefinition = "TEXT")
+    private String resumoOrcamentoJson;
+
     public UUID getTentativa(){return tentativa;} public void setTentativa(UUID v){tentativa=v;}
 
     public UUID getId(){return id;} public String getChaveIdempotencia(){return chaveIdempotencia;} public void setChaveIdempotencia(String v){chaveIdempotencia=v;}
@@ -31,4 +46,13 @@ public class ExecucaoCalculo {
     public int getItensProcessados(){return itensProcessados;} public void setItensProcessados(int v){itensProcessados=v;} public String getReferenciaDados(){return referenciaDados;} public void setReferenciaDados(String v){referenciaDados=v;}
     public String getReferenciaRegras(){return referenciaRegras;} public void setReferenciaRegras(String v){referenciaRegras=v;} public OffsetDateTime getSolicitadoEm(){return solicitadoEm;} public OffsetDateTime getIniciadoEm(){return iniciadoEm;} public void setIniciadoEm(OffsetDateTime v){iniciadoEm=v;}
     public OffsetDateTime getConcluidoEm(){return concluidoEm;} public void setConcluidoEm(OffsetDateTime v){concluidoEm=v;} public String getFalha(){return falha;} public void setFalha(String v){falha=v;} public String getResultado(){return resultado;} public void setResultado(String v){resultado=v;}
+
+    public BigDecimal getOrcamentoTotalCampanhas() { return orcamentoTotalCampanhas; }
+    public void setOrcamentoTotalCampanhas(BigDecimal orcamentoTotalCampanhas) { this.orcamentoTotalCampanhas = orcamentoTotalCampanhas; }
+    public BigDecimal getComissaoTotalApurada() { return comissaoTotalApurada; }
+    public void setComissaoTotalApurada(BigDecimal comissaoTotalApurada) { this.comissaoTotalApurada = comissaoTotalApurada; }
+    public StatusEnquadramentoOrcamento getStatusEnquadramentoExecucao() { return statusEnquadramentoExecucao; }
+    public void setStatusEnquadramentoExecucao(StatusEnquadramentoOrcamento statusEnquadramentoExecucao) { this.statusEnquadramentoExecucao = statusEnquadramentoExecucao; }
+    public String getResumoOrcamentoJson() { return resumoOrcamentoJson; }
+    public void setResumoOrcamentoJson(String resumoOrcamentoJson) { this.resumoOrcamentoJson = resumoOrcamentoJson; }
 }

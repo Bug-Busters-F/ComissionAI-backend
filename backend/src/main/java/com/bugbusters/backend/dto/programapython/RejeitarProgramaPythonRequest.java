@@ -5,7 +5,6 @@ import jakarta.validation.constraints.NotBlank;
 
 @Schema(description = "Payload para rejeição ou devolução do código executável da campanha")
 public record RejeitarProgramaPythonRequest(
-        @NotBlank(message = "A identificação do revisor técnico é obrigatória.")
         @Schema(description = "Identificação do revisor técnico que rejeitou o código", example = "Renan Tomasi")
         String rejeitadoPor,
 

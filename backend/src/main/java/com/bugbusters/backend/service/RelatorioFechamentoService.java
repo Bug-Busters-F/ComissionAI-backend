@@ -304,10 +304,13 @@ public class RelatorioFechamentoService {
             equipeMap.computeIfAbsent(equipeKey, k -> new EquipeAccumulator(r.getCodLoja(), nomeLoja, r.getCodMarca(), nomeMarca))
                     .acumular(valVenda, valComissao, valTotalBonus, r.getMatricula());
 
-            // Acumula por Colaborador
+            // Acumula por Colaborador (preserva granularidade por matrícula + cargo + loja + marca)
             String matKey = r.getMatricula() != null ? r.getMatricula() : "SEM_MATRICULA";
-            colaboradorMap.computeIfAbsent(matKey, k -> new ColaboradorAccumulator(
-                            k, r.getCodCargo(), nomeCargo, r.getCodLoja(), nomeLoja, r.getCodMarca(), nomeMarca))
+            String colaboradorKey = matKey + "#" + (r.getCodCargo() != null ? r.getCodCargo() : 0)
+                    + "#" + (r.getCodLoja() != null ? r.getCodLoja() : 0)
+                    + "#" + (r.getCodMarca() != null ? r.getCodMarca() : 0);
+            colaboradorMap.computeIfAbsent(colaboradorKey, k -> new ColaboradorAccumulator(
+                            matKey, r.getCodCargo(), nomeCargo, r.getCodLoja(), nomeLoja, r.getCodMarca(), nomeMarca))
                     .acumular(valVenda, valComissao, valBonusPerc, valBonusFixo);
         }
 

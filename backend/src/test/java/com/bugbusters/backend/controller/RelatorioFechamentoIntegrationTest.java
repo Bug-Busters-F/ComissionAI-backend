@@ -7,12 +7,15 @@ import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.dto.apuracao.CalculoDefinitivoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
+import com.bugbusters.backend.dto.esteira.AprovarGerenteRequest;
 import com.bugbusters.backend.dto.esteira.AvancarEsteiraRequest;
 import com.bugbusters.backend.dto.fechamento.FechamentoRequestDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoResponseDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.programapython.AprovarProgramaPythonRequest;
 import com.bugbusters.backend.dto.regra.StatusRegra;
+import com.bugbusters.backend.dto.simulacao.AceiteSimulacaoRequest;
+import com.bugbusters.backend.dto.simulacao.SimulacaoPythonRequest;
 import com.bugbusters.backend.model.Campanha;
 import com.bugbusters.backend.model.CampanhaVersao;
 import com.bugbusters.backend.model.EstadoCampanha;
@@ -348,11 +351,29 @@ public class RelatorioFechamentoIntegrationTest {
         // 3. Avançar esteira até EM_REVISAO_TECNICA (etapa 2)
         avancarEsteira(campanhaId, 2);
 
-        // 4. Homologar programa Python na etapa 2
+        // 4. Homologar programa Python na etapa 2 (transita para etapa 3)
         aprovarProgramaPython(campanhaId);
 
-        // 5. Avançar esteira para HOMOLOGADA (etapa 3)
-        avancarEsteira(campanhaId, 3);
+        // 5. Simular, aceitar simulação, avançar esteira para etapa 4 e aprovar gerencialmente
+        SimulacaoPythonRequest simReq = new SimulacaoPythonRequest("2026-10", null, 50, 0, false, false);
+        MvcResult simRes = mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(simReq)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID simId = UUID.fromString(objectMapper.readTree(simRes.getResponse().getContentAsString()).get("id").asText());
+
+        mockMvc.perform(post("/api/v1/simulacoes/{id}/aceite", simId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("gestor.relatorio", "Aceite para relatório"))))
+                .andExpect(status().isOk());
+
+        avancarEsteira(campanhaId, 4);
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/aprovar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AprovarGerenteRequest("gerente.comercial", "Aprovação gerencial para relatório"))))
+                .andExpect(status().isOk());
 
         // 6. Executar cálculo definitivo da campanha
         CalculoDefinitivoCampanhaRequest calcReq = new CalculoDefinitivoCampanhaRequest(
@@ -439,7 +460,12 @@ public class RelatorioFechamentoIntegrationTest {
                 LocalDate.of(2026, 10, 31),
                 EstadoCampanha.DRAFT,
                 List.of(regra),
-                null
+                null,
+                new BigDecimal("50000.00"),
+                null,
+                true,
+                "gestor.relatorio",
+                "Orçamento aprovado para relatório"
         );
 
         MvcResult result = mockMvc.perform(post("/api/v1/campanhas")

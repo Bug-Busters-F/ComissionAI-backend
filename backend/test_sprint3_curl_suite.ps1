@@ -11,7 +11,9 @@
 # ==============================================================================
 
 param (
-    [string]$BaseUrl = "http://localhost:8080"
+    [string]$BaseUrl = "http://localhost:8080",
+    [string]$AdminEmail = $(if ($env:APP_AUTH_ADMIN_EMAIL) { $env:APP_AUTH_ADMIN_EMAIL } else { "admin@comissai.local" }),
+    [string]$AdminPassword = $(if ($env:APP_AUTH_ADMIN_PASSWORD) { $env:APP_AUTH_ADMIN_PASSWORD } else { "Admin@123" })
 )
 
 Write-Host "=================================================================" -ForegroundColor Cyan
@@ -21,6 +23,7 @@ Write-Host "=================================================================`n"
 
 $global:passCount = 0
 $global:failCount = 0
+$global:authHeaders = @{}
 
 function Assert-Step([string]$StepName, [int]$ExpectedStatus, [int]$ActualStatus, [string]$Details = "") {
     if ($ExpectedStatus -eq $ActualStatus) {
@@ -36,6 +39,8 @@ function Assert-Step([string]$StepName, [int]$ExpectedStatus, [int]$ActualStatus
 }
 
 function Request-Json([string]$Uri, [string]$Method = "Get", $Body = $null) {
+    $headers = @{}
+    foreach ($k in $global:authHeaders.Keys) { $headers[$k] = $global:authHeaders[$k] }
     if ($null -ne $Body) {
         if ($Body -is [string]) {
             $jsonStr = $Body
@@ -43,10 +48,25 @@ function Request-Json([string]$Uri, [string]$Method = "Get", $Body = $null) {
             $jsonStr = $Body | ConvertTo-Json -Depth 10
         }
         $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonStr)
-        return Invoke-RestMethod -Uri $Uri -Method $Method -ContentType "application/json; charset=utf-8" -Body $utf8Bytes
+        return Invoke-RestMethod -Uri $Uri -Method $Method -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Bytes
     } else {
-        return Invoke-RestMethod -Uri $Uri -Method $Method
+        return Invoke-RestMethod -Uri $Uri -Method $Method -Headers $headers
     }
+}
+
+# ------------------------------------------------------------------------------
+# 0. AUTENTICACAO BEARER (BACK-1)
+# ------------------------------------------------------------------------------
+Write-Host "--- 0. Autenticacao Bearer (/api/v1/auth/login) ---" -ForegroundColor Yellow
+try {
+    $loginResp = Request-Json -Uri "$BaseUrl/api/v1/auth/login" -Method Post -Body @{ email = $AdminEmail; senha = $AdminPassword }
+    $global:authHeaders = @{ Authorization = "Bearer $($loginResp.token)" }
+    Assert-Step "Login Administrador (POST /api/v1/auth/login)" 200 200 "Usuario: $($loginResp.usuario.email) ($($loginResp.usuario.papel))"
+} catch {
+    $statusCode = 500
+    if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode }
+    Assert-Step "Login Administrador (POST /api/v1/auth/login)" 200 $statusCode $_.Exception.Message
+    exit 1
 }
 
 # ------------------------------------------------------------------------------
@@ -61,6 +81,9 @@ $payloadCampanha = @'
   "estado": "DRAFT",
   "dataInicio": "2026-11-01",
   "dataFim": "2026-11-30",
+  "orcamento": 50000.00,
+  "orcamentoConfirmado": true,
+  "orcamentoConfirmadoPor": "admin@comissai.local",
   "regras": [
     {
       "blocoId": "regra-ecommerce-8",
@@ -359,7 +382,7 @@ try {
 # Caso 8.2: Exportação CSV Detalhado
 try {
     $tempFile = [System.IO.Path]::GetTempFileName()
-    Invoke-WebRequest -Uri "$BaseUrl/api/v1/campanhas/$campanhaId/apuracao-definitiva/exportar?tipo=DETALHADO&delimitador=;" -OutFile $tempFile
+    Invoke-WebRequest -Uri "$BaseUrl/api/v1/campanhas/$campanhaId/apuracao-definitiva/exportar?tipo=DETALHADO&delimitador=;" -Headers $global:authHeaders -OutFile $tempFile
     $csvBytes = [System.IO.File]::ReadAllBytes($tempFile)
     Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     $hasBom = ($csvBytes[0] -eq 0xEF -and $csvBytes[1] -eq 0xBB -and $csvBytes[2] -eq 0xBF)
@@ -372,7 +395,7 @@ try {
 # Caso 8.3: Exportação CSV Consolidado por Canal
 try {
     $tempFileCanal = [System.IO.Path]::GetTempFileName()
-    Invoke-WebRequest -Uri "$BaseUrl/api/v1/campanhas/$campanhaId/apuracao-definitiva/exportar?tipo=CONSOLIDADO_CANAL&delimitador=," -OutFile $tempFileCanal
+    Invoke-WebRequest -Uri "$BaseUrl/api/v1/campanhas/$campanhaId/apuracao-definitiva/exportar?tipo=CONSOLIDADO_CANAL&delimitador=," -Headers $global:authHeaders -OutFile $tempFileCanal
     $csvCanalBytes = [System.IO.File]::ReadAllBytes($tempFileCanal)
     Remove-Item $tempFileCanal -Force -ErrorAction SilentlyContinue
     Assert-Step "Exportacao CSV Consolidado por Canal" 200 200 "Tamanho: $($csvCanalBytes.Length) bytes"
@@ -407,7 +430,7 @@ try {
 # Caso 9.3: Exportar trilha de auditoria em CSV com BOM
 try {
     $tempFileAudit = [System.IO.Path]::GetTempFileName()
-    Invoke-WebRequest -Uri "$BaseUrl/api/v1/auditoria/exportar?delimitador=;" -OutFile $tempFileAudit
+    Invoke-WebRequest -Uri "$BaseUrl/api/v1/auditoria/exportar?delimitador=;" -Headers $global:authHeaders -OutFile $tempFileAudit
     $csvAuditBytes = [System.IO.File]::ReadAllBytes($tempFileAudit)
     Remove-Item $tempFileAudit -Force -ErrorAction SilentlyContinue
     $hasAuditBom = ($csvAuditBytes[0] -eq 0xEF -and $csvAuditBytes[1] -eq 0xBB -and $csvAuditBytes[2] -eq 0xBF)

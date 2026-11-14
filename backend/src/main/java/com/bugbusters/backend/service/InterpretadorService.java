@@ -9,6 +9,7 @@ import com.bugbusters.backend.dto.interpretador.proposta.FiltrosRegraDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.InterpretacaoMultiplaRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.InterpretacaoMultiplaResponse;
 import com.bugbusters.backend.dto.interpretador.proposta.OperacaoBaseDTO;
+import com.bugbusters.backend.dto.interpretador.proposta.OrcamentoExtraidoDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.OrigemCampo;
 import com.bugbusters.backend.dto.interpretador.proposta.PendenciaPropostaDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.PeriodoVigenciaDTO;
@@ -27,6 +28,7 @@ import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.model.Cargo;
 import com.bugbusters.backend.model.CatalogoDominioDomRock;
 import com.bugbusters.backend.model.Marca;
+import com.bugbusters.backend.model.OrigemOrcamentoCampanha;
 
 import com.bugbusters.backend.service.client.AiServiceClient;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -278,6 +282,7 @@ public class InterpretadorService {
                 Map<String, Object> blocoMap = (Map<String, Object>) itemMap;
                 blocosValidos.add(blocoMap);
             } else {
+
                 pendenciasGerais.add(PendenciaPropostaDTO.impedimento(
                         "propostas[" + i + "]",
                         "BLOCO_INVALIDO",
@@ -318,6 +323,7 @@ public class InterpretadorService {
                 somaConfianca = somaConfianca.add(confianca != null ? confianca
                         : Boolean.TRUE.equals(proposta.completa()) ? new BigDecimal("0.95") : new BigDecimal("0.70"));
             } catch (Exception e) {
+
                 pendenciasGerais.add(PendenciaPropostaDTO.impedimento(
                         "propostas[" + i + "]",
                         "BLOCO_INVALIDO",
@@ -343,6 +349,9 @@ public class InterpretadorService {
                 && !temPendenciaGeralImpeditiva
                 && propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa()));
 
+        OrcamentoExtraidoDTO orcamentoExtraido = extrairOrcamento(resposta, request.texto());
+        BigDecimal orcamentoSugerido = orcamentoExtraido != null ? orcamentoExtraido.valor() : null;
+
         return new InterpretacaoMultiplaResponse(
                 gerarTituloSugerido(propostas, request.texto()),
                 propostas,
@@ -350,7 +359,10 @@ public class InterpretadorService {
                 possuiPendencias,
                 todasCompletas,
                 confiancaGeral,
-                pendenciasGerais
+                pendenciasGerais,
+
+                orcamentoSugerido,
+                orcamentoExtraido
         );
     }
 
@@ -1291,5 +1303,67 @@ public class InterpretadorService {
 
         boolean valida = erros.isEmpty();
         return new ValidarPropostaResponse(valida, erros, avisos, referencias, analiseConcorrencia);
+    }
+
+    private static final Pattern PATTERN_ORCAMENTO = Pattern.compile(
+            "(?i)(?:or[çc]amento|teto(?:\\s+or[çc]ament[áa]rio)?|verba)(?:\\s+(?:m[áa]ximo|total|previsto|estimado|de|em|da\\s+campanha|no\\s+valor\\s+de))*\\s*[:=]?\\s*(?:R\\$\\s*|BRL\\s*)?(\\d{1,3}(?:\\.\\d{3})*(?:,\\d{2})?|\\d+(?:,\\d{2})?|\\d+)\\s*(mil(?:h[õo]es)?)?",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    public static OrcamentoExtraidoDTO extrairOrcamento(Map<String, Object> resposta, String texto) {
+        if (resposta != null) {
+            Object obj = resposta.get("orcamentoExtraido");
+            if (obj == null) obj = resposta.get("orcamento_extraido");
+            if (obj == null) obj = resposta.get("orcamento");
+            if (obj == null) obj = resposta.get("orcamentoSugerido");
+            if (obj == null) obj = resposta.get("orcamento_sugerido");
+            if (obj == null) obj = resposta.get("budget");
+
+            if (obj instanceof Map<?, ?> map) {
+                BigDecimal valor = decimal(map.get("valor") != null ? map.get("valor") : map.get("amount"));
+                if (valor != null && valor.compareTo(BigDecimal.ZERO) > 0) {
+                    String trecho = texto(map.get("trechoOriginal"), "Extraído pelo modelo de IA");
+                    Double confianca = map.get("confianca") instanceof Number num ? num.doubleValue() : 0.95;
+                    return new OrcamentoExtraidoDTO(valor, trecho, OrigemOrcamentoCampanha.EXTRAIDO_IA, confianca);
+                }
+            } else if (obj != null) {
+                BigDecimal valor = decimal(obj);
+                if (valor != null && valor.compareTo(BigDecimal.ZERO) > 0) {
+                    return new OrcamentoExtraidoDTO(valor, "Extraído pelo modelo de IA", OrigemOrcamentoCampanha.EXTRAIDO_IA, 0.95);
+                }
+            }
+        }
+
+        if (texto != null && !texto.isBlank()) {
+            return extrairOrcamentoTexto(texto);
+        }
+        return null;
+    }
+
+    private static OrcamentoExtraidoDTO extrairOrcamentoTexto(String texto) {
+        if (texto == null) return null;
+        Matcher m = PATTERN_ORCAMENTO.matcher(texto);
+        if (m.find()) {
+            String trecho = m.group(0).trim();
+            String numStr = m.group(1);
+            String multiplicador = m.group(2);
+            try {
+                String limpo = numStr.replace(".", "").replace(",", ".");
+                BigDecimal valor = new BigDecimal(limpo);
+                if (multiplicador != null) {
+                    String multLower = multiplicador.toLowerCase();
+                    if (multLower.startsWith("milh")) {
+                        valor = valor.multiply(new BigDecimal("1000000"));
+                    } else if (multLower.startsWith("mil")) {
+                        valor = valor.multiply(new BigDecimal("1000"));
+                    }
+                }
+                if (valor.compareTo(BigDecimal.ZERO) > 0) {
+                    return new OrcamentoExtraidoDTO(valor, trecho, OrigemOrcamentoCampanha.EXTRAIDO_IA, 0.85);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
     }
 }

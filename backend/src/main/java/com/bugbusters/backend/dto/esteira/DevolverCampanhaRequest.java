@@ -19,7 +19,6 @@ public record DevolverCampanhaRequest(
         String motivo,
 
         @Schema(description = "Identificação do gerente ou revisor que está devolvendo", example = "gerente.vendas@empresa.com")
-        @NotBlank(message = "O identificador do responsável pela devolução é obrigatório.")
         String devolvidoPor
 ) {}
 

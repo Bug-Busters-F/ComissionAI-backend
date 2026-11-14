@@ -149,24 +149,30 @@ public class AuditoriaGeralService {
     }
 
     /**
-     * Retorna métricas e resumo executivo da auditoria geral.
+     * Retorna métricas e resumo executivo da auditoria geral via agregação em banco de dados.
      */
     @Transactional(readOnly = true)
     public ResumoAuditoriaDTO obterResumo() {
-        List<AuditoriaGeral> todos = repository.findAll();
-
-        long total = todos.size();
-        long sucessos = todos.stream().filter(AuditoriaGeral::isSucesso).count();
-        long falhas = total - sucessos;
+        long total = repository.count();
+        long sucessos = repository.countBySucessoTrue();
+        long falhas = Math.max(0L, total - sucessos);
 
         OffsetDateTime umDiaAtras = OffsetDateTime.now().minusHours(24);
-        long ultimas24Horas = todos.stream().filter(a -> a.getDataHora().isAfter(umDiaAtras)).count();
+        long ultimas24Horas = repository.countByDataHoraAfter(umDiaAtras);
 
-        Map<String, Long> porAcao = todos.stream()
-                .collect(Collectors.groupingBy(a -> a.getTipoAcao().name(), Collectors.counting()));
+        Map<String, Long> porAcao = new LinkedHashMap<>();
+        for (Object[] linha : repository.contarPorTipoAcao()) {
+            if (linha[0] != null) {
+                porAcao.put(((TipoAcaoAuditoria) linha[0]).name(), ((Number) linha[1]).longValue());
+            }
+        }
 
-        Map<String, Long> porEntidade = todos.stream()
-                .collect(Collectors.groupingBy(a -> a.getTipoEntidade().name(), Collectors.counting()));
+        Map<String, Long> porEntidade = new LinkedHashMap<>();
+        for (Object[] linha : repository.contarPorTipoEntidade()) {
+            if (linha[0] != null) {
+                porEntidade.put(((TipoEntidadeAuditoria) linha[0]).name(), ((Number) linha[1]).longValue());
+            }
+        }
 
         return new ResumoAuditoriaDTO(total, sucessos, falhas, ultimas24Horas, porAcao, porEntidade);
     }

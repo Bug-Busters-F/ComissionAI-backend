@@ -16,6 +16,7 @@ import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.repository.*;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +63,12 @@ public class CampanhaApuracaoService {
     private final AuditoriaGeralService auditoriaService;
     private final ObjectMapper objectMapper;
 
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider;
+
+    @Autowired(required = false)
+    private SnapshotResultadoCalculoRepository snapshotResultadoCalculoRepository;
+
     @Autowired
     public CampanhaApuracaoService(
             CampanhaRepository campanhaRepository,
@@ -104,6 +111,9 @@ public class CampanhaApuracaoService {
         if (request == null) {
             request = new CalculoDefinitivoCampanhaRequest(null, null, null, "SISTEMA", null, false);
         }
+        String executadoPor = usuarioAtualProvider != null
+                ? usuarioAtualProvider.obterUsuarioAtual(request.executadoPor())
+                : (request.executadoPor() != null && !request.executadoPor().isBlank() ? request.executadoPor() : "SISTEMA");
 
         // 1. Resolução da Campanha e Versão
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId)
@@ -141,6 +151,14 @@ public class CampanhaApuracaoService {
             }
         }
 
+        // 5. Exige aprovação gerencial ou vigência/publicação formal
+        boolean aprovadaParaApuracao = versao.getEstadoEsteira() == EstadoEsteiraCampanha.APROVADA
+                || campanha.getEstado() == EstadoCampanha.ATIVA
+                || versao.getStatus() == StatusVersaoCampanha.PUBLICADA;
+        if (!aprovadaParaApuracao) {
+            throw new BusinessException("A campanha/versão precisa estar aprovada gerencialmente ou publicada/ativa antes de executar a apuração definitiva.");
+        }
+
         // 5. Determinação da Competência e Período
         String competenciaStr = resolverCompetencia(request.competencia(), versao);
         validarTravaFechamento(competenciaStr, request.forcarRecalculo());
@@ -172,9 +190,13 @@ public class CampanhaApuracaoService {
             throw new BusinessException("A campanha não possui regras cadastradas para a apuração definitiva.");
         }
 
-        List<RegraItemRequest> regrasRequest = regrasEntidade.stream()
-                .map(this::converterRegraParaItemRequest)
-                .toList();
+        Map<RegraItemRequest, Long> idsPorRegra = new IdentityHashMap<>();
+        List<RegraItemRequest> regrasRequest = new ArrayList<>(regrasEntidade.size());
+        for (Regra regra : regrasEntidade) {
+            RegraItemRequest item = converterRegraParaItemRequest(regra);
+            regrasRequest.add(item);
+            idsPorRegra.put(item, regra.getId());
+        }
 
         // 7. Filtragem das vendas do público-alvo da campanha
         List<Sale> vendasCampanha = vendasDoPeriodo.stream()
@@ -203,7 +225,7 @@ public class CampanhaApuracaoService {
         }
 
         for (Sale sale : vendasCampanha) {
-            ItemProcessamentoVenda processamento = processarVenda(sale, regrasRequest, basesComissao);
+            ItemProcessamentoVenda processamento = processarVenda(sale, regrasRequest, basesComissao, idsPorRegra);
 
             if (!processamento.valida()) {
                 String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
@@ -229,7 +251,24 @@ public class CampanhaApuracaoService {
             String matricula = sale.getRegistration() != null ? sale.getRegistration().getRegistration() : null;
 
             if (resultado != null) {
-                resultado.setProtocoloCalculo(UUID.randomUUID());
+                UUID novoProtocolo = UUID.randomUUID();
+                if (snapshotResultadoCalculoRepository != null) {
+                    SnapshotResultadoCalculo snapshot = new SnapshotResultadoCalculo(
+                            resultado,
+                            resultado.isDesatualizadoPorCorrecao()
+                                    ? (resultado.getMotivoDesatualizacao() != null ? resultado.getMotivoDesatualizacao() : "Invalidado por correção de base")
+                                    : "Substituído por apuração definitiva da campanha",
+                            resultado.getLoteCorrecao()
+                    );
+                    snapshot.setSubstituidoPorProtocolo(novoProtocolo);
+                    snapshotResultadoCalculoRepository.save(snapshot);
+                }
+                resultado.setProtocoloAnterior(resultado.getProtocoloCalculo());
+                resultado.setProtocoloCalculo(novoProtocolo);
+                resultado.setDesatualizadoPorCorrecao(false);
+                resultado.setDesatualizadoEm(null);
+                resultado.setMotivoDesatualizacao(null);
+                resultado.setLoteCorrecao(null);
                 resultado.setMatricula(matricula);
                 resultado.setCodMarca(codMarca);
                 resultado.setCodLoja(codLoja);
@@ -298,7 +337,7 @@ public class CampanhaApuracaoService {
             logImutavel.setOrigemTaxa(processamento.origemTaxa());
             logImutavel.setValorBonusPercentual(processamento.parcelaBonusPerc());
             logImutavel.setValorBonusFixo(processamento.parcelaBonusFixo());
-            logImutavel.setUsuarioExecutor(request.executadoPor());
+            logImutavel.setUsuarioExecutor(executadoPor);
 
             logsParaSalvar.add(logImutavel);
 
@@ -318,14 +357,14 @@ public class CampanhaApuracaoService {
         apuracao.setVersaoCampanhaNumero(versao.getNumero());
         apuracao.setVersaoProgramaPython(programa.getVersaoPrograma());
         apuracao.setChecksumPython(programa.getChecksumSha256());
-        apuracao.setExecutadoViaPython(true);
+        apuracao.setExecutadoViaPython(false);
         apuracao.setTotalVendasProcessadas(vendasCampanha.size());
         apuracao.setTotalCalculados(resultadosParaSalvar.size());
         apuracao.setTotalImpedimentos(impedimentos.size());
         apuracao.setValorTotalVendas(totalVendas);
         apuracao.setValorTotalComissao(totalComissao);
         apuracao.setValorTotalBonus(totalBonus);
-        apuracao.setExecutadoPor(request.executadoPor());
+        apuracao.setExecutadoPor(executadoPor);
         apuracao.setExecutadoEm(OffsetDateTime.now());
         apuracao.setStatus("CONCLUIDO");
         apuracao.setObservacoes(request.observacoes());
@@ -340,21 +379,22 @@ public class CampanhaApuracaoService {
         // 10. Persistência em blocos
         salvarEmBlocos(resultadosParaSalvar, logsParaSalvar);
 
-        // 11. Atualização do progresso da esteira (Etapa 4 - Concluída / Apurada)
-        versao.setUltimaEtapa(Math.max(versao.getUltimaEtapa(), 4));
+        // 11. Atualização do progresso da esteira (Etapa 4 - Apurada)
+        int etapaOrigem = versao.getUltimaEtapa();
+        versao.setUltimaEtapa(Math.max(etapaOrigem, 4));
         versao.setEtapaMaisAvancada(Math.max(versao.getEtapaMaisAvancada(), 4));
         campanhaVersaoRepository.save(versao);
 
         if (transicaoRepository != null) {
             transicaoRepository.save(new CampanhaEsteiraTransicao(
                     versao,
+                    etapaOrigem,
                     versao.getUltimaEtapa(),
-                    4,
                     versao.getEstadoEsteira(),
                     versao.getEstadoEsteira(),
                     TipoAcaoEsteira.AVANCO_ETAPA,
-                    request.executadoPor(),
-                    String.format("Apuração definitiva executada com sucesso via motor Python (v%d - %s). Protocolo: %s",
+                    executadoPor,
+                    String.format("Apuração definitiva executada no motor Java com programa validado (v%d - %s). Protocolo: %s",
                             programa.getVersaoPrograma(),
                             programa.getChecksumSha256() != null && programa.getChecksumSha256().length() >= 8
                                     ? programa.getChecksumSha256().substring(0, 8) : "hash",
@@ -364,14 +404,14 @@ public class CampanhaApuracaoService {
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    request.executadoPor(),
+                    executadoPor,
                     TipoAcaoAuditoria.CALCULO_DEFINITIVO_CAMPANHA,
                     TipoEntidadeAuditoria.APURACAO,
                     String.valueOf(campanhaId),
                     versao.getNumero(),
                     String.format("Apuração definitiva executada com sucesso. Protocolo: %s, Total Vendas: %d, Sucessos: %d, Impedimentos: %d",
                             apuracao.getProtocolo(), vendasCampanha.size(), resultadosParaSalvar.size(), impedimentos.size()),
-                    String.format("{\"protocolo\": \"%s\", \"totalVendas\": %d, \"totalComissao\": \"%s\"}",
+                    String.format("{\"protocolo\": \"%s\", \"totalVendas\": %d, \"totalComissao\": \"%s\", \"motor\": \"JAVA_APURACAO_ENGINE\"}",
                             apuracao.getProtocolo(), vendasCampanha.size(), totalComissao)
             );
         }
@@ -543,7 +583,8 @@ public class CampanhaApuracaoService {
     private ItemProcessamentoVenda processarVenda(
             Sale sale,
             List<RegraItemRequest> regras,
-            List<BaseComiss> basesComissao
+            List<BaseComiss> basesComissao,
+            Map<RegraItemRequest, Long> idsPorRegra
     ) {
         List<String> impedimentos = new ArrayList<>();
         Registration reg = sale.getRegistration();
@@ -658,7 +699,9 @@ public class CampanhaApuracaoService {
                 : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal valorComissao = parcelaBase.add(parcelaBonusPerc).add(parcelaBonusFixo);
-        Long regraId = extrairIdNumerico(vencedora.blocoId());
+        Long regraId = idsPorRegra != null && idsPorRegra.containsKey(vencedora)
+                ? idsPorRegra.get(vencedora)
+                : extrairIdNumerico(vencedora.blocoId());
 
         return new ItemProcessamentoVenda(
                 true,

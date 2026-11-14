@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS tb_campanha_pendencia_aceite (
     campanha_id BIGINT NOT NULL REFERENCES tb_campanha(id) ON DELETE CASCADE,
     campanha_versao_id BIGINT REFERENCES tb_campanha_versao(id) ON DELETE CASCADE,
     regra_id BIGINT REFERENCES tb_regra(id) ON DELETE CASCADE,
+    envio_arquivo_id BIGINT REFERENCES tb_envio_arquivo(id) ON DELETE CASCADE,
+    inconsistencia_importacao_id BIGINT REFERENCES tb_inconsistencia_importacao(id) ON DELETE CASCADE,
     pendencia_identificador VARCHAR(150) NOT NULL,
     codigo VARCHAR(100) NOT NULL,
     campo VARCHAR(100),
@@ -29,4 +31,5 @@ CREATE INDEX IF NOT EXISTS idx_pendencia_aceite_campanha ON tb_campanha_pendenci
 CREATE INDEX IF NOT EXISTS idx_pendencia_aceite_versao ON tb_campanha_pendencia_aceite(campanha_versao_id);
 CREATE INDEX IF NOT EXISTS idx_pendencia_aceite_regra ON tb_campanha_pendencia_aceite(regra_id);
 CREATE INDEX IF NOT EXISTS idx_pendencia_aceite_ident ON tb_campanha_pendencia_aceite(pendencia_identificador);
+CREATE INDEX IF NOT EXISTS idx_pendencia_aceite_inconsistencia ON tb_campanha_pendencia_aceite(inconsistencia_importacao_id);
 

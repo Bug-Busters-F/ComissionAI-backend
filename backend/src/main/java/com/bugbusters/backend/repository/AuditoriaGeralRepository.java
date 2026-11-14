@@ -35,5 +35,15 @@ public interface AuditoriaGeralRepository extends JpaRepository<AuditoriaGeral, 
     long countByTipoAcao(TipoAcaoAuditoria tipoAcao);
 
     long countByDataHoraBetween(OffsetDateTime inicio, OffsetDateTime fim);
+
+    long countBySucessoTrue();
+
+    long countByDataHoraAfter(OffsetDateTime dataHora);
+
+    @org.springframework.data.jpa.repository.Query("SELECT a.tipoAcao, COUNT(a) FROM AuditoriaGeral a GROUP BY a.tipoAcao")
+    List<Object[]> contarPorTipoAcao();
+
+    @org.springframework.data.jpa.repository.Query("SELECT a.tipoEntidade, COUNT(a) FROM AuditoriaGeral a GROUP BY a.tipoEntidade")
+    List<Object[]> contarPorTipoEntidade();
 }
 

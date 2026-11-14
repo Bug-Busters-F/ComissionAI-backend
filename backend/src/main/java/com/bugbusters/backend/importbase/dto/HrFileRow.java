@@ -13,10 +13,18 @@ public class HrFileRow {
     private LocalDate demissDate;
     private Integer positionCode;
     private String positionDescription;
+    private int linha;
 
     public HrFileRow(LocalDate referenceDate, Integer brandCode, String brandDescription, Integer storeCode,
             String storeDescription, String registration, LocalDate admissDate, LocalDate demissDate,
             Integer positionCode, String positionDescription) {
+        this(referenceDate, brandCode, brandDescription, storeCode, storeDescription, registration,
+                admissDate, demissDate, positionCode, positionDescription, 0);
+    }
+
+    public HrFileRow(LocalDate referenceDate, Integer brandCode, String brandDescription, Integer storeCode,
+            String storeDescription, String registration, LocalDate admissDate, LocalDate demissDate,
+            Integer positionCode, String positionDescription, int linha) {
         this.referenceDate = referenceDate;
         this.brandCode = brandCode;
         this.brandDescription = brandDescription;
@@ -27,6 +35,15 @@ public class HrFileRow {
         this.demissDate = demissDate;
         this.positionCode = positionCode;
         this.positionDescription = positionDescription;
+        this.linha = linha;
+    }
+
+    public int getLinha() {
+        return linha;
+    }
+
+    public void setLinha(int linha) {
+        this.linha = linha;
     }
 
     public LocalDate getReferenceDate() {
@@ -68,5 +85,4 @@ public class HrFileRow {
     public String getRegistration() {
         return registration;
     }
-
 }

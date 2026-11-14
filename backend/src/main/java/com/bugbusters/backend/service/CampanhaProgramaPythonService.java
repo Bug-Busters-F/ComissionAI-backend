@@ -11,9 +11,11 @@ import com.bugbusters.backend.repository.CampanhaProgramaPythonRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,9 @@ public class CampanhaProgramaPythonService {
     private final FechamentoService fechamentoService;
     private final com.bugbusters.backend.repository.CampanhaEsteiraTransicaoRepository transicaoRepository;
     private final AuditoriaGeralService auditoriaService;
+
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
 
     public CampanhaProgramaPythonService(
             CampanhaRepository campanhaRepository,
@@ -106,11 +111,12 @@ public class CampanhaProgramaPythonService {
         }
 
         int proximaVersaoPrograma = optAtual.map(p -> p.getVersaoPrograma() + 1).orElse(1);
+        String autor = usuarioAtualProvider.obterUsuarioAtual(request.autor());
 
         CampanhaProgramaPython novoPrograma = new CampanhaProgramaPython(versao, proximaVersaoPrograma, novoCodigo);
         novoPrograma.setJustificativa(request.justificativa() != null && !request.justificativa().isBlank()
                 ? request.justificativa()
-                : (request.autor() != null ? "Atualizado por: " + request.autor() : "Código executável atualizado"));
+                : (!"SISTEMA".equals(autor) ? "Atualizado por: " + autor : "Código executável atualizado"));
         novoPrograma.setStatusAprovacao(StatusAprovacaoPrograma.PENDENTE_REVISAO);
 
         // A alteração do código-fonte invalida a aprovação técnica prévia
@@ -143,16 +149,22 @@ public class CampanhaProgramaPythonService {
                     return programaPythonRepository.save(p);
                 });
 
-        // Verificação defensiva de concorrência com o checksum esperado pelo revisor
-        if (request.checksumEsperado() != null && !request.checksumEsperado().isBlank()) {
-            if (!Objects.equals(programa.getChecksumSha256().toLowerCase(), request.checksumEsperado().trim().toLowerCase())) {
-                throw new BusinessException("Divergência de integridade: o código-fonte foi alterado antes da confirmação de aprovação. " +
-                        "Atualize a página e revise a versão mais recente.");
-            }
+        // Verificação obrigatória de concorrência e integridade com o checksum esperado pelo revisor
+        if (request.checksumEsperado() == null || request.checksumEsperado().isBlank()) {
+            throw new BusinessException("O checksum SHA-256 esperado é obrigatório para confirmar a integridade do código aprovado.");
+        }
+        if (!Objects.equals(programa.getChecksumSha256().toLowerCase(), request.checksumEsperado().trim().toLowerCase())) {
+            throw new BusinessException("Divergência de integridade: o código-fonte foi alterado antes da confirmação de aprovação. " +
+                    "Atualize a página e revise a versão mais recente.");
+        }
+
+        String aprovadoPor = usuarioAtualProvider.obterUsuarioAtual(request.aprovadoPor());
+        if (aprovadoPor == null || aprovadoPor.isBlank() || ("SISTEMA".equals(aprovadoPor) && (request.aprovadoPor() == null || request.aprovadoPor().isBlank()))) {
+            throw new BusinessException("A identificação do revisor técnico é obrigatória.");
         }
 
         programa.setStatusAprovacao(StatusAprovacaoPrograma.APROVADO);
-        programa.setAprovadoPor(request.aprovadoPor());
+        programa.setAprovadoPor(aprovadoPor);
         programa.setAprovadoEm(OffsetDateTime.now());
         programa.setRejeitadoPor(null);
         programa.setRejeitadoEm(null);
@@ -188,14 +200,14 @@ public class CampanhaProgramaPythonService {
                     estAntigo,
                     com.bugbusters.backend.model.EstadoEsteiraCampanha.EM_SIMULACAO,
                     com.bugbusters.backend.model.TipoAcaoEsteira.APROVACAO_TECNICA,
-                    request.aprovadoPor(),
+                    aprovadoPor,
                     request.justificativa() != null ? request.justificativa() : "Programa Python homologado tecnicamente"
             ));
         }
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    request.aprovadoPor(),
+                    aprovadoPor,
                     TipoAcaoAuditoria.APROVACAO_PROGRAMA_PYTHON,
                     TipoEntidadeAuditoria.PROGRAMA_PYTHON,
                     String.valueOf(campanhaId),
@@ -206,7 +218,7 @@ public class CampanhaProgramaPythonService {
         }
 
         log.info("Programa Python (versão {}) da campanha {} versão {} aprovado por {}.",
-                programa.getVersaoPrograma(), campanhaId, versao.getNumero(), request.aprovadoPor());
+                programa.getVersaoPrograma(), campanhaId, versao.getNumero(), aprovadoPor);
         return ProgramaPythonResponse.de(programa);
     }
 
@@ -226,8 +238,13 @@ public class CampanhaProgramaPythonService {
                     return programaPythonRepository.save(p);
                 });
 
+        String rejeitadoPor = usuarioAtualProvider.obterUsuarioAtual(request.rejeitadoPor());
+        if (rejeitadoPor == null || rejeitadoPor.isBlank() || ("SISTEMA".equals(rejeitadoPor) && (request.rejeitadoPor() == null || request.rejeitadoPor().isBlank()))) {
+            throw new BusinessException("A identificação do revisor técnico é obrigatória.");
+        }
+
         programa.setStatusAprovacao(StatusAprovacaoPrograma.REJEITADO);
-        programa.setRejeitadoPor(request.rejeitadoPor());
+        programa.setRejeitadoPor(rejeitadoPor);
         programa.setRejeitadoEm(OffsetDateTime.now());
         programa.setAprovadoPor(null);
         programa.setAprovadoEm(null);
@@ -236,11 +253,12 @@ public class CampanhaProgramaPythonService {
         programa = programaPythonRepository.save(programa);
 
         // Desvincula o programa aprovado da versão e marca devolução técnica na esteira
+        int etapaAnterior = versao.getUltimaEtapa();
         com.bugbusters.backend.model.EstadoEsteiraCampanha estAntigo = versao.getEstadoEsteira() != null
                 ? versao.getEstadoEsteira() : com.bugbusters.backend.model.EstadoEsteiraCampanha.EM_REVISAO_TECNICA;
         versao.setProgramaPythonAprovado(null);
         versao.setEstadoEsteira(com.bugbusters.backend.model.EstadoEsteiraCampanha.DEVOLVIDA);
-        versao.setDevolvidoPor(request.rejeitadoPor());
+        versao.setDevolvidoPor(rejeitadoPor);
         versao.setDevolvidoEm(OffsetDateTime.now());
         versao.setMotivoDevolucao("Rejeição técnica do código Python: " + request.justificativa());
         versao.setEtapaDevolucao(1);
@@ -250,19 +268,19 @@ public class CampanhaProgramaPythonService {
         if (transicaoRepository != null) {
             transicaoRepository.save(new com.bugbusters.backend.model.CampanhaEsteiraTransicao(
                     versao,
-                    2,
+                    etapaAnterior,
                     1,
                     estAntigo,
                     com.bugbusters.backend.model.EstadoEsteiraCampanha.DEVOLVIDA,
                     com.bugbusters.backend.model.TipoAcaoEsteira.REJEICAO_TECNICA,
-                    request.rejeitadoPor(),
+                    rejeitadoPor,
                     request.justificativa()
             ));
         }
 
         if (auditoriaService != null) {
             auditoriaService.registrarAcao(
-                    request.rejeitadoPor(),
+                    rejeitadoPor,
                     TipoAcaoAuditoria.REJEICAO_PROGRAMA_PYTHON,
                     TipoEntidadeAuditoria.PROGRAMA_PYTHON,
                     String.valueOf(campanhaId),
@@ -273,7 +291,7 @@ public class CampanhaProgramaPythonService {
         }
 
         log.info("Programa Python (versão {}) da campanha {} versão {} rejeitado por {}. Motivo: {}",
-                programa.getVersaoPrograma(), campanhaId, versao.getNumero(), request.rejeitadoPor(), request.justificativa());
+                programa.getVersaoPrograma(), campanhaId, versao.getNumero(), rejeitadoPor, request.justificativa());
         return ProgramaPythonResponse.de(programa);
     }
 
@@ -356,16 +374,21 @@ public class CampanhaProgramaPythonService {
         py.append("from decimal import Decimal, ROUND_HALF_UP\n\n");
         py.append("def calcular_comissao(venda: dict) -> float | None:\n");
         py.append("    \"\"\"Calcula a comissão para um registro de venda segundo as regras da campanha.\"\"\"\n");
-        py.append("    data_venda = str(venda.get('data_venda', ''))[:10]\n");
+        py.append("    data_raw = venda.get('data_venda') if venda.get('data_venda') is not None else venda.get('dataVenda', '')\n");
+        py.append("    data_venda = str(data_raw)[:10]\n");
         py.append("    if not ('").append(versao.getDataInicio()).append("' <= data_venda <= '").append(versao.getDataFim()).append("'):\n");
         py.append("        return None\n\n");
         py.append("    valor_raw = venda.get('valor_venda')\n");
+        py.append("    if valor_raw is None:\n");
+        py.append("        valor_raw = venda.get('valor')\n");
         py.append("    if valor_raw is None:\n");
         py.append("        return None\n");
         py.append("    valor = Decimal(str(valor_raw))\n");
         py.append("    if valor <= 0:\n");
         py.append("        return None\n\n");
-        py.append("    centavo = Decimal('0.01')\n\n");
+        py.append("    centavo = Decimal('0.01')\n");
+        py.append("    taxa_base_raw = venda.get('taxa_base')\n");
+        py.append("    taxa_base_venda = Decimal(str(taxa_base_raw)) if taxa_base_raw is not None else None\n\n");
 
         if (regras == null || regras.isEmpty()) {
             py.append("    # Nenhuma regra ativa configurada nesta campanha\n");
@@ -382,7 +405,7 @@ public class CampanhaProgramaPythonService {
             py.append("    # Regra ").append(idx++).append(": ").append(r.getBlocoId() != null ? r.getBlocoId() : "Bloco " + r.getId());
             String desc = r.getNome() != null && !r.getNome().isBlank() ? r.getNome() : r.getExplicacao();
             if (desc != null && !desc.isBlank()) {
-                py.append(" - ").append(desc);
+                py.append(" - ").append(desc.replace('\r', ' ').replace('\n', ' '));
             }
             py.append("\n");
 
@@ -413,8 +436,33 @@ public class CampanhaProgramaPythonService {
             String ifClause = condicoes.isEmpty() ? "True" : String.join(" and ", condicoes);
             py.append("    if ").append(ifClause).append(":\n");
 
-            BigDecimal taxa = r.getTaxa() != null ? r.getTaxa() : BigDecimal.ZERO;
-            py.append("        taxa = Decimal('").append(taxa.toPlainString()).append("')\n");
+            com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase tipoOp =
+                    r.getTipoOperacao() != null ? r.getTipoOperacao() : com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase.DEFINIR_TAXA;
+            BigDecimal taxaEfetiva = r.getTaxa() != null ? r.getTaxa() : BigDecimal.ZERO;
+            BigDecimal ajuste = r.getValorAjuste() != null ? r.getValorAjuste() : taxaEfetiva;
+
+            py.append("        # Operação: ").append(tipoOp.name()).append("\n");
+            switch (tipoOp) {
+                case ACRESCIMO_PONTOS -> {
+                    py.append("        ajuste = Decimal('").append(ajuste.toPlainString()).append("')\n");
+                    py.append("        taxa = (taxa_base_venda + ajuste) if taxa_base_venda is not None else Decimal('").append(taxaEfetiva.toPlainString()).append("')\n");
+                }
+                case DESCONTO_PONTOS -> {
+                    py.append("        ajuste = Decimal('").append(ajuste.toPlainString()).append("')\n");
+                    py.append("        taxa = max(Decimal('0'), taxa_base_venda - ajuste) if taxa_base_venda is not None else Decimal('").append(taxaEfetiva.toPlainString()).append("')\n");
+                }
+                case MULTIPLICADOR_BASE -> {
+                    py.append("        fator = Decimal('").append(ajuste.toPlainString()).append("')\n");
+                    py.append("        taxa = (taxa_base_venda * fator) if taxa_base_venda is not None else Decimal('").append(taxaEfetiva.toPlainString()).append("')\n");
+                }
+                case DIVISOR_BASE -> {
+                    py.append("        divisor = Decimal('").append(ajuste.toPlainString()).append("')\n");
+                    py.append("        taxa = (taxa_base_venda / divisor) if (taxa_base_venda is not None and divisor != 0) else Decimal('").append(taxaEfetiva.toPlainString()).append("')\n");
+                }
+                default -> {
+                    py.append("        taxa = Decimal('").append(taxaEfetiva.toPlainString()).append("')\n");
+                }
+            }
             py.append("        comissao = (valor * taxa).quantize(centavo, rounding=ROUND_HALF_UP)\n");
 
             if (r.getBonusPercentual() != null && r.getBonusPercentual().compareTo(BigDecimal.ZERO) > 0) {
@@ -444,10 +492,18 @@ public class CampanhaProgramaPythonService {
     }
 
     private String toJsonLiteral(Object valor) {
+        if (valor == null) {
+            return "None";
+        }
         try {
             return OBJECT_MAPPER.writeValueAsString(valor);
         } catch (Exception e) {
-            return "'" + valor + "'";
+            String escaped = String.valueOf(valor)
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("\n", "\\n")
+                    .replace("\r", "\\r");
+            return "\"" + escaped + "\"";
         }
     }
 }

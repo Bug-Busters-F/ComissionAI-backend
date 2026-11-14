@@ -13,4 +13,5 @@ public interface CampanhaRepository extends JpaRepository<Campanha, Long> {
     List<Campanha> findAllByRemovidoEmIsNullOrderByCriadoEmDesc();
     List<Campanha> findAllByEstadoAndRemovidoEmIsNullOrderByCriadoEmDesc(EstadoCampanha estado);
     Optional<Campanha> findByIdAndRemovidoEmIsNull(Long id);
+    boolean existsByIdAndRemovidoEmIsNull(Long id);
 }

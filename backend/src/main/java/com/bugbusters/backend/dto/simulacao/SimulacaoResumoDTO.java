@@ -1,12 +1,13 @@
 package com.bugbusters.backend.dto.simulacao;
 
+import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-@Schema(description = "Resumo executivo de uma simulação persistida no sistema")
+@Schema(description = "Resumo executivo de uma simulação persistida no sistema com indicadores orçamentários")
 public record SimulacaoResumoDTO(
         @Schema(description = "Identificador único da simulação")
         UUID id,
@@ -54,5 +55,34 @@ public record SimulacaoResumoDTO(
         CenarioConsolidadoDTO cenario120,
 
         @Schema(description = "Consolidado do Cenário 150% (Alta Performance)")
-        CenarioConsolidadoDTO cenario150
-) {}
+        CenarioConsolidadoDTO cenario150,
+
+        @Schema(description = "Teto orçamentário da campanha considerado na simulação", example = "50000.00")
+        BigDecimal orcamentoCampanha,
+
+        @Schema(description = "Status do enquadramento no cenário 100%", example = "ENQUADRADO")
+        StatusEnquadramentoOrcamento statusEnquadramento100,
+
+        @Schema(description = "Indica se o cenário 100% coube no teto orçamentário", example = "true")
+        Boolean dentroDoOrcamento100,
+
+        @Schema(description = "Saldo orçamentário restante no cenário 100%", example = "7500.00")
+        BigDecimal saldoOrcamento100,
+
+        @Schema(description = "Percentual de consumo do orçamento no cenário 100%", example = "85.00")
+        BigDecimal percentualUsoOrcamento100
+) {
+    public SimulacaoResumoDTO(
+            UUID id, UUID protocolo, OffsetDateTime executadoEm, String competencia,
+            Long campanhaId, String tituloCampanha, LocalDate dataInicioCampanha,
+            LocalDate dataFimCampanha, long diasInclusivos, BigDecimal fatorProjecao,
+            int totalVendasRecortadas, BigDecimal valorTotalRecortado,
+            CenarioConsolidadoDTO cenario100, CenarioConsolidadoDTO cenario80,
+            CenarioConsolidadoDTO cenario120, CenarioConsolidadoDTO cenario150
+    ) {
+        this(id, protocolo, executadoEm, competencia, campanhaId, tituloCampanha,
+                dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao,
+                totalVendasRecortadas, valorTotalRecortado,
+                cenario100, cenario80, cenario120, cenario150, null, null, null, null, null);
+    }
+}

@@ -118,16 +118,33 @@ class CampanhaEsteiraIntegrationTest {
                 .andExpect(jsonPath("$.estadoEsteira").value("EM_REVISAO_TECNICA"));
     }
 
+    private String obterChecksum(Long campanhaId) throws Exception {
+        MvcResult progRes = mockMvc.perform(get("/api/v1/campanhas/{id}/programa-python", campanhaId))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readTree(progRes.getResponse().getContentAsString()).get("checksumSha256").asText();
+    }
+
     @Test
-    @DisplayName("Deve bloquear avanço para etapa 3 caso o programa Python não tenha aprovação técnica")
+    @DisplayName("Deve bloquear salto de etapa (1 -> 3) e avanço para etapa 3 sem aprovação técnica do Python")
     void deveBloquearAvancoParaEtapa3SemAprovacaoDoProgramaPython() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Bloqueio Etapa 3");
 
-        AvancarEsteiraRequest req = new AvancarEsteiraRequest(3, "analista@empresa.com");
+        AvancarEsteiraRequest saltoReq = new AvancarEsteiraRequest(3, "analista@empresa.com");
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/avancar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(saltoReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("sequencialmente")));
 
         mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/avancar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
+                        .content(objectMapper.writeValueAsString(new AvancarEsteiraRequest(2, "analista@empresa.com"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/esteira/avancar", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(saltoReq)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message", containsString("aprovação técnica prévia do programa Python")));
     }
@@ -136,10 +153,11 @@ class CampanhaEsteiraIntegrationTest {
     @DisplayName("Deve transitar automaticamente para etapa 3 e estado EM_SIMULACAO ao aprovar programa Python")
     void deveTransitarParaEtapa3AposAprovarProgramaPython() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Aprovar Python");
+        String checksum = obterChecksum(campanhaId);
 
         AprovarProgramaPythonRequest aprovarReq = new AprovarProgramaPythonRequest(
                 "auditor.tecnico@empresa.com",
-                null,
+                checksum,
                 "Código homologado com sucesso"
         );
 
@@ -159,10 +177,11 @@ class CampanhaEsteiraIntegrationTest {
     @DisplayName("Deve permitir devolução da proposta pelo gerente com justificativa obrigatória (FRONT-9 / BACK-4)")
     void devePermitirDevolucaoPeloGerenteComJustificativa() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Devolução Gerente");
+        String checksum = obterChecksum(campanhaId);
 
         // Aprova o programa Python para colocar a campanha na etapa 3
         AprovarProgramaPythonRequest aprovarReq = new AprovarProgramaPythonRequest(
-                "auditor.tecnico@empresa.com", null, "Aprovado"
+                "auditor.tecnico@empresa.com", checksum, "Aprovado"
         );
         mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -219,11 +238,12 @@ class CampanhaEsteiraIntegrationTest {
     @DisplayName("Deve limpar o estado de devolução quando a esteira reavançar após correções")
     void deveLimparEstadoDeDevolucaoAoReavancar() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Limpar Devolução");
+        String checksum = obterChecksum(campanhaId);
 
         // Aprova o programa Python para ir para etapa 3
         mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("auditor@empresa.com", null, "Ok"))))
+                        .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("auditor@empresa.com", checksum, "Ok"))))
                 .andExpect(status().isOk());
 
         // Devolve para etapa 2
@@ -236,7 +256,7 @@ class CampanhaEsteiraIntegrationTest {
         // Reavalia e aprova novamente o código Python para reavançar para 3
         mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("auditor@empresa.com", null, "Código corrigido"))))
+                        .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("auditor@empresa.com", checksum, "Código corrigido"))))
                 .andExpect(status().isOk());
 
         // Verifica que o estado de devolução foi limpo
@@ -258,9 +278,10 @@ class CampanhaEsteiraIntegrationTest {
                 .andExpect(status().isOk());
 
         // Aprovação técnica (2 -> 3)
+        String checksum = obterChecksum(campanhaId);
         mockMvc.perform(post("/api/v1/campanhas/{id}/programa-python/aprovar", campanhaId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("auditor@empresa.com", null, "Ok"))))
+                        .content(objectMapper.writeValueAsString(new AprovarProgramaPythonRequest("auditor@empresa.com", checksum, "Ok"))))
                 .andExpect(status().isOk());
 
         // Devolução gerente (3 -> 1)

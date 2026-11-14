@@ -56,6 +56,7 @@ public class ImportService {
     private final SaleRepository saleRepository;
     private final RegistrationRepository registrationRepository;
     private final BaseComissRepository baseComissRepository;
+    private final com.bugbusters.backend.repository.ArquivoImportacaoRepository arquivoImportacaoRepository;
 
     public ImportService(@Qualifier("importJobOperator") JobOperator jobOperator,
                          @Qualifier("importJob") Job job,
@@ -67,7 +68,8 @@ public class ImportService {
                          List<VerificadorDependenciaLote> verificadores,
                          SaleRepository saleRepository,
                          RegistrationRepository registrationRepository,
-                         BaseComissRepository baseComissRepository) {
+                         BaseComissRepository baseComissRepository,
+                         @org.springframework.beans.factory.annotation.Autowired(required = false) com.bugbusters.backend.repository.ArquivoImportacaoRepository arquivoImportacaoRepository) {
         this.jobOperator = jobOperator;
         this.job = job;
         this.repository = repository;
@@ -79,6 +81,7 @@ public class ImportService {
         this.saleRepository = saleRepository;
         this.registrationRepository = registrationRepository;
         this.baseComissRepository = baseComissRepository;
+        this.arquivoImportacaoRepository = arquivoImportacaoRepository;
     }
 
     public ImportResponse processImport(MultipartFile file, ImportType importType) {
@@ -127,8 +130,28 @@ public class ImportService {
         String idLote = UUID.randomUUID().toString();
         String filename = file.getOriginalFilename() == null ? "arquivo" : file.getOriginalFilename();
 
+        java.util.UUID arquivoImportacaoId = null;
+        if (arquivoImportacaoRepository != null) {
+            try {
+                var opt = arquivoImportacaoRepository.findByHashConteudo(hashConteudo);
+                if (opt.isPresent()) {
+                    arquivoImportacaoId = opt.get().getId();
+                } else {
+                    com.bugbusters.backend.model.ArquivoImportacao novoArq = new com.bugbusters.backend.model.ArquivoImportacao(
+                            hashConteudo,
+                            filename,
+                            file.getContentType(),
+                            file.getSize(),
+                            file.getBytes(),
+                            "SISTEMA"
+                    );
+                    arquivoImportacaoId = arquivoImportacaoRepository.save(novoArq).getId();
+                }
+            } catch (Exception ignored) {}
+        }
+
         // 1. Gravar lote PENDENTE em transação própria (REQUIRES_NEW) e confirmada antes de disparar o job
-        envioArquivoTxService.criarLotePendente(idLote, filename, importType, competencia, hashConteudo);
+        envioArquivoTxService.criarLotePendente(idLote, filename, importType, competencia, hashConteudo, arquivoImportacaoId);
 
         Path upload = null;
         boolean submitted = false;

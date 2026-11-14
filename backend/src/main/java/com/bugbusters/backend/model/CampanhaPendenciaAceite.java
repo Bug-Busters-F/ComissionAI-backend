@@ -30,6 +30,12 @@ public class CampanhaPendenciaAceite {
     @JoinColumn(name = "regra_id")
     private Regra regra;
 
+    @Column(name = "envio_arquivo_id")
+    private Long envioArquivoId;
+
+    @Column(name = "inconsistencia_importacao_id")
+    private Long inconsistenciaImportacaoId;
+
     @Column(name = "pendencia_identificador", length = 150, nullable = false)
     private String pendenciaIdentificador;
 
@@ -235,6 +241,22 @@ public class CampanhaPendenciaAceite {
 
     public void setMotivoRevogacao(String motivoRevogacao) {
         this.motivoRevogacao = motivoRevogacao;
+    }
+
+    public Long getEnvioArquivoId() {
+        return envioArquivoId;
+    }
+
+    public void setEnvioArquivoId(Long envioArquivoId) {
+        this.envioArquivoId = envioArquivoId;
+    }
+
+    public Long getInconsistenciaImportacaoId() {
+        return inconsistenciaImportacaoId;
+    }
+
+    public void setInconsistenciaImportacaoId(Long inconsistenciaImportacaoId) {
+        this.inconsistenciaImportacaoId = inconsistenciaImportacaoId;
     }
 }
 

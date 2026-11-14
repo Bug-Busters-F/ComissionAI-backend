@@ -9,8 +9,8 @@ import java.util.List;
 @Repository
 public interface CampanhaEsteiraTransicaoRepository extends JpaRepository<CampanhaEsteiraTransicao, Long> {
 
-    List<CampanhaEsteiraTransicao> findAllByCampanhaVersaoIdOrderByCriadoEmDesc(Long campanhaVersaoId);
+    List<CampanhaEsteiraTransicao> findAllByCampanhaVersaoIdOrderByCriadoEmDescIdDesc(Long campanhaVersaoId);
 
-    List<CampanhaEsteiraTransicao> findAllByCampanhaVersaoCampanhaIdOrderByCriadoEmDesc(Long campanhaId);
+    List<CampanhaEsteiraTransicao> findAllByCampanhaVersaoCampanhaIdOrderByCriadoEmDescIdDesc(Long campanhaId);
 }
 
