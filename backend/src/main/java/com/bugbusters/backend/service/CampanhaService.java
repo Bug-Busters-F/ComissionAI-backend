@@ -548,6 +548,12 @@ public class CampanhaService {
                 ? simulacaoRepository.findAllByCampanhaVersaoId(proposta.getId())
                 : simulacaoRepository.findAllByCampanhaIdAndStatusAceite(campanha.getId(), StatusAceiteSimulacao.ACEITA);
         OffsetDateTime agora = OffsetDateTime.now();
+        if (proposta != null && proposta.getProgramaPythonAprovado() != null) {
+            proposta.setProgramaPythonAprovado(null);
+            if (campanhaVersaoRepository != null) {
+                campanhaVersaoRepository.save(proposta);
+            }
+        }
         for (Simulacao sim : simulacoes) {
             sim.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
             sim.setInvalidadoEm(agora);
@@ -837,6 +843,15 @@ public class CampanhaService {
         boolean possuiIncompletas = regrasDTO.stream()
                 .anyMatch(r -> Boolean.FALSE.equals(r.completa()) || r.taxa() == null);
 
+        CampanhaVersao vRev = c.versaoParaRevisao();
+        com.bugbusters.backend.model.EstadoEsteiraCampanha estEsteira = vRev != null && vRev.getEstadoEsteira() != null
+                ? vRev.getEstadoEsteira() : com.bugbusters.backend.model.EstadoEsteiraCampanha.EM_ELABORACAO;
+        boolean devolvida = vRev != null && vRev.isDevolvida();
+        String devPor = vRev != null ? vRev.getDevolvidoPor() : null;
+        OffsetDateTime devEm = vRev != null ? vRev.getDevolvidoEm() : null;
+        String motDev = vRev != null ? vRev.getMotivoDevolucao() : null;
+        Integer etDev = vRev != null ? vRev.getEtapaDevolucao() : null;
+
         return new CampanhaResponse(
                 c.getId(),
                 exibida != null ? exibida.getTitulo() : c.getTitulo(),
@@ -858,6 +873,12 @@ public class CampanhaService {
                 c.getVersaoProposta() != null && c.getVersaoProposta().getVersaoAnterior() != null
                         ? c.getVersaoProposta().getVersaoAnterior().getNumero() : null,
                 motivoBloqueioEdicao(c),
+                estEsteira,
+                devolvida,
+                devPor,
+                devEm,
+                motDev,
+                etDev,
                 exibida != null ? exibida.getOrcamento() : c.getOrcamento(),
                 exibida != null ? exibida.getOrcamentoExtraidoIa() : c.getOrcamentoExtraidoIa(),
                 exibida != null ? exibida.getOrigemOrcamento() : c.getOrigemOrcamento(),

@@ -68,6 +68,18 @@ public class ResultadoCalculo {
     @Column(name = "fechamento_id")
     private UUID fechamentoId;
 
+    @Column(name = "campanha_id")
+    private Long campanhaId;
+
+    @Column(name = "versao_programa_python")
+    private Integer versaoProgramaPython;
+
+    @Column(name = "checksum_python", length = 64)
+    private String checksumPython;
+
+    @Column(name = "apuracao_campanha_id")
+    private UUID apuracaoCampanhaId;
+
     @Column(name = "desatualizado_por_correcao", nullable = false)
     private boolean desatualizadoPorCorrecao = false;
 
@@ -275,6 +287,38 @@ public class ResultadoCalculo {
 
     public void setFechamentoId(UUID fechamentoId) {
         this.fechamentoId = fechamentoId;
+    }
+
+    public Long getCampanhaId() {
+        return campanhaId;
+    }
+
+    public void setCampanhaId(Long campanhaId) {
+        this.campanhaId = campanhaId;
+    }
+
+    public Integer getVersaoProgramaPython() {
+        return versaoProgramaPython;
+    }
+
+    public void setVersaoProgramaPython(Integer versaoProgramaPython) {
+        this.versaoProgramaPython = versaoProgramaPython;
+    }
+
+    public String getChecksumPython() {
+        return checksumPython;
+    }
+
+    public void setChecksumPython(String checksumPython) {
+        this.checksumPython = checksumPython;
+    }
+
+    public UUID getApuracaoCampanhaId() {
+        return apuracaoCampanhaId;
+    }
+
+    public void setApuracaoCampanhaId(UUID apuracaoCampanhaId) {
+        this.apuracaoCampanhaId = apuracaoCampanhaId;
     }
 
     public boolean isDesatualizadoPorCorrecao() {

@@ -3,6 +3,7 @@ package com.bugbusters.backend.dto.campanha;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.regra.StatusRegra;
 import com.bugbusters.backend.model.EstadoCampanha;
+import com.bugbusters.backend.model.EstadoEsteiraCampanha;
 import com.bugbusters.backend.model.OrigemOrcamentoCampanha;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -34,6 +35,12 @@ public record CampanhaResponse(
         Long revisaoControle,
         Integer versaoOrigem,
         String motivoBloqueioEdicao,
+        EstadoEsteiraCampanha estadoEsteira,
+        Boolean devolvida,
+        String devolvidoPor,
+        OffsetDateTime devolvidoEm,
+        String motivoDevolucao,
+        Integer etapaDevolucao,
 
         @Schema(description = "Teto orçamentário monetário da campanha (BACK-8)", example = "50000.00")
         BigDecimal orcamento,
@@ -82,6 +89,7 @@ public record CampanhaResponse(
     ) {
         this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm,
                 null, null, null, null, 1, 1, null, null, null,
+                null, false, null, null, null, null,
                 null, null, null, false, null, null, null, false, null, null, null);
     }
 
@@ -108,6 +116,7 @@ public record CampanhaResponse(
     ) {
         this(id, titulo, textoOriginal, estado, dataInicio, dataFim, regras, possuiIncompletas, criadoEm, atualizadoEm,
                 simulacaoAceitaId, statusAceite, versaoVigente, versaoProposta, ultimaEtapa, etapaMaisAvancada, revisaoControle, versaoOrigem, motivoBloqueioEdicao,
+                null, false, null, null, null, null,
                 null, null, null, false, null, null, null, false, null, null, null);
     }
 

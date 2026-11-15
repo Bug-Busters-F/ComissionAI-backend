@@ -58,6 +58,14 @@ public interface ResultadoCalculoRepository extends JpaRepository<ResultadoCalcu
 
     List<ResultadoCalculo> findTop5ByMatriculaIn(Collection<String> matriculas);
 
+    List<ResultadoCalculo> findAllByApuracaoCampanhaIdOrderByDataVendaAsc(UUID apuracaoCampanhaId);
+
+    List<ResultadoCalculo> findAllByCampanhaIdOrderByCalculadoEmDesc(Long campanhaId);
+
+    List<ResultadoCalculo> findAllByFechamentoIdOrderByDataVendaAsc(UUID fechamentoId);
+
+    List<ResultadoCalculo> findAllByFechamentoId(UUID fechamentoId);
+
     @org.springframework.data.jpa.repository.Query("""
         SELECT COUNT(r) FROM ResultadoCalculo r
         WHERE r.codMarca = :codMarca
