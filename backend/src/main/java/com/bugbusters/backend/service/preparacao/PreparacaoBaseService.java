@@ -79,6 +79,7 @@ public class PreparacaoBaseService {
     private final TravaCompetencia travaCompetencia;
     private final UsuarioAtualProvider usuarioAtualProvider;
     private final PropagacaoImpactoCorrecaoService propagacaoImpactoCorrecaoService;
+    private final com.bugbusters.backend.service.AlertaEstatisticoService alertaEstatisticoService;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -130,7 +131,8 @@ public class PreparacaoBaseService {
             FechamentoService fechamentoService,
             TravaCompetencia travaCompetencia,
             UsuarioAtualProvider usuarioAtualProvider,
-            PropagacaoImpactoCorrecaoService propagacaoImpactoCorrecaoService) {
+            PropagacaoImpactoCorrecaoService propagacaoImpactoCorrecaoService,
+            com.bugbusters.backend.service.AlertaEstatisticoService alertaEstatisticoService) {
         this.campanhaRepository = campanhaRepository;
         this.lotePreparacaoRepository = lotePreparacaoRepository;
         this.linhaPreparacaoRepository = linhaPreparacaoRepository;
@@ -153,6 +155,7 @@ public class PreparacaoBaseService {
         this.travaCompetencia = travaCompetencia;
         this.usuarioAtualProvider = usuarioAtualProvider;
         this.propagacaoImpactoCorrecaoService = propagacaoImpactoCorrecaoService;
+        this.alertaEstatisticoService = alertaEstatisticoService;
     }
 
     /**
@@ -933,6 +936,7 @@ public class PreparacaoBaseService {
         lote.setEfetivadoEm(agora);
         lote.setEfetivadoPor(autor);
         lotePreparacaoRepository.save(lote);
+        alertaEstatisticoService.analisarLoteEfetivado(lote);
 
         // 7. Propagação dos impactos confirmados para campanhas, simulações e cálculos
         ResumoPropagacaoImpactoDTO resumoImpactos = null;

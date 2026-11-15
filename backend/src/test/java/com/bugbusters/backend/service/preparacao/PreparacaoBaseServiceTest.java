@@ -226,6 +226,8 @@ class PreparacaoBaseServiceTest {
                 .stream()
                 .anyMatch(a -> a.getId().equals(efetivacao.anexoCampanhaId()));
         assertThat(anexado).isTrue();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tb_alerta_estatistico WHERE lote_preparacao_id = ?", Integer.class, loteDTO.id()))
+                .isEqualTo(1);
     }
 
     @Test
