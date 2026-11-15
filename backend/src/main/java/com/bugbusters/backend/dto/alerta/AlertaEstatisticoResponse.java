@@ -8,4 +8,4 @@ import java.util.UUID;
 public record AlertaEstatisticoResponse(UUID id, UUID lotePreparacaoId, UUID vendaId, String matricula,
         LocalDate dataReferencia, String tipo, String metodo, String grupoComparavel, int tamanhoAmostra,
         BigDecimal valorObservado, BigDecimal mediaGrupo, BigDecimal desvioPadrao, BigDecimal score,
-        String versaoBases, OffsetDateTime geradoEm) { }
+        String versaoBases, OffsetDateTime geradoEm, OffsetDateTime substituidoEm, UUID substituidoPorId) { }

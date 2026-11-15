@@ -9,6 +9,8 @@ import java.util.UUID;
 
 @Repository
 public interface HistoricoVersaoRegistroRepository extends JpaRepository<HistoricoVersaoRegistro, UUID> {
+    List<HistoricoVersaoRegistro> findAllByLotePreparacaoId(UUID lotePreparacaoId);
+
     List<HistoricoVersaoRegistro> findByTipoBaseAndRegistroIdOrderByVersaoDesc(String tipoBase, UUID registroId);
 
     List<HistoricoVersaoRegistro> findByTipoBaseAndChaveNegocioOrderByVersaoDesc(String tipoBase, String chaveNegocio);

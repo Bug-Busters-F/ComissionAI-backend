@@ -5,6 +5,7 @@ import com.bugbusters.backend.model.TipoAlertaEstatistico;
 import com.bugbusters.backend.service.AlertaEstatisticoService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springdoc.core.annotations.ParameterObject;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -27,7 +28,7 @@ public class AlertaEstatisticoController {
             @RequestParam(required = false) String matricula, @RequestParam(required = false) String competencia,
             @RequestParam(required = false) TipoAlertaEstatistico tipo, @RequestParam(required = false) UUID lotePreparacaoId,
             @RequestParam(defaultValue = "false") boolean incluirSubstituidos,
-            @PageableDefault(size = 20, sort = "geradoEm", direction = Sort.Direction.DESC) Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "geradoEm", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(service.consultar(matricula, competencia, tipo, lotePreparacaoId, incluirSubstituidos, pageable));
     }
 
