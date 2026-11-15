@@ -7,7 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
@@ -30,6 +34,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Component 
 public class AiServiceClient {
     private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(AiServiceClient.class);
+
+    /** IA-10: cabeçalho de rastreio devolvido pela IA e presente em todos os logs dela. */
+    public static final String HEADER_CORRELACAO = "X-Correlation-Id";
+    /** Chave do MDC reaproveitada quando um filtro já tiver definido o id da requisição. */
+    public static final String MDC_CORRELACAO = "correlationId";
 
     public record ItemExecucaoPython(String id, boolean aplicada, BigDecimal comissao) {}
 
@@ -64,6 +74,15 @@ public class AiServiceClient {
     @Value("${ai.service.v2.executar-programa-endpoint:/api/v2/executar-programa}")
     private String v2ExecutarProgramaEndpoint;
 
+    @Value("${ai.service.v2.gerar-programa-endpoint:/api/v2/gerar-programa}")
+    private String v2GerarProgramaEndpoint;
+
+    @Value("${ai.service.v2.simular-endpoint:/api/v2/simular}")
+    private String v2SimularEndpoint;
+
+    @Value("${ai.service.v2.anomalias-endpoint:/api/v2/anomalias/analisar}")
+    private String v2AnomaliasEndpoint;
+
     public AiServiceClient(RestClient aiRestClient, @Value("${ai.service.endpoint:/api/v1/interpretar}") String endpoint) {
         this.aiRestClient = aiRestClient;
         this.endpoint = endpoint;
@@ -83,6 +102,7 @@ public class AiServiceClient {
             return aiRestClient.post()
                     .uri(endpoint)
                     .header(authHeader, authKey)
+                    .header(HEADER_CORRELACAO, correlacaoId(endpoint))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
@@ -134,6 +154,7 @@ public class AiServiceClient {
             ExecutarProgramaPythonResponse response = aiRestClient.post()
                     .uri(v2ExecutarProgramaEndpoint)
                     .header(authHeader, authKey)
+                    .header(HEADER_CORRELACAO, correlacaoId(v2ExecutarProgramaEndpoint))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(payload)
                     .retrieve()
@@ -204,6 +225,7 @@ public class AiServiceClient {
             return aiRestClient.post()
                     .uri(uri)
                     .header(authHeader, authKey)
+                    .header(HEADER_CORRELACAO, correlacaoId(uri))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(payload)
                     .retrieve()
@@ -221,6 +243,79 @@ public class AiServiceClient {
         } catch (RestClientException ex) {
             throw new AiInvalidResponseException("O serviço de IA retornou uma resposta em formato inválido.", ex);
         }
+    }
+
+    // ------------------------------------------------------------------ contratos da Sprint 3 (IA-10)
+    // Métodos prontos para o BACK-11 (gerar/simular com cenários, calibração e explicações) e o BACK-12
+    // (anomalias). O payload e a resposta seguem docs/CONTRATO-SPRINT3.md e docs/contratos/*.schema.json do
+    // serviço de IA. Diferente de postarV2, um 4xx da IA (payload inválido, volume acima do limite) vira
+    // BusinessException com a mensagem da IA, para chegar ao usuário em vez de "serviço indisponível".
+
+    /** Gera e valida o programa antes da revisão técnica (POST /api/v2/gerar-programa, IA-2/IA-10). */
+    public Map<String, Object> gerarProgramaV2(Map<String, Object> payload) {
+        return postarContratoIa(v2GerarProgramaEndpoint, payload);
+    }
+
+    /**
+     * Quatro cenários com orçamento, calibração ({@code calibrar=true}) e explicações por cenário
+     * (POST /api/v2/simular, IA-5 a IA-7). Enviar {@code codigoAprovado} para não regerar código (ver §5 do contrato).
+     */
+    public Map<String, Object> simularV2(Map<String, Object> payload) {
+        return postarContratoIa(v2SimularEndpoint, payload);
+    }
+
+    /** Detecção estatística diária de anomalias por grupo comparável (POST /api/v2/anomalias/analisar, IA-8). */
+    public Map<String, Object> analisarAnomaliasV2(Map<String, Object> payload) {
+        return postarContratoIa(v2AnomaliasEndpoint, payload);
+    }
+
+    private Map<String, Object> postarContratoIa(String uri, Map<String, Object> payload) {
+        try {
+            validarChaveInterna();
+            return aiRestClient.post()
+                    .uri(uri)
+                    .header(authHeader, authKey)
+                    .header(HEADER_CORRELACAO, correlacaoId(uri))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
+                        String mensagem = extrairMensagemErroSandbox(res.getBody().readAllBytes(), res.getStatusCode().value());
+                        throw new BusinessException("O serviço de IA recusou a requisição: " + mensagem);
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, res) -> {
+                        throw new AiServiceUnavailableException("O serviço de IA retornou status HTTP " + res.getStatusCode().value());
+                    })
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {});
+        } catch (BusinessException | AiServiceUnavailableException ex) {
+            throw ex;
+        } catch (ResourceAccessException ex) {
+            if (ex.getCause() instanceof SocketTimeoutException) {
+                throw new AiTimeoutException("O serviço de IA excedeu o tempo limite configurado.");
+            }
+            throw new AiServiceUnavailableException("Não foi possível conectar ao serviço de IA em Python. Verifique se o módulo está ativo.");
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().is4xxClientError()) {
+                String mensagem = extrairMensagemErroSandbox(ex.getResponseBodyAsByteArray(), ex.getStatusCode().value());
+                throw new BusinessException("O serviço de IA recusou a requisição: " + mensagem);
+            }
+            throw new AiServiceUnavailableException("Erro retornado pelo serviço de IA: " + ex.getStatusText());
+        } catch (RestClientException ex) {
+            throw new AiInvalidResponseException("O serviço de IA retornou uma resposta em formato inválido.", ex);
+        }
+    }
+
+    /**
+     * IA-10: id de rastreio enviado em toda chamada à IA. Reaproveita o MDC quando houver; senão gera um por
+     * chamada e registra no log, para cruzar com os logs da IA (que repetem o id em cada linha).
+     */
+    private String correlacaoId(String uri) {
+        String id = MDC.get(MDC_CORRELACAO);
+        if (id == null || id.isBlank()) {
+            id = UUID.randomUUID().toString();
+        }
+        log.info("Chamada ao serviço de IA {} com {}={}", uri, HEADER_CORRELACAO, id);
+        return id;
     }
 
     private void validarChaveInterna() {
