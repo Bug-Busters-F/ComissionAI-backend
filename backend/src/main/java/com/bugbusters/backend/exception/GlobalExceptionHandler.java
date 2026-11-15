@@ -17,6 +17,20 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+        @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+        public ResponseEntity<ApiErrorResponse> handleAccessDenied(
+                org.springframework.security.access.AccessDeniedException ex, HttpServletRequest request) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiErrorResponse(
+                    OffsetDateTime.now(), 403, "Forbidden", ex.getMessage(), request.getRequestURI(), List.of()));
+        }
+
+        @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+        public ResponseEntity<ApiErrorResponse> handleNoResourceFound(
+                org.springframework.web.servlet.resource.NoResourceFoundException ex, HttpServletRequest request) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiErrorResponse(
+                    OffsetDateTime.now(), 404, "Not Found", "Recurso não encontrado.", request.getRequestURI(), List.of()));
+        }
+
         @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
         public ResponseEntity<ApiErrorResponse> handleAuthentication(
                 org.springframework.security.core.AuthenticationException ex, HttpServletRequest request) {
