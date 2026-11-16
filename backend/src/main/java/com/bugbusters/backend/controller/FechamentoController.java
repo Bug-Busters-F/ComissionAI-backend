@@ -4,6 +4,7 @@ import com.bugbusters.backend.dto.error.ApiErrorResponse;
 import com.bugbusters.backend.dto.fechamento.FechamentoRequestDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoResponseDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoStatusDTO;
+import com.bugbusters.backend.dto.relatorio.ImpedimentoFechamentoResponseDTO;
 import com.bugbusters.backend.dto.relatorio.RelatorioFechamentoConsolidadoDTO;
 import com.bugbusters.backend.dto.relatorio.TipoExportacaoRelatorio;
 import com.bugbusters.backend.service.FechamentoService;
@@ -98,9 +99,41 @@ public class FechamentoController {
     @GetMapping("/{competencia}/relatorio")
     public ResponseEntity<RelatorioFechamentoConsolidadoDTO> obterRelatorioCompetencia(
             @Parameter(description = "Competência no formato YYYY-MM", example = "2026-10")
-            @PathVariable String competencia) {
-        RelatorioFechamentoConsolidadoDTO relatorio = relatorioService.gerarRelatorioCompetencia(competencia);
+            @PathVariable String competencia,
+            @Parameter(description = "Filtro opcional por código da loja")
+            @RequestParam(required = false) Integer codLoja,
+            @Parameter(description = "Filtro opcional por código da marca")
+            @RequestParam(required = false) Integer codMarca,
+            @Parameter(description = "Filtro opcional por identificador da regra aplicada")
+            @RequestParam(required = false) Long idRegra,
+            @Parameter(description = "Filtro opcional por matrícula do colaborador")
+            @RequestParam(required = false) String matricula) {
+        RelatorioFechamentoConsolidadoDTO relatorio = relatorioService.gerarRelatorioCompetencia(
+                competencia, codLoja, codMarca, idRegra, matricula);
         return ResponseEntity.ok(relatorio);
+    }
+
+    @Operation(
+            summary = "Listar impedimentos registrados no fechamento da competência (FRONT-11 / BACK-15)",
+            description = "Retorna lista paginada de vendas impedidas durante o fechamento concluído da competência, com filtros opcionais por matrícula e marca."
+    )
+    @ApiResponse(responseCode = "200", description = "Página de impedimentos retornada com sucesso")
+    @ApiResponse(responseCode = "400", description = "Formato de competência ou parâmetros de consulta inválidos",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Competência sem fechamento concluído",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/{competencia}/impedimentos")
+    public ResponseEntity<Page<ImpedimentoFechamentoResponseDTO>> listarImpedimentosCompetencia(
+            @Parameter(description = "Competência no formato YYYY-MM", example = "2026-10")
+            @PathVariable String competencia,
+            @Parameter(description = "Filtro opcional por matrícula do colaborador")
+            @RequestParam(required = false) String matricula,
+            @Parameter(description = "Filtro opcional por código da marca")
+            @RequestParam(required = false) Integer codMarca,
+            @PageableDefault(size = 20, sort = "dataVenda", direction = Sort.Direction.DESC) Pageable pageable) {
+        Page<ImpedimentoFechamentoResponseDTO> impedimentos = relatorioService.listarImpedimentosCompetencia(
+                competencia, matricula, codMarca, pageable);
+        return ResponseEntity.ok(impedimentos);
     }
 
     @Operation(

@@ -6,10 +6,12 @@ import com.bugbusters.backend.dto.fechamento.FechamentoResponseDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoStatusDTO;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.FechamentoCompetencia;
+import com.bugbusters.backend.model.ImpedimentoFechamento;
 import com.bugbusters.backend.model.StatusFechamento;
 import com.bugbusters.backend.model.TipoAcaoAuditoria;
 import com.bugbusters.backend.model.TipoEntidadeAuditoria;
 import com.bugbusters.backend.repository.FechamentoCompetenciaRepository;
+import com.bugbusters.backend.repository.ImpedimentoFechamentoRepository;
 import com.bugbusters.backend.service.lock.TravaCompetencia;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +50,9 @@ public class FechamentoService {
     private final TravaCompetencia travaCompetencia;
     private final TransactionTemplate transacaoIsolada;
     private final AuditoriaGeralService auditoriaService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ImpedimentoFechamentoRepository impedimentoFechamentoRepository;
 
     public FechamentoService(FechamentoCompetenciaRepository repository, CalculoService calculoService,
                              TravaCompetencia travaCompetencia, PlatformTransactionManager transactionManager) {
@@ -101,6 +106,24 @@ public class FechamentoService {
                 fechamento.setStatus(StatusFechamento.CONCLUIDO);
                 fechamento.setConcluidoEm(OffsetDateTime.now());
                 fechamentoCompetenciaRepository.save(fechamento);
+
+                if (impedimentoFechamentoRepository != null && apuracao.impedimentos() != null && !apuracao.impedimentos().isEmpty()) {
+                    var impedimentosPersistir = apuracao.impedimentos().stream()
+                            .map(dto -> new ImpedimentoFechamento(
+                                    UUID.randomUUID(),
+                                    fechamento.getId(),
+                                    competencia,
+                                    dto.idVenda(),
+                                    dto.matricula(),
+                                    dto.codMarca(),
+                                    dto.dataVenda(),
+                                    dto.valorVenda(),
+                                    dto.motivo() != null ? dto.motivo() : "Impedimento durante apuração",
+                                    dto.tipoImpedimento()
+                            ))
+                            .toList();
+                    impedimentoFechamentoRepository.saveAll(impedimentosPersistir);
+                }
 
                 if (auditoriaService != null) {
                     auditoriaService.registrarAcao(

@@ -9,11 +9,27 @@ import com.bugbusters.backend.model.ResultadoCalculo;
 import com.bugbusters.backend.model.StatusFechamento;
 import com.bugbusters.backend.model.TipoAcaoAuditoria;
 import com.bugbusters.backend.model.TipoEntidadeAuditoria;
+import com.bugbusters.backend.dto.relatorio.ImpedimentoFechamentoResponseDTO;
+import com.bugbusters.backend.dto.relatorio.TotalPorColaboradorDTO;
+import com.bugbusters.backend.dto.relatorio.TotalPorRegraDTO;
+import com.bugbusters.backend.dto.relatorio.TotaisGeraisFechamentoDTO;
+import com.bugbusters.backend.model.ImpedimentoFechamento;
+import com.bugbusters.backend.registration.Registration;
+import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.repository.CampanhaApuracaoRepository;
 import com.bugbusters.backend.repository.FechamentoCompetenciaRepository;
+import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository;
+import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.CanalGrupoRow;
+import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.ColaboradorGranularRow;
+import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.ColaboradorResumoRow;
+import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.EquipeGrupoRow;
+import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.TotaisGeraisRow;
 import com.bugbusters.backend.repository.ResultadoCalculoRepository;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +63,12 @@ public class RelatorioFechamentoService {
     private final SaleRepository saleRepository;
     private final AuditoriaGeralService auditoriaService;
 
+    @Autowired(required = false)
+    private RelatorioFechamentoQueryRepository relatorioQueryRepository;
+
+    @Autowired(required = false)
+    private RegistrationRepository registrationRepository;
+
     @Autowired
     public RelatorioFechamentoService(
             FechamentoCompetenciaRepository fechamentoCompetenciaRepository,
@@ -67,12 +89,27 @@ public class RelatorioFechamentoService {
      */
     @Transactional(readOnly = true)
     public RelatorioFechamentoConsolidadoDTO gerarRelatorioCompetencia(String competenciaStr) {
+        return gerarRelatorioCompetencia(competenciaStr, null, null, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public RelatorioFechamentoConsolidadoDTO gerarRelatorioCompetencia(
+            String competenciaStr,
+            Integer codLoja,
+            Integer codMarca,
+            Long idRegra,
+            String matricula
+    ) {
         String competencia = normalizarCompetencia(competenciaStr);
 
         FechamentoCompetencia fechamento = fechamentoCompetenciaRepository
                 .findFirstByCompetenciaAndStatusOrderByConcluidoEmDesc(competencia, StatusFechamento.CONCLUIDO)
-                .or(() -> fechamentoCompetenciaRepository.findFirstByCompetenciaOrderByIniciadoEmDesc(competencia))
-                .orElseThrow(() -> new ResourceNotFoundException("Nenhum fechamento registrado para a competência: " + competencia));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Nenhum fechamento concluído foi localizado para a competência: " + competencia));
+
+        if (relatorioQueryRepository != null) {
+            return montarRelatorioViaConsultaBanco(fechamento, codLoja, codMarca, idRegra, matricula);
+        }
 
         List<ResultadoCalculo> resultados = resultadoCalculoRepository.findAllByFechamentoIdOrderByDataVendaAsc(fechamento.getId());
 
@@ -105,7 +142,63 @@ public class RelatorioFechamentoService {
         FechamentoCompetencia fechamento = fechamentoCompetenciaRepository.findByProtocolo(protocolo)
                 .orElseThrow(() -> new ResourceNotFoundException("Fechamento não encontrado com o protocolo: " + protocolo));
 
+        if (fechamento.getStatus() != StatusFechamento.CONCLUIDO) {
+            throw new ResourceNotFoundException("Nenhum fechamento concluído foi localizado para o protocolo: " + protocolo);
+        }
+
+        if (relatorioQueryRepository != null) {
+            return montarRelatorioViaConsultaBanco(fechamento, null, null, null, null);
+        }
+
         return gerarRelatorioCompetencia(fechamento.getCompetencia());
+    }
+
+    /**
+     * Lista os impedimentos persistidos do fechamento concluído de uma competência,
+     * com paginação e filtros opcionais por matrícula e marca (FRONT-11 / BACK-15).
+     */
+    @Transactional(readOnly = true)
+    public Page<ImpedimentoFechamentoResponseDTO> listarImpedimentosCompetencia(
+            String competenciaStr,
+            String matricula,
+            Integer codMarca,
+            Pageable pageable
+    ) {
+        String competencia = normalizarCompetencia(competenciaStr);
+
+        FechamentoCompetencia fechamento = fechamentoCompetenciaRepository
+                .findFirstByCompetenciaAndStatusOrderByConcluidoEmDesc(competencia, StatusFechamento.CONCLUIDO)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Nenhum fechamento concluído foi localizado para a competência: " + competencia));
+
+        if (relatorioQueryRepository == null) {
+            return Page.empty(pageable);
+        }
+
+        Page<ImpedimentoFechamento> pagina = relatorioQueryRepository.listarImpedimentosPaginados(
+                fechamento.getId(), matricula, codMarca, pageable);
+
+        java.util.List<String> matriculas = pagina.getContent().stream()
+                .map(ImpedimentoFechamento::getMatricula)
+                .filter(m -> m != null && !m.isBlank())
+                .map(String::trim)
+                .toList();
+        java.util.Set<String> matriculasCadastradas = buscarMatriculasExistentes(matriculas);
+
+        return pagina.map(imp -> {
+            String mat = imp.getMatricula() != null ? imp.getMatricula().trim() : null;
+            String nomeColaborador = resolverNomeColaboradorImpedimento(mat, matriculasCadastradas);
+            return new ImpedimentoFechamentoResponseDTO(
+                    imp.getId(),
+                    imp.getIdVenda(),
+                    imp.getMatricula(),
+                    nomeColaborador,
+                    imp.getDataVenda(),
+                    imp.getValorVenda(),
+                    imp.getMotivo(),
+                    imp.getTipoImpedimento()
+            );
+        });
     }
 
     /**
@@ -581,15 +674,241 @@ public class RelatorioFechamentoService {
         return perc.setScale(2, RoundingMode.HALF_UP).toPlainString() + "%";
     }
 
+    private RelatorioFechamentoConsolidadoDTO montarRelatorioViaConsultaBanco(
+            FechamentoCompetencia fechamento,
+            Integer codLoja,
+            Integer codMarca,
+            Long idRegra,
+            String matricula
+    ) {
+        UUID fechamentoId = fechamento.getId();
+        YearMonth ym = YearMonth.parse(fechamento.getCompetencia());
+        LocalDate inicio = ym.atDay(1);
+        LocalDate fim = ym.atEndOfMonth();
+        java.time.OffsetDateTime fechadoEm = fechamento.getConcluidoEm() != null
+                ? fechamento.getConcluidoEm()
+                : fechamento.getIniciadoEm();
+
+        TotaisGeraisRow tg = relatorioQueryRepository.consultarTotaisGerais(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+        boolean semFiltros = codLoja == null
+                && codMarca == null
+                && idRegra == null
+                && (matricula == null || matricula.isBlank());
+        int totalImpedimentos = semFiltros
+                ? fechamento.getTotalImpedimentos()
+                : relatorioQueryRepository.contarImpedimentosFiltrados(
+                        fechamentoId, codLoja, codMarca, idRegra, matricula);
+        int totalVendasProcessadas = semFiltros && fechamento.getTotalVendasProcessadas() > 0
+                ? fechamento.getTotalVendasProcessadas()
+                : tg.totalCalculados() + totalImpedimentos;
+
+        BigDecimal valorTotalVendas = tg.valorTotalVendas();
+        BigDecimal valorTotalComissao = tg.valorTotalComissao();
+        BigDecimal valorTotalBonusPerc = tg.valorTotalBonusPercentual();
+        BigDecimal valorTotalBonusFixo = tg.valorTotalBonusFixo();
+        BigDecimal valorTotalBonus = valorTotalBonusPerc.add(valorTotalBonusFixo)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+
+        List<TotalPorRegraDTO> totaisPorRegra = relatorioQueryRepository.agruparPorRegra(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+        List<CanalGrupoRow> canalRows = relatorioQueryRepository.agruparPorCanal(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+        List<EquipeGrupoRow> equipeRows = relatorioQueryRepository.agruparPorEquipe(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+        List<ColaboradorGranularRow> colabGranularRows = relatorioQueryRepository.agruparPorColaboradorGranular(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+        List<ColaboradorResumoRow> colabResumoRows = relatorioQueryRepository.agruparTotaisPorColaborador(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+        List<ItemRelatorioFechamentoDTO> detalheVendas = relatorioQueryRepository.listarItensDetalhados(
+                fechamentoId, codLoja, codMarca, idRegra, matricula);
+
+        List<TotalPorColaboradorDTO> totaisPorColaborador = colabResumoRows.stream()
+                .map(row -> new TotalPorColaboradorDTO(
+                        row.matricula(),
+                        resolverNomeColaboradorCalculado(row.matricula()),
+                        row.nomeCargo(),
+                        row.nomeLoja(),
+                        row.quantidadeVendas(),
+                        row.valorTotalVendas(),
+                        row.valorTotalComissao()
+                ))
+                .toList();
+
+        List<ConsolidadoCanalDTO> porCanal = canalRows.stream()
+                .map(c -> new ConsolidadoCanalDTO(
+                        c.canal(),
+                        c.quantidadeVendas(),
+                        c.quantidadeColaboradores(),
+                        c.valorTotalVendas(),
+                        c.valorTotalComissao(),
+                        c.valorTotalBonus(),
+                        calcularTaxaEfetiva(c.valorTotalComissao(), c.valorTotalVendas()),
+                        calcularPercentual(c.valorTotalVendas(), valorTotalVendas),
+                        calcularPercentual(c.valorTotalComissao(), valorTotalComissao)
+                ))
+                .toList();
+
+        List<ConsolidadoEquipeDTO> porEquipe = equipeRows.stream()
+                .map(e -> new ConsolidadoEquipeDTO(
+                        e.codLoja(),
+                        e.nomeLoja(),
+                        e.codMarca(),
+                        e.nomeMarca(),
+                        e.quantidadeVendas(),
+                        e.quantidadeColaboradores(),
+                        e.valorTotalVendas(),
+                        e.valorTotalComissao(),
+                        e.valorTotalBonus(),
+                        calcularTaxaEfetiva(e.valorTotalComissao(), e.valorTotalVendas()),
+                        calcularPercentual(e.valorTotalComissao(), valorTotalComissao)
+                ))
+                .toList();
+
+        List<ConsolidadoColaboradorDTO> porColaborador = colabGranularRows.stream()
+                .map(col -> {
+                    BigDecimal bonus = col.valorTotalBonusPercentual().add(col.valorTotalBonusFixo())
+                            .setScale(2, java.math.RoundingMode.HALF_UP);
+                    BigDecimal comissaoBase = col.valorTotalComissao().subtract(bonus)
+                            .max(BigDecimal.ZERO)
+                            .setScale(2, java.math.RoundingMode.HALF_UP);
+                    return new ConsolidadoColaboradorDTO(
+                            col.matricula(),
+                            col.codCargo(),
+                            col.nomeCargo(),
+                            col.codLoja(),
+                            col.nomeLoja(),
+                            col.codMarca(),
+                            col.nomeMarca(),
+                            col.quantidadeVendas(),
+                            col.valorTotalVendas(),
+                            comissaoBase,
+                            col.valorTotalBonusPercentual(),
+                            col.valorTotalBonusFixo(),
+                            bonus,
+                            col.valorTotalComissao(),
+                            calcularTaxaEfetiva(col.valorTotalComissao(), col.valorTotalVendas())
+                    );
+                })
+                .toList();
+
+        TotaisGeraisFechamentoDTO totaisGerais = new TotaisGeraisFechamentoDTO(
+                totalVendasProcessadas,
+                tg.totalCalculados(),
+                totalImpedimentos,
+                valorTotalVendas,
+                valorTotalComissao
+        );
+
+        ResumoFechamentoDTO resumo = new ResumoFechamentoDTO(
+                "Competência " + fechamento.getCompetencia(),
+                fechamento.getProtocolo(),
+                fechamento.getStatus().name(),
+                fechamento.getCompetencia(),
+                inicio,
+                fim,
+                fechamento.getExecutadoPor(),
+                fechadoEm,
+                totalVendasProcessadas,
+                tg.totalCalculados(),
+                totalImpedimentos,
+                valorTotalVendas,
+                valorTotalComissao,
+                valorTotalBonusPerc,
+                valorTotalBonusFixo,
+                valorTotalBonus,
+                valorTotalComissao,
+                calcularTaxaEfetiva(valorTotalComissao, valorTotalVendas),
+                tg.totalColaboradoresDistintos(),
+                tg.totalLojasDistintas(),
+                porCanal.size()
+        );
+
+        return new RelatorioFechamentoConsolidadoDTO(
+                fechamento.getCompetencia(),
+                fechamentoId,
+                fechamento.getProtocolo(),
+                fechadoEm,
+                fechamento.getExecutadoPor(),
+                fechamento.getMotivo(),
+                totaisGerais,
+                totaisPorRegra,
+                totaisPorColaborador,
+                resumo,
+                porCanal,
+                porEquipe,
+                porColaborador,
+                detalheVendas
+        );
+    }
+
+    private java.util.Set<String> buscarMatriculasExistentes(java.util.Collection<String> matriculas) {
+        if (registrationRepository == null || matriculas == null || matriculas.isEmpty()) {
+            return java.util.Set.of();
+        }
+        java.util.Set<String> unicas = new java.util.LinkedHashSet<>();
+        for (String m : matriculas) {
+            if (m != null && !m.isBlank()) {
+                unicas.add(m.trim());
+            }
+        }
+        if (unicas.isEmpty()) {
+            return java.util.Set.of();
+        }
+        java.util.Set<String> encontradas = new java.util.HashSet<>();
+        for (Registration reg : registrationRepository.findByRegistrationIn(unicas)) {
+            if (reg.getRegistration() != null) {
+                encontradas.add(reg.getRegistration().trim());
+            }
+        }
+        return encontradas;
+    }
+
+    private String resolverNomeColaboradorImpedimento(String matricula, java.util.Set<String> cadastradas) {
+        if (matricula == null || matricula.isBlank()) {
+            return "Colaborador Não Encontrado";
+        }
+        if (registrationRepository != null && !cadastradas.contains(matricula)) {
+            return "Colaborador Não Encontrado";
+        }
+        return "Colaborador " + matricula;
+    }
+
+    private String resolverNomeColaboradorCalculado(String matricula) {
+        if (matricula == null || matricula.isBlank() || "SEM_MATRICULA".equals(matricula)) {
+            return "Colaborador Não Encontrado";
+        }
+        return "Colaborador " + matricula;
+    }
+
+    private BigDecimal calcularTaxaEfetiva(BigDecimal comissao, BigDecimal vendas) {
+        if (vendas == null || vendas.compareTo(BigDecimal.ZERO) <= 0 || comissao == null) {
+            return BigDecimal.ZERO.setScale(4, java.math.RoundingMode.HALF_UP);
+        }
+        return comissao.divide(vendas, 4, java.math.RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calcularPercentual(BigDecimal parcial, BigDecimal total) {
+        if (total == null || total.compareTo(BigDecimal.ZERO) <= 0 || parcial == null) {
+            return BigDecimal.ZERO.setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+        return parcial.multiply(BigDecimal.valueOf(100))
+                .divide(total, 2, java.math.RoundingMode.HALF_UP);
+    }
+
     private String normalizarCompetencia(String comp) {
         if (comp == null || comp.isBlank()) {
             throw new BusinessException("A competência é obrigatória para o relatório de fechamento.");
         }
         String limpo = comp.trim();
-        if (limpo.length() >= 7) {
-            return limpo.substring(0, 7);
+        if (!limpo.matches("\\d{4}-(0[1-9]|1[0-2])")) {
+            throw new BusinessException(String.format("Formato de competência inválido: '%s'. Utilize YYYY-MM.", comp));
         }
-        throw new BusinessException(String.format("Formato de competência inválido: '%s'. Utilize YYYY-MM.", comp));
+        try {
+            return YearMonth.parse(limpo).toString();
+        } catch (Exception e) {
+            throw new BusinessException(String.format("Competência inválida: '%s'. Utilize YYYY-MM.", comp));
+        }
     }
 
     // Classes acumuladoras em memória para agregação limpa e eficiente

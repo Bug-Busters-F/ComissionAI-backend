@@ -1,5 +1,6 @@
 package com.bugbusters.backend.dto.esteira;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.NotNull;
 @Schema(description = "Requisição formal de devolução de proposta na esteira pelo gerente (FRONT-9 / BACK-4)")
 public record DevolverCampanhaRequest(
         @Schema(description = "Etapa de destino para devolução (1: Proposta, 2: Revisão Técnica, 3: Simulação)", example = "1")
+        @JsonAlias("paraEtapa")
         @NotNull(message = "A etapa de destino da devolução é obrigatória.")
         @Min(value = 1, message = "A etapa mínima de destino é 1.")
         @Max(value = 3, message = "A etapa máxima para devolução é 3.")

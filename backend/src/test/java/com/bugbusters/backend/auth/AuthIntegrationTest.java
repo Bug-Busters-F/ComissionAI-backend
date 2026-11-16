@@ -112,48 +112,6 @@ class AuthIntegrationTest {
                                 .andExpect(status().isOk());
         }
 
-    @Test void loginErrosESessaoReal() throws Exception {
-        Usuario u = user("login@teste.local", PapelUsuario.ANALISTA_NEGOCIOS);
-        mvc.perform(post("/api/v1/auth/login").contentType("application/json")
-                .content("{\"email\":\"login@teste.local\",\"senha\":\"errada\"}"))
-                .andExpect(status().isUnauthorized()).andExpect(jsonPath("status").value(401));
-        mvc.perform(post("/api/v1/auth/login").contentType("application/json")
-                .content("{\"email\":\"login@teste.local\",\"senha\":\"Teste@123\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("usuario.papel").value("ANALISTA_NEGOCIOS"))
-                .andExpect(jsonPath("token").isNotEmpty());
-        String t = token(u);
-        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + t))
-                .andExpect(status().isOk()).andExpect(jsonPath("email").value(u.getEmail()));
-        mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer " + t)).andExpect(status().isNoContent());
-        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + t))
-                .andExpect(status().isUnauthorized()).andExpect(jsonPath("status").value(401));
-        u.setAtivo(false); usuarios.saveAndFlush(u);
-        mvc.perform(post("/api/v1/auth/login").contentType("application/json")
-                .content("{\"email\":\"login@teste.local\",\"senha\":\"Teste@123\"}"))
-                .andExpect(status().isUnauthorized());
-    }
-    @Test void sessaoExpiradaEUsuarioDesativadoSaoRecusados() throws Exception {
-        Usuario u = user("expira@teste.local", PapelUsuario.ANALISTA_NEGOCIOS);
-        String t = token(u);
-        var s = sessoes.findByUsuarioIdAndEncerradaEmIsNull(u.getId()).getFirst();
-        s.setExpiraEm(OffsetDateTime.now().minusMinutes(1)); sessoes.saveAndFlush(s);
-        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + t)).andExpect(status().isUnauthorized());
-        String outro = token(u); u.setAtivo(false); usuarios.saveAndFlush(u);
-        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + outro)).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized());
-    }
-    @Test void trocarSenhaRevogaTodasAsSessoes() throws Exception {
-        Usuario u = user("senha@teste.local", PapelUsuario.ANALISTA_CODIGO);
-        String t = token(u), outro = token(u);
-        mvc.perform(patch("/api/v1/auth/me/senha").header("Authorization", "Bearer " + t)
-                .contentType("application/json").content("{\"senhaAtual\":\"Teste@123\",\"novaSenha\":\"Nova@12345\"}"))
-                .andExpect(status().isNoContent());
-        for (String antigo : new String[]{t, outro}) mvc.perform(get("/api/v1/auth/me")
-                .header("Authorization", "Bearer " + antigo)).andExpect(status().isUnauthorized());
-        mvc.perform(post("/api/v1/auth/login").contentType("application/json")
-                .content("{\"email\":\"senha@teste.local\",\"senha\":\"Nova@12345\"}"))
-                .andExpect(status().isOk());
-    }
     @Test void adminNaoPodeDesativarOuRebaixarPropriaConta() throws Exception {
         Usuario admin = user("admin-teste@teste.local", PapelUsuario.ADMINISTRADOR);
         String t = token(admin);
@@ -164,30 +122,6 @@ class AuthIntegrationTest {
         mvc.perform(patch("/api/v1/usuarios/" + admin.getId() + "/perfil").header("Authorization", "Bearer " + t)
                 .contentType("application/json").content("{\"papel\":\"AUDITOR\"}"))
                 .andExpect(status().isConflict());
-    }
-    @Test void mudancaDePerfilValeNoTokenExistenteEExclusaoPreservaIdentidade() throws Exception {
-        Usuario admin = user("gestao@teste.local", PapelUsuario.ADMINISTRADOR);
-        Usuario alvo = user("alvo@teste.local", PapelUsuario.ANALISTA_NEGOCIOS);
-        String adm = token(admin), t = token(alvo);
-        mvc.perform(get("/api/v1/usuarios").header("Authorization", "Bearer " + t)).andExpect(status().isForbidden());
-        mvc.perform(patch("/api/v1/usuarios/" + alvo.getId() + "/perfil").header("Authorization", "Bearer " + adm)
-                .contentType("application/json").content("{\"papel\":\"ADMINISTRADOR\"}"))
-                .andExpect(status().isOk());
-        mvc.perform(get("/api/v1/usuarios").header("Authorization", "Bearer " + t)).andExpect(status().isOk());
-        mvc.perform(delete("/api/v1/usuarios/" + alvo.getId()).header("Authorization", "Bearer " + adm))
-                .andExpect(status().isNoContent());
-        mvc.perform(get("/api/v1/usuarios/" + alvo.getId()).header("Authorization", "Bearer " + adm))
-                .andExpect(status().isOk()).andExpect(jsonPath("ativo").value(false))
-                .andExpect(jsonPath("email").value("alvo@teste.local"));
-        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + t)).andExpect(status().isUnauthorized());
-    }
-    @Test void auditorPodeConsultarBasesMasNaoAlterar() throws Exception {
-        String t = token(user("auditoria@teste.local", PapelUsuario.AUDITOR));
-        mvc.perform(get("/api/v1/imports").header("Authorization", "Bearer " + t)).andExpect(status().isOk());
-        mvc.perform(delete("/api/v1/imports/999999").header("Authorization", "Bearer " + t))
-                .andExpect(status().isForbidden()).andExpect(jsonPath("status").value(403));
-        mvc.perform(post("/api/v1/campanhas").header("Authorization", "Bearer " + t)
-                .contentType("application/json").content("{}" )).andExpect(status().isForbidden());
     }
     @Test void auditorConsultaAlertasMasNaoPodeReprocessar() throws Exception {
         String auditor = token(user("auditor-alertas@teste.local", PapelUsuario.AUDITOR));
@@ -201,18 +135,6 @@ class AuthIntegrationTest {
                 .contentType("application/json").content("{\"lotePreparacaoId\":\"00000000-0000-0000-0000-000000000001\"}"))
                 .andExpect(status().isNotFound());
     }
-    @Test void codigoSalvaENegociosRegistraProgressoSemPublicar() throws Exception {
-        for (PapelUsuario papel : new PapelUsuario[]{PapelUsuario.ANALISTA_CODIGO, PapelUsuario.ANALISTA_NEGOCIOS}) {
-            String t = token(user(papel.name() + "@teste.local", papel));
-            // A requisição chega à validação do domínio, em vez de ser barrada com 403.
-            mvc.perform(put("/api/v1/campanhas/999999").header("Authorization", "Bearer " + t)
-                    .contentType("application/json").content("{}" )).andExpect(status().isBadRequest());
-            mvc.perform(patch("/api/v1/campanhas/999999/progresso").header("Authorization", "Bearer " + t)
-                    .contentType("application/json").content("{\"ultimaEtapa\":2,\"etapaMaisAvancada\":2,\"versaoProposta\":1}"))
-                    .andExpect(status().isNotFound());
-            mvc.perform(post("/api/v1/campanhas/999999/ativar").header("Authorization", "Bearer " + t))
-                    .andExpect(status().isForbidden());
-        }
 
         @Test
         void mudancaDePerfilValeNoTokenExistenteEExclusaoPreservaIdentidade() throws Exception {
@@ -305,5 +227,95 @@ class AuthIntegrationTest {
                                 .andExpect(status().isUnauthorized());
                 mvc.perform(delete("/api/v1/consultas-ia/marcas").header("X-Internal-Api-Key", "test-internal-ai-key"))
                                 .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void aprovacaoCodigoRestritaACodigoEAdminEJwtSobrescreveAprovadoPor() throws Exception {
+                String negocios = token(user("negocios-camp@teste.local", PapelUsuario.ANALISTA_NEGOCIOS));
+                String gerente = token(user("gerente-camp@teste.local", PapelUsuario.GERENTE_VENDAS));
+                String auditor = token(user("auditor-camp@teste.local", PapelUsuario.AUDITOR));
+                String codigo = token(user("codigo-revisor@teste.local", PapelUsuario.ANALISTA_CODIGO));
+                String admin = token(user("admin-cod@teste.local", PapelUsuario.ADMINISTRADOR));
+
+                String campanhaJson = mvc.perform(post("/api/v1/campanhas")
+                                .header("Authorization", "Bearer " + negocios)
+                                .contentType("application/json")
+                                .content("""
+                                        {"titulo":"Campanha Seguranca Codigo","textoOriginal":"Comissao 5% ecommerce",
+                                         "dataInicio":"2026-06-01","dataFim":"2026-06-30","estado":"DRAFT",
+                                         "regras":[{"canal":"ECOMMERCE","taxa":0.05,"completa":true}]}
+                                        """))
+                                .andExpect(status().isCreated())
+                                .andReturn().getResponse().getContentAsString();
+                long campanhaId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(campanhaJson).get("id").asLong();
+
+                String payloadAprovacao = """
+                                {"aprovado":true,"motivo":"Revisado","aprovadoPor":"spoofed-attacker@evil.com"}
+                                """;
+
+                for (String tokenProibido : new String[] { negocios, gerente, auditor }) {
+                        mvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                                        .header("Authorization", "Bearer " + tokenProibido)
+                                        .contentType("application/json")
+                                        .content(payloadAprovacao))
+                                        .andExpect(status().isForbidden());
+                }
+
+                mvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                                .header("Authorization", "Bearer " + codigo)
+                                .contentType("application/json")
+                                .content(payloadAprovacao))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.statusAprovacaoCodigo").value("APROVADO"))
+                                .andExpect(jsonPath("$.codigoAprovadoPor").value("codigo-revisor@teste.local"));
+
+                mvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                                .header("Authorization", "Bearer " + admin)
+                                .contentType("application/json")
+                                .content(payloadAprovacao))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.codigoAprovadoPor").value("admin-cod@teste.local"));
+        }
+
+        @Test
+        void devolverCampanhaERelatoriosImpedimentosRespeitamPerfisDeAcesso() throws Exception {
+                String admin = token(user("admin-rbac@teste.local", PapelUsuario.ADMINISTRADOR));
+                String gerente = token(user("gerente-rbac@teste.local", PapelUsuario.GERENTE_VENDAS));
+                String auditor = token(user("auditor-rbac@teste.local", PapelUsuario.AUDITOR));
+                String negocios = token(user("negocios-rbac@teste.local", PapelUsuario.ANALISTA_NEGOCIOS));
+                String codigo = token(user("codigo-rbac@teste.local", PapelUsuario.ANALISTA_CODIGO));
+
+                String devolverBody = "{\"motivo\":\"Ajustar etapa inicial\",\"paraEtapa\":1}";
+                for (String tokenProibido : new String[] { negocios, codigo, auditor }) {
+                        mvc.perform(post("/api/v1/campanhas/999999/devolver")
+                                        .header("Authorization", "Bearer " + tokenProibido)
+                                        .contentType("application/json")
+                                        .content(devolverBody))
+                                        .andExpect(status().isForbidden());
+                }
+                for (String tokenPermitido : new String[] { gerente, admin }) {
+                        mvc.perform(post("/api/v1/campanhas/999999/devolver")
+                                        .header("Authorization", "Bearer " + tokenPermitido)
+                                        .contentType("application/json")
+                                        .content(devolverBody))
+                                        .andExpect(status().isNotFound());
+                }
+
+                for (String tokenProibido : new String[] { negocios, codigo }) {
+                        mvc.perform(get("/api/v1/comissoes/fechamento/2099-01/relatorio")
+                                        .header("Authorization", "Bearer " + tokenProibido))
+                                        .andExpect(status().isForbidden());
+                        mvc.perform(get("/api/v1/comissoes/fechamento/2099-01/impedimentos")
+                                        .header("Authorization", "Bearer " + tokenProibido))
+                                        .andExpect(status().isForbidden());
+                }
+                for (String tokenPermitido : new String[] { admin, gerente, auditor }) {
+                        mvc.perform(get("/api/v1/comissoes/fechamento/2099-01/relatorio")
+                                        .header("Authorization", "Bearer " + tokenPermitido))
+                                        .andExpect(status().isNotFound());
+                        mvc.perform(get("/api/v1/comissoes/fechamento/2099-01/impedimentos")
+                                        .header("Authorization", "Bearer " + tokenPermitido))
+                                        .andExpect(status().isNotFound());
+                }
         }
 }

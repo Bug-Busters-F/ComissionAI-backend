@@ -5,9 +5,12 @@ import com.bugbusters.backend.dto.simulacao.ConferenciaSimulacaoResponse;
 import com.bugbusters.backend.dto.simulacao.SimulacaoCenariosRequest;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.Campanha;
+import com.bugbusters.backend.model.CampanhaVersao;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
+import com.bugbusters.backend.model.StatusAprovacaoCodigo;
+import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.SimulacaoRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -82,7 +85,50 @@ public class CampanhaSimulacaoValidator {
                     String.join("\n- ", divergencias)));
         }
 
+        List<String> divergenciasCodigo = detectarDivergenciasAprovacaoCodigo(campanha);
+        if (!divergenciasCodigo.isEmpty()) {
+            throw new BusinessException(divergenciasCodigo.get(0));
+        }
+
         return simulacaoAceita;
+    }
+
+    /**
+     * Valida se o código Python da versão e todas as regras vinculadas estão formalmente aprovados e íntegros (BACK-8 / FRONT-9).
+     */
+    public List<String> detectarDivergenciasAprovacaoCodigo(Campanha campanha) {
+        List<String> divergencias = new ArrayList<>();
+        if (campanha == null) {
+            return divergencias;
+        }
+        CampanhaVersao versao = campanha.versaoParaRevisao();
+        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
+
+        boolean versaoNaoAprovada = versao != null && versao.getStatusAprovacaoCodigo() != StatusAprovacaoCodigo.APROVADO;
+        boolean regraNaoAprovadaOuAlterada = regrasAtuais.stream().anyMatch(r -> {
+            if (r.getStatusAprovacaoCodigo() != StatusAprovacaoCodigo.APROVADO) {
+                return true;
+            }
+            String hashAtual = CampanhaService.calcularHashArtefatos(r);
+            return r.getHashArtefatosCodigo() != null && !r.getHashArtefatosCodigo().equals(hashAtual);
+        });
+
+        boolean hashVersaoAlterado = false;
+        if (versao != null && !regrasAtuais.isEmpty() && versao.getHashArtefatosCodigo() != null) {
+            StringBuilder hashVersaoBuilder = new StringBuilder();
+            for (Regra r : regrasAtuais) {
+                hashVersaoBuilder.append(CampanhaService.calcularHashArtefatos(r)).append(";");
+            }
+            String currentVersaoHash = CampanhaService.calcularHashString(hashVersaoBuilder.toString());
+            if (!versao.getHashArtefatosCodigo().equals(currentVersaoHash)) {
+                hashVersaoAlterado = true;
+            }
+        }
+
+        if (versaoNaoAprovada || regraNaoAprovadaOuAlterada || hashVersaoAlterado) {
+            divergencias.add("Ativação bloqueada: o código Python da versão precisa ser aprovado pelo Analista de Código antes da publicação. Regras invalidadas ou pendentes encontradas.");
+        }
+        return divergencias;
     }
 
     /**
@@ -129,6 +175,7 @@ public class CampanhaSimulacaoValidator {
         }
 
         divergencias.addAll(conferirDivergencias(campanha, simulacaoAceita));
+        divergencias.addAll(detectarDivergenciasAprovacaoCodigo(campanha));
 
         boolean apta = divergencias.isEmpty() && simulacaoAceita.getStatusAceite() == StatusAceiteSimulacao.ACEITA;
         String mensagem = apta
@@ -217,6 +264,10 @@ public class CampanhaSimulacaoValidator {
                 BigDecimal excedente = simulacao.getComissaoProjetada().subtract(orcamentoCampanha);
                 divergencias.add(String.format("O custo total projetado de comissões no cenário 100%% (R$ %s) excede o teto orçamentário da campanha (R$ %s) em R$ %s. Encaminhamento ao gerente e ativação bloqueados.",
                         simulacao.getComissaoProjetada(), orcamentoCampanha, excedente));
+            }
+            if (Boolean.FALSE.equals(simulacao.getEnquadrado100())
+                    || StatusEnquadramentoOrcamento.ACIMA_DO_TETO.equals(simulacao.getStatusEnquadramento100())) {
+                divergencias.add("O cenário base de 100% da meta excede o orçamento confirmado da campanha.");
             }
         }
 

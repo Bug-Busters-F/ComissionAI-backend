@@ -93,6 +93,11 @@ class CampanhaMultiplasRegrasTest {
                 .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite inicial\"}"))
                 .andExpect(status().isOk());
 
+        mockMvc.perform(post("/api/v1/campanhas/" + id + "/aprovacao-codigo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aprovado\":true,\"motivo\":\"Código v1 aprovado\"}"))
+                .andExpect(status().isOk());
+
         // Navegar na revisão não substitui regras nem invalida o aceite formal.
         mockMvc.perform(patch("/api/v1/campanhas/" + id + "/progresso").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ultimaEtapa\":4,\"etapaMaisAvancada\":4,\"versaoProposta\":1}"))
@@ -132,6 +137,11 @@ class CampanhaMultiplasRegrasTest {
         mockMvc.perform(post("/api/v1/simulacoes/" + simNovaId + "/aceite")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"aceitoPor\":\"gestor@empresa.com\",\"motivo\":\"Aceite da revisão\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + id + "/aprovacao-codigo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aprovado\":true,\"motivo\":\"Código v2 aprovado\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/campanhas/" + id + "/ativar").header("X-Campanha-Revisao", new JsonMapper().readTree(mockMvc.perform(get("/api/v1/campanhas/"+id)).andReturn().getResponse().getContentAsString()).path("revisaoControle").asLong())

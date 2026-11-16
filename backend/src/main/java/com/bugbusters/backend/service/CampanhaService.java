@@ -56,6 +56,9 @@ public class CampanhaService {
     @Autowired(required = false)
     private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
 
+    @Autowired(required = false)
+    private CampanhaEsteiraService campanhaEsteiraService;
+
     @Autowired
     public CampanhaService(CampanhaRepository campanhaRepository,
                            RegraRepository regraRepository,
@@ -941,6 +944,12 @@ public class CampanhaService {
         if (regras.isEmpty() || regras.stream().anyMatch(r -> Boolean.FALSE.equals(r.getCompleta()) || r.getTaxa() == null)) {
             throw new BusinessException("Não é possível publicar uma proposta com regras incompletas.");
         }
+        if (campanhaSimulacaoValidator != null) {
+            List<String> divergenciasCodigo = campanhaSimulacaoValidator.detectarDivergenciasAprovacaoCodigo(campanha);
+            if (!divergenciasCodigo.isEmpty()) {
+                throw new BusinessException(divergenciasCodigo.get(0));
+            }
+        }
         OffsetDateTime agora = OffsetDateTime.now();
         CampanhaVersao anterior = campanha.getVersaoVigente();
         if (anterior != null && !anterior.getId().equals(proposta.getId())) {
@@ -1392,6 +1401,17 @@ public class CampanhaService {
         campanhaRepository.saveAndFlush(campanha);
 
         return mapearParaResponse(campanha, regrasDaVersaoExibida(campanha));
+    }
+
+    @Transactional
+    public CampanhaResponse devolverCampanhaGerente(Long id, com.bugbusters.backend.dto.esteira.DevolverCampanhaRequest request) {
+        if (campanhaEsteiraService == null) {
+            throw new BusinessException("Serviço de esteira da campanha indisponível.");
+        }
+        campanhaEsteiraService.devolverCampanha(id, null, request);
+        Campanha atualizada = campanhaRepository.findByIdAndRemovidoEmIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha com ID " + id + " não encontrada ou removida."));
+        return mapearParaResponse(atualizada, regrasDaVersaoExibida(atualizada));
     }
 
     private void garantirCampanhaExiste(Long campanhaId) {

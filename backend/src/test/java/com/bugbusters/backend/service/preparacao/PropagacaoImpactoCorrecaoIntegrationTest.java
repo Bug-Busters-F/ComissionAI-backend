@@ -209,6 +209,8 @@ class PropagacaoImpactoCorrecaoIntegrationTest {
         SimulacaoCenariosResponse simResp = simulacaoService.simularEPersistir(simReq);
         simulacao = simulacaoRepository.findById(simResp.id()).orElseThrow();
         simulacaoService.aceitarSimulacao(simResp.id(), new AceiteSimulacaoRequest("DIRETOR_COMERCIAL", "Aprovado em comite"));
+        campanhaService.aprovarCodigoCampanha(campanha.getId(),
+                new AprovacaoCodigoCampanhaRequest(true, "Código aprovado para teste", "revisor@empresa.com"));
 
         campanhaService.ativarCampanha(campanha.getId());
         campanha = campanhaRepository.findById(campanha.getId()).orElseThrow();

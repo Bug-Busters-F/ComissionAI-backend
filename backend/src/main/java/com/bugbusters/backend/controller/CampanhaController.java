@@ -11,6 +11,7 @@ import com.bugbusters.backend.dto.campanha.VersaoCampanhaResumoResponse;
 import com.bugbusters.backend.dto.campanha.VersaoCampanhaDetalheResponse;
 import com.bugbusters.backend.dto.campanha.ComparacaoVersaoResponse;
 import com.bugbusters.backend.dto.error.ApiErrorResponse;
+import com.bugbusters.backend.dto.esteira.DevolverCampanhaRequest;
 import com.bugbusters.backend.model.EstadoCampanha;
 import com.bugbusters.backend.service.CampanhaService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -108,6 +109,18 @@ public class CampanhaController {
             @PathVariable Long id,
             @RequestBody(required = false) EncaminharCampanhaGerenteRequest request) {
         return ResponseEntity.ok(campanhaService.encaminharAoGerente(id, request));
+    }
+
+    @Operation(summary = "Devolver campanha formalmente pelo gerente (FRONT-9 / BACK-4)",
+            description = "Devolve a campanha para uma etapa anterior com justificativa obrigatória, limpa o encaminhamento e invalida simulação e aprovação técnica quando aplicável.")
+    @ApiResponse(responseCode = "200", description = "Campanha devolvida com sucesso")
+    @ApiResponse(responseCode = "400", description = "Etapa de destino inválida ou motivo não informado", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Campanha não encontrada", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @PostMapping("/{id}/devolver")
+    public ResponseEntity<CampanhaResponse> devolverCampanha(
+            @PathVariable Long id,
+            @Valid @RequestBody DevolverCampanhaRequest request) {
+        return ResponseEntity.ok(campanhaService.devolverCampanhaGerente(id, request));
     }
 
     @Operation(
