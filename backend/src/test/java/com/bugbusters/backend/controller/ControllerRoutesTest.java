@@ -879,6 +879,11 @@ class ControllerRoutesTest {
                 .content("{\"aceitoPor\":\"diretoria@empresa.com\",\"motivo\":\"Aprovado no teste\"}"))
                 .andExpect(status().isOk());
 
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aprovado\":true,\"motivo\":\"Código aprovado no teste\"}"))
+                .andExpect(status().isOk());
+
         // 2. Alterar para ATIVA
         mockMvc.perform(patch("/api/v1/campanhas/" + campanhaId + "/estado")
                 .contentType(MediaType.APPLICATION_JSON)

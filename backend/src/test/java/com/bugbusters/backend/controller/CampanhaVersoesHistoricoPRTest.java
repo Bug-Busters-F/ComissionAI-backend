@@ -202,6 +202,12 @@ class CampanhaVersoesHistoricoPRTest {
                         .content(objectMapper.writeValueAsString(aceiteV1)))
                 .andExpect(status().isOk());
 
+        // Aprovar código v1
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Código v1 aprovado\"}"))
+                .andExpect(status().isOk());
+
         // Publicar versão 1
         mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/ativar")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -253,6 +259,11 @@ class CampanhaVersoesHistoricoPRTest {
         mockMvc.perform(post("/api/v1/simulacoes/" + simV2Id + "/aceite")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(aceiteV2)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Código v2 aprovado\"}"))
                 .andExpect(status().isOk());
 
         long revisaoAtivar = campanhaRepository.findById(campanhaId).get().getVersaoControle();
@@ -401,6 +412,11 @@ class CampanhaVersoesHistoricoPRTest {
                         .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("gestor.v3@empresa.com", "Aceito v3 com regra 2"))))
                 .andExpect(status().isOk());
 
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Código v3 aprovado\"}"))
+                .andExpect(status().isOk());
+
         long revisaoAtivarV3 = campanhaRepository.findById(campanhaId).get().getVersaoControle();
         mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/ativar")
                         .header("X-Campanha-Revisao", revisaoAtivarV3)
@@ -456,6 +472,11 @@ class CampanhaVersoesHistoricoPRTest {
         mockMvc.perform(post("/api/v1/simulacoes/" + simV4Id + "/aceite")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("gestor.v4@empresa.com", "Aceito v4 sem regra 2"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Código v4 aprovado\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/ativar")

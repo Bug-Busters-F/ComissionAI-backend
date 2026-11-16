@@ -72,6 +72,9 @@ class CampanhaHistoricoIntegrationTest {
         if (esperada != null) aceite.put("versaoEsperada",esperada);
         mvc.perform(post("/api/v1/simulacoes/"+sim.path("id").asText()+"/aceite").contentType(MediaType.APPLICATION_JSON).content(aceite.toString()))
             .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/campanhas/"+id+"/aprovacao-codigo").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"aprovado\":true,\"motivo\":\"Código revisado para publicação\"}"))
+            .andExpect(status().isOk());
         ObjectNode ativacao = json.createObjectNode(); if (esperada != null) ativacao.put("versaoEsperada",esperada);
         mvc.perform(post("/api/v1/campanhas/"+id+"/ativar").header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong()).contentType(MediaType.APPLICATION_JSON).content(ativacao.toString()))
             .andExpect(status().isOk());

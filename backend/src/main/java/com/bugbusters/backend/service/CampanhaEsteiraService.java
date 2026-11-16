@@ -8,6 +8,7 @@ import com.bugbusters.backend.repository.CampanhaEsteiraTransicaoRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.repository.SimulacaoRepository;
 import com.bugbusters.backend.dto.pendencia.ResumoPendenciasCampanhaResponse;
 import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import org.slf4j.Logger;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class CampanhaEsteiraService {
@@ -33,6 +35,9 @@ public class CampanhaEsteiraService {
 
     @Autowired(required = false)
     private CampanhaPendenciaService pendenciaService;
+
+    @Autowired(required = false)
+    private SimulacaoRepository simulacaoRepository;
 
     @Autowired(required = false)
     private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
@@ -144,10 +149,20 @@ public class CampanhaEsteiraService {
         CampanhaVersao versao = resolverVersao(campanha, versaoNumero);
         validarImutabilidadeVersao(versao);
 
-        int etapaOrigem = versao.getUltimaEtapa();
+        EstadoEsteiraCampanha estadoOrigem = versao.getEstadoEsteira() != null ? versao.getEstadoEsteira() : EstadoEsteiraCampanha.EM_ELABORACAO;
+        int etapaOrigem = versao.getUltimaEtapa() != null ? versao.getUltimaEtapa() : 1;
+        boolean temSimulacaoAceita = versao.getSimulacaoAceita() != null || campanha.getSimulacaoAceita() != null;
+        boolean encaminhadaAoGerente = versao.isEncaminhadaGerente()
+                || campanha.isEncaminhadaGerente()
+                || EstadoEsteiraCampanha.EM_APROVACAO_GERENCIAL.equals(estadoOrigem);
+        int etapaEfetivaOrigem = encaminhadaAoGerente
+                ? Math.max(etapaOrigem, 4)
+                : (temSimulacaoAceita ? Math.max(etapaOrigem, 3)
+                : ((versao.getProgramaPythonAprovado() != null || versao.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO)
+                        ? Math.max(etapaOrigem, 2) : etapaOrigem));
         int etapaDestino = request.etapaDestino();
 
-        if (etapaDestino >= etapaOrigem) {
+        if (etapaDestino >= etapaEfetivaOrigem) {
             throw new BusinessException(String.format(
                     "A etapa de destino da devolução (%d) deve ser anterior à etapa atual (%d).",
                     etapaDestino, etapaOrigem
@@ -157,26 +172,87 @@ public class CampanhaEsteiraService {
         if (request.motivo() == null || request.motivo().trim().isBlank()) {
             throw new BusinessException("A justificativa formal de devolução é obrigatória.");
         }
+        String motivoLimpo = request.motivo().trim();
         String devolvidoPor = usuarioAtualProvider.obterUsuarioAtual(request.devolvidoPor());
-        if (devolvidoPor == null || devolvidoPor.isBlank() || ("SISTEMA".equals(devolvidoPor) && (request.devolvidoPor() == null || request.devolvidoPor().isBlank()))) {
-            throw new BusinessException("O identificador do responsável pela devolução é obrigatório.");
-        }
-
-        EstadoEsteiraCampanha estadoOrigem = versao.getEstadoEsteira() != null ? versao.getEstadoEsteira() : EstadoEsteiraCampanha.EM_ELABORACAO;
+        OffsetDateTime agora = OffsetDateTime.now();
 
         versao.setEstadoEsteira(EstadoEsteiraCampanha.DEVOLVIDA);
         versao.setDevolvidoPor(devolvidoPor);
-        versao.setDevolvidoEm(OffsetDateTime.now());
-        versao.setMotivoDevolucao(request.motivo().trim());
+        versao.setDevolvidoEm(agora);
+        versao.setMotivoDevolucao(motivoLimpo);
         versao.setEtapaDevolucao(etapaDestino);
         versao.setUltimaEtapa(etapaDestino);
 
-        // Se devolveu para antes da simulação, invalida aceite gerencial prévio
+        // Limpa encaminhamento gerencial e aprovações prévias (FRONT-9 / BACK-4)
         versao.setGerenteAprovador(null);
         versao.setGerenteAprovadoEm(null);
         versao.setParecerGerente(null);
+        versao.setEncaminhadaGerente(false);
+        versao.setEncaminhadaGerentePor(null);
+        versao.setEncaminhadaGerenteEm(null);
+        versao.setObservacaoEncaminhamento(null);
+
+        // Invalida aceite de simulação vinculado à versão devolvida
+        if (simulacaoRepository != null) {
+            List<Simulacao> simulacoes = simulacaoRepository.findAllByCampanhaVersaoId(versao.getId());
+            if ((simulacoes == null || simulacoes.isEmpty()) && campanha.getVersaoVigente() == null) {
+                simulacoes = simulacaoRepository.findAllByCampanhaIdAndStatusAceite(campanha.getId(), StatusAceiteSimulacao.ACEITA);
+            }
+            if (simulacoes != null && !simulacoes.isEmpty()) {
+                for (Simulacao sim : simulacoes) {
+                    if (sim.getStatusAceite() == StatusAceiteSimulacao.ACEITA || sim.getStatusAceite() == StatusAceiteSimulacao.PENDENTE) {
+                        sim.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+                        sim.setInvalidadoEm(agora);
+                        sim.setMotivoInvalidacao("Campanha devolvida pelo gerente: " + motivoLimpo);
+                    }
+                    if (campanha.getSimulacaoAceita() != null && Objects.equals(campanha.getSimulacaoAceita().getId(), sim.getId())) {
+                        campanha.setSimulacaoAceita(null);
+                    }
+                }
+                simulacaoRepository.saveAll(simulacoes);
+            }
+        }
+        versao.setSimulacaoAceita(null);
+        if (campanha.getVersaoVigente() == null) {
+            campanha.setSimulacaoAceita(null);
+        }
+
+        // Quando devolvida para revisão de regras ou código (etapa <= 2), invalida homologação técnica e código
+        if (etapaDestino <= 2) {
+            versao.setProgramaPythonAprovado(null);
+            if (versao.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO) {
+                versao.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.INVALIDADO);
+                versao.setCodigoInvalidadoEm(agora);
+                versao.setMotivoInvalidacaoCodigo("Código invalidado após devolução para a Etapa " + etapaDestino + ": " + motivoLimpo);
+            }
+            List<Regra> regrasVersao = regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId());
+            List<Regra> regrasInvalidar = regrasVersao.stream()
+                    .filter(r -> r.getStatusAprovacaoCodigo() == StatusAprovacaoCodigo.APROVADO)
+                    .toList();
+            if (!regrasInvalidar.isEmpty()) {
+                for (Regra regra : regrasInvalidar) {
+                    regra.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.INVALIDADO);
+                    regra.setCodigoInvalidadoEm(agora);
+                    regra.setMotivoInvalidacaoCodigo("Código invalidado após devolução para a Etapa " + etapaDestino + ": " + motivoLimpo);
+                }
+                regraRepository.saveAll(regrasInvalidar);
+            }
+        }
 
         versao = campanhaVersaoRepository.save(versao);
+
+        if (Objects.equals(versao.getId(), campanha.getVersaoProposta() != null ? campanha.getVersaoProposta().getId() : null)
+                || campanha.getVersaoVigente() == null) {
+            campanha.setEncaminhadaGerente(false);
+            campanha.setEncaminhadaGerentePor(null);
+            campanha.setEncaminhadaGerenteEm(null);
+            campanha.setObservacaoEncaminhamento(null);
+            if (campanha.getVersaoVigente() == null && campanha.getEstado() != EstadoCampanha.DRAFT) {
+                campanha.setEstado(EstadoCampanha.DRAFT);
+            }
+            campanha.setAtualizadoEm(agora);
+            campanhaRepository.save(campanha);
+        }
 
         CampanhaEsteiraTransicao transicao = new CampanhaEsteiraTransicao(
                 versao,
@@ -186,24 +262,29 @@ public class CampanhaEsteiraService {
                 EstadoEsteiraCampanha.DEVOLVIDA,
                 TipoAcaoEsteira.DEVOLUCAO_GERENCIAL,
                 devolvidoPor,
-                request.motivo().trim()
+                motivoLimpo
         );
         transicaoRepository.save(transicao);
 
         if (auditoriaService != null) {
+            String motivoEscapado = motivoLimpo
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("\r", "\\r")
+                    .replace("\n", "\\n");
             auditoriaService.registrarAcao(
                     devolvidoPor,
                     TipoAcaoAuditoria.DEVOLUCAO_ESTEIRA,
                     TipoEntidadeAuditoria.ESTEIRA,
                     String.valueOf(campanhaId),
                     versao.getNumero(),
-                    String.format("Esteira devolvida da etapa %d para %d. Motivo: %s", etapaOrigem, etapaDestino, request.motivo()),
-                    String.format("{\"etapaOrigem\": %d, \"etapaDestino\": %d, \"motivo\": \"%s\"}", etapaOrigem, etapaDestino, request.motivo())
+                    String.format("Esteira devolvida da etapa %d para %d. Motivo: %s", etapaOrigem, etapaDestino, motivoLimpo),
+                    String.format("{\"etapaOrigem\": %d, \"etapaDestino\": %d, \"motivo\": \"%s\"}", etapaOrigem, etapaDestino, motivoEscapado)
             );
         }
 
         log.warn("Campanha {} versão {} devolvida pelo gerente {} da etapa {} para etapa {}. Motivo: {}",
-                campanhaId, versao.getNumero(), devolvidoPor, etapaOrigem, etapaDestino, request.motivo());
+                campanhaId, versao.getNumero(), devolvidoPor, etapaOrigem, etapaDestino, motivoLimpo);
 
         return EstadoEsteiraResponse.de(versao);
     }

@@ -19,7 +19,10 @@ import com.bugbusters.backend.dto.simulacao.SimulacaoPythonRequest;
 import com.bugbusters.backend.model.Campanha;
 import com.bugbusters.backend.model.CampanhaVersao;
 import com.bugbusters.backend.model.EstadoCampanha;
+import com.bugbusters.backend.model.FechamentoCompetencia;
+import com.bugbusters.backend.model.ImpedimentoFechamento;
 import com.bugbusters.backend.model.Regra;
+import com.bugbusters.backend.model.StatusFechamento;
 import com.bugbusters.backend.model.StatusVersaoCampanha;
 import com.bugbusters.backend.position.Position;
 import com.bugbusters.backend.position.PositionRepository;
@@ -107,6 +110,9 @@ public class RelatorioFechamentoIntegrationTest {
     private CampanhaApuracaoRepository apuracaoRepository;
 
     @Autowired
+    private ImpedimentoFechamentoRepository impedimentoFechamentoRepository;
+
+    @Autowired
     private org.springframework.jdbc.core.JdbcTemplate cleanupJdbc;
 
     @Autowired
@@ -133,6 +139,7 @@ public class RelatorioFechamentoIntegrationTest {
         cleanupJdbc.update("DELETE FROM tb_log_calculo_imutavel");
         cleanupJdbc.update("DELETE FROM tb_resultado_calculo");
         cleanupJdbc.update("DELETE FROM tb_campanha_apuracao");
+        cleanupJdbc.update("DELETE FROM tb_impedimento_fechamento");
         cleanupJdbc.update("DELETE FROM tb_fechamento_competencia");
         cleanupJdbc.update("DELETE FROM tb_campanha_pendencia_aceite");
         cleanupJdbc.update("DELETE FROM tb_campanha_esteira_transicao");
@@ -185,6 +192,280 @@ public class RelatorioFechamentoIntegrationTest {
         if (sandboxMock != null) {
             sandboxMock.restaurar();
         }
+    }
+
+    @Test
+    @DisplayName("FRONT-11 / BACK-15: Deve consolidar totais SQL, aplicar filtros combinados e paginar impedimentos persistidos")
+    void deveAplicarFiltrosNoRelatorioEListarImpedimentosPaginadosPorMatriculaEMarca() throws Exception {
+        String competencia = "2026-10";
+        LocalDate inicioMes = LocalDate.of(2026, 10, 1);
+        LocalDate fimMes = LocalDate.of(2026, 10, 31);
+
+        Brand marca2 = brandRepository.findByCode(21).orElseGet(() -> {
+            Brand b = new Brand();
+            b.setCode(21);
+            b.setDescription("MARCA SUL");
+            return brandRepository.save(b);
+        });
+        Store loja2 = storeRepository.findByCode(81).orElseGet(() -> {
+            Store s = new Store();
+            s.setCode(81);
+            s.setDescription("LOJA SHOPPING SUL");
+            return storeRepository.save(s);
+        });
+        LocalDate mesRef = LocalDate.of(2026, 10, 1);
+        baseComissRepository.findByBrandIdAndPositionIdAndReferenceMonth(marca2.getId(), testPosition.getId(), mesRef)
+                .orElseGet(() -> {
+                    BaseComiss bc = new BaseComiss(marca2, testPosition, new BigDecimal("0.0400"));
+                    bc.setReferenceMonth(mesRef);
+                    return baseComissRepository.save(bc);
+                });
+
+        Registration regColab2 = registrationRepository.findByRegistration("MATRIC-REL-20").orElseGet(() -> {
+            Registration r = new Registration();
+            r.setRegistration("MATRIC-REL-20");
+            r.setPosition(testPosition);
+            r.setStore(loja2);
+            r.setAdmissDate(LocalDate.of(2022, 1, 10));
+            return registrationRepository.save(r);
+        });
+        Registration regImp1 = registrationRepository.findByRegistration("MATRIC-IMP-20").orElseGet(() -> {
+            Registration r = new Registration();
+            r.setRegistration("MATRIC-IMP-20");
+            r.setPosition(testPosition);
+            r.setStore(testStore);
+            r.setAdmissDate(LocalDate.of(2026, 10, 20));
+            return registrationRepository.save(r);
+        });
+        Registration regImp2 = registrationRepository.findByRegistration("MATRIC-IMP-21").orElseGet(() -> {
+            Registration r = new Registration();
+            r.setRegistration("MATRIC-IMP-21");
+            r.setPosition(testPosition);
+            r.setStore(loja2);
+            r.setAdmissDate(LocalDate.of(2022, 1, 10));
+            r.setDemissDate(LocalDate.of(2026, 10, 5));
+            return registrationRepository.save(r);
+        });
+
+        // 2 vendas calculadas em marcas/lojas distintas + 2 vendas com impedimento de vigência cadastral (admissão posterior / demissão anterior)
+        Sale vendaCalc1 = new Sale();
+        vendaCalc1.setSaleDate(LocalDate.of(2026, 10, 5));
+        vendaCalc1.setValue(new BigDecimal("4000.00"));
+        vendaCalc1.setRegistration(testRegistration);
+        vendaCalc1.setBrand(testBrand);
+        vendaCalc1.setStore(testStore);
+        vendaCalc1.setSaleChannel("ECOMMERCE");
+        saleRepository.save(vendaCalc1);
+
+        Sale vendaCalc2 = new Sale();
+        vendaCalc2.setSaleDate(LocalDate.of(2026, 10, 8));
+        vendaCalc2.setValue(new BigDecimal("2000.00"));
+        vendaCalc2.setRegistration(regColab2);
+        vendaCalc2.setBrand(marca2);
+        vendaCalc2.setStore(loja2);
+        vendaCalc2.setSaleChannel("LOJA_FISICA");
+        saleRepository.save(vendaCalc2);
+
+        Sale vendaImp1 = new Sale();
+        vendaImp1.setSaleDate(LocalDate.of(2026, 10, 12));
+        vendaImp1.setValue(new BigDecimal("1500.00"));
+        vendaImp1.setRegistration(regImp1);
+        vendaImp1.setBrand(testBrand);
+        vendaImp1.setStore(testStore);
+        vendaImp1.setSaleChannel("ECOMMERCE");
+        saleRepository.save(vendaImp1);
+
+        Sale vendaImp2 = new Sale();
+        vendaImp2.setSaleDate(LocalDate.of(2026, 10, 14));
+        vendaImp2.setValue(new BigDecimal("2500.00"));
+        vendaImp2.setRegistration(regImp2);
+        vendaImp2.setBrand(marca2);
+        vendaImp2.setStore(loja2);
+        vendaImp2.setSaleChannel("LOJA_FISICA");
+        saleRepository.save(vendaImp2);
+
+        Campanha campanha = new Campanha();
+        campanha.setTitulo("Campanha Multi Marca FRONT-11");
+        campanha.setTextoOriginal("Regras por marca");
+        campanha.setDataInicio(inicioMes);
+        campanha.setDataFim(fimMes);
+        campanha.setEstado(EstadoCampanha.ATIVA);
+        campanha = campanhaRepository.save(campanha);
+
+        CampanhaVersao versao = new CampanhaVersao();
+        versao.setCampanha(campanha);
+        versao.setNumero(1);
+        versao.setStatus(StatusVersaoCampanha.PUBLICADA);
+        versao.setDataInicio(inicioMes);
+        versao.setDataFim(fimMes);
+        versao.setTitulo("Campanha Multi Marca v1");
+        versao.setTextoOriginal("Regras por marca");
+        versao.setPublicadoEm(OffsetDateTime.now());
+        versao = campanhaVersaoRepository.save(versao);
+
+        campanha.setVersaoVigente(versao);
+        campanhaRepository.save(campanha);
+
+        Regra regraA = new Regra();
+        regraA.setCampanha(campanha);
+        regraA.setCampanhaVersao(versao);
+        regraA.setNome("Regra Marca Norte 10%");
+        regraA.setTaxa(new BigDecimal("0.1000"));
+        regraA.setStatus(StatusRegra.ATIVA);
+        regraA.setCompleta(true);
+        regraA.setDataInicio(inicioMes);
+        regraA.setDataFim(fimMes);
+        regraA.setCodMarca(testBrand.getCode());
+        regraA.setCodCargo(testPosition.getCode());
+        regraA = regraRepository.save(regraA);
+
+        Regra regraB = new Regra();
+        regraB.setCampanha(campanha);
+        regraB.setCampanhaVersao(versao);
+        regraB.setNome("Regra Marca Sul 15%");
+        regraB.setTaxa(new BigDecimal("0.1500"));
+        regraB.setStatus(StatusRegra.ATIVA);
+        regraB.setCompleta(true);
+        regraB.setDataInicio(inicioMes);
+        regraB.setDataFim(fimMes);
+        regraB.setCodMarca(marca2.getCode());
+        regraB.setCodCargo(testPosition.getCode());
+        regraB = regraRepository.save(regraB);
+
+        FechamentoRequestDTO request = new FechamentoRequestDTO(competencia, "controladoria@empresa.com", "Liquidação Outubro FRONT-11");
+        MvcResult fechamentoResult = mockMvc.perform(post("/api/v1/comissoes/fechamento")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONCLUIDO"))
+                .andReturn();
+        String fechamentoIdStr = objectMapper.readTree(fechamentoResult.getResponse().getContentAsString()).get("id").asText();
+
+        // 1. Relatório sem filtros com contrato unificado FRONT-11 + campos legados
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/relatorio", competencia))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.competencia").value(competencia))
+                .andExpect(jsonPath("$.fechamentoId").value(fechamentoIdStr))
+                .andExpect(jsonPath("$.protocolo").isNotEmpty())
+                .andExpect(jsonPath("$.fechadoEm").isNotEmpty())
+                .andExpect(jsonPath("$.executadoPor").value("controladoria@empresa.com"))
+                .andExpect(jsonPath("$.motivo").value("Liquidação Outubro FRONT-11"))
+                .andExpect(jsonPath("$.totaisGerais.totalVendasProcessadas").value(4))
+                .andExpect(jsonPath("$.totaisGerais.totalCalculados").value(2))
+                .andExpect(jsonPath("$.totaisGerais.totalImpedimentos").value(2))
+                .andExpect(jsonPath("$.totaisGerais.valorTotalVendas").value(6000.00))
+                .andExpect(jsonPath("$.totaisGerais.valorTotalComissao").value(700.00))
+                .andExpect(jsonPath("$.totaisPorRegra", hasSize(2)))
+                .andExpect(jsonPath("$.totaisPorColaborador", hasSize(2)))
+                .andExpect(jsonPath("$.detalheVendas", hasSize(2)));
+
+        // 2. Filtros combinados por codLoja, codMarca e matricula
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/relatorio", competencia)
+                        .param("codLoja", "80")
+                        .param("codMarca", "20")
+                        .param("matricula", "MATRIC-REL-10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totaisGerais.totalCalculados").value(1))
+                .andExpect(jsonPath("$.totaisGerais.totalImpedimentos").value(0))
+                .andExpect(jsonPath("$.totaisGerais.valorTotalVendas").value(4000.00))
+                .andExpect(jsonPath("$.totaisGerais.valorTotalComissao").value(400.00))
+                .andExpect(jsonPath("$.totaisPorRegra", hasSize(1)))
+                .andExpect(jsonPath("$.totaisPorRegra[0].idRegra").value(regraA.getId()))
+                .andExpect(jsonPath("$.totaisPorColaborador", hasSize(1)))
+                .andExpect(jsonPath("$.totaisPorColaborador[0].matricula").value("MATRIC-REL-10"))
+                .andExpect(jsonPath("$.detalheVendas", hasSize(1)));
+
+        // 2b. Filtros por codLoja e codMarca contabilizam tanto calculados quanto impedimentos daquele recorte
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/relatorio", competencia)
+                        .param("codLoja", "80")
+                        .param("codMarca", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totaisGerais.totalCalculados").value(1))
+                .andExpect(jsonPath("$.totaisGerais.totalImpedimentos").value(1))
+                .andExpect(jsonPath("$.totaisGerais.totalVendasProcessadas").value(2));
+
+        // 3. Filtro por idRegra específica
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/relatorio", competencia)
+                        .param("idRegra", String.valueOf(regraB.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totaisGerais.totalCalculados").value(1))
+                .andExpect(jsonPath("$.totaisGerais.valorTotalVendas").value(2000.00))
+                .andExpect(jsonPath("$.totaisGerais.valorTotalComissao").value(300.00))
+                .andExpect(jsonPath("$.totaisPorColaborador", hasSize(1)))
+                .andExpect(jsonPath("$.totaisPorColaborador[0].matricula").value("MATRIC-REL-20"));
+
+        // 4. Listagem paginada de impedimentos persistidos em tb_impedimento_fechamento
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/impedimentos", competencia)
+                        .param("page", "0")
+                        .param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].tipoImpedimento").value("COLABORADOR_DEMISSAO_ANTERIOR"))
+                .andExpect(jsonPath("$.content[0].nomeColaborador", startsWith("Colaborador ")));
+
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/impedimentos", competencia)
+                        .param("codMarca", "21")
+                        .param("matricula", "MATRIC-IMP-21"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].matricula").value("MATRIC-IMP-21"))
+                .andExpect(jsonPath("$.content[0].nomeColaborador").value("Colaborador MATRIC-IMP-21"))
+                .andExpect(jsonPath("$.content[0].valorVenda").value(2500.00));
+
+        // 5. Fallback para matricula ausente em tb_registration
+        ImpedimentoFechamento impOrfa = new ImpedimentoFechamento(
+                UUID.randomUUID(),
+                UUID.fromString(fechamentoIdStr),
+                competencia,
+                UUID.randomUUID(),
+                "MATRIC-ORFA",
+                21,
+                LocalDate.of(2026, 10, 18),
+                new BigDecimal("500.00"),
+                "Colaborador sem cadastro ativo",
+                "COLABORADOR_NAO_ENCONTRADO"
+        );
+        impedimentoFechamentoRepository.save(impOrfa);
+
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/{competencia}/impedimentos", competencia)
+                        .param("matricula", "MATRIC-ORFA"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].nomeColaborador").value("Colaborador Não Encontrado"));
+    }
+
+    @Test
+    @DisplayName("FRONT-11 / BACK-15: Deve retornar 404 estrito para fechamento não concluído e 400 para competência/parâmetro inválido")
+    void deveValidarFormatoCompetenciaEExigirFechamentoConcluidoStrict404() throws Exception {
+        FechamentoCompetencia emAndamento = new FechamentoCompetencia("2026-08", UUID.randomUUID(), "analista", "Em curso");
+        emAndamento.setStatus(StatusFechamento.PROCESSANDO);
+        fechamentoCompetenciaRepository.save(emAndamento);
+
+        UUID protocoloFalhou = UUID.randomUUID();
+        FechamentoCompetencia falhou = new FechamentoCompetencia("2026-09", protocoloFalhou, "analista", "Falhou no motor");
+        falhou.setStatus(StatusFechamento.FALHOU);
+        fechamentoCompetenciaRepository.save(falhou);
+
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/2026-08/relatorio"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/2026-09/relatorio"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/2026-08/impedimentos"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/protocolo/{protocolo}/relatorio", protocoloFalhou))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/2026-11/relatorio"))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/2026-13/relatorio"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/invalida/impedimentos"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/comissoes/fechamento/2026-10/impedimentos")
+                        .param("codMarca", "nao-numerico"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

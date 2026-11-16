@@ -349,6 +349,12 @@ class CampanhaCoberturaControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(aceiteV1)))
                 .andExpect(status().isOk());
 
+        // Aprovar código v1 (FRONT-9)
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Aprovado para publicação\"}"))
+                .andExpect(status().isOk());
+
         // Publicar versão 1
         mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/ativar")
                         .contentType(MediaType.APPLICATION_JSON)

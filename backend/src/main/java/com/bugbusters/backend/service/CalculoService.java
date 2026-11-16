@@ -514,13 +514,16 @@ public class CalculoService {
             // Sem recálculo, o resultado vigente é reutilizado sem consultar as regras atuais.
             if (existente != null && !recalcular) {
                 if (existente.isDesatualizadoPorCorrecao()) {
+                    Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
                     impedimentos.add(new CalculoImpedimentoDTO(
                             idVenda,
                             matricula,
                             sale.getSaleDate(),
                             sale.getValue(),
                             String.format("Cálculo anterior da venda '%s' foi invalidado por correção na base (%s). É necessário recalcular com recálculo habilitado.",
-                                    idVenda, existente.getMotivoDesatualizacao() != null ? existente.getMotivoDesatualizacao() : "Base alterada")
+                                    idVenda, existente.getMotivoDesatualizacao() != null ? existente.getMotivoDesatualizacao() : "Base alterada"),
+                            "CALCULO_DESATUALIZADO",
+                            codMarca
                     ));
                     continue;
                 }
@@ -551,12 +554,18 @@ public class CalculoService {
             }
 
             if (!resolucao.sucesso()) {
+                Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
+                String tipoImp = resolucao.tipoImpedimento() != null && !resolucao.tipoImpedimento().isBlank()
+                        ? resolucao.tipoImpedimento()
+                        : "IMPEDIMENTO_CALCULO";
                 impedimentos.add(new CalculoImpedimentoDTO(
                         idVenda,
                         matricula,
                         sale.getSaleDate(),
                         sale.getValue(),
-                        resolucao.motivoImpedimento()
+                        resolucao.motivoImpedimento(),
+                        tipoImp,
+                        codMarca
                 ));
                 continue;
             }
@@ -650,13 +659,16 @@ public class CalculoService {
             Sale sale,
             ResultadoCalculo existente
     ) {
+        Integer codMarca = sale.getBrand() != null ? sale.getBrand().getCode() : null;
         return new CalculoImpedimentoDTO(
                 idVenda,
                 matricula,
                 sale.getSaleDate(),
                 sale.getValue(),
                 String.format("Venda com ID '%s' possui dados divergentes de cálculo prévio (anterior: %s, atual: %s)",
-                        idVenda, existente.getValorVenda(), sale.getValue())
+                        idVenda, existente.getValorVenda(), sale.getValue()),
+                "DIVERGENCIA_VALOR_VENDA",
+                codMarca
         );
     }
 

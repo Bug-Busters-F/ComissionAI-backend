@@ -51,6 +51,11 @@ public class SecurityConfig {
                         // Apuração definitiva de campanha e relatórios financeiros de apuração:
                         .requestMatchers(HttpMethod.GET, "/api/v1/campanhas/*/apuracao-definitiva/**", "/api/v1/campanhas/*/apuracoes/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/calcular-definitivo").hasAnyRole(ADMIN, GERENTE)
+                        // Relatórios e auditoria de impedimentos de fechamento (FRONT-11 / BACK-15):
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/comissoes/fechamento/*/relatorio/**",
+                                "/api/v1/comissoes/fechamento/protocolo/*/relatorio/**",
+                                "/api/v1/comissoes/fechamento/*/impedimentos/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
                         // Auditor consulta as bases; nenhuma escrita é liberada por esta regra.
                         .requestMatchers(HttpMethod.GET, "/api/v1/imports/**", "/api/v1/vendas/**", "/api/v1/matriculas/**",
                                 "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE, AUDITOR)
@@ -59,8 +64,9 @@ public class SecurityConfig {
                                 "/api/v1/bases-comissao/**", "/api/v1/comissoes/**").hasAnyRole(ADMIN, GERENTE)
                         // Consulta de negócio é permitida a todos os perfis autenticados.
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole(TODOS)
-                        // Esteira de aprovação e governança (BACK-4):
+                        // Esteira de aprovação e governança (BACK-4 / FRONT-9):
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/aprovar", "/api/v1/campanhas/*/versoes/*/esteira/aprovar").hasAnyRole(ADMIN, GERENTE)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/devolver").hasAnyRole(ADMIN, GERENTE)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/devolver", "/api/v1/campanhas/*/versoes/*/esteira/devolver").hasAnyRole(ADMIN, GERENTE, CODIGO)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/avancar", "/api/v1/campanhas/*/versoes/*/esteira/avancar").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE)
                         // Programa Python versionado e homologação técnica na Etapa 2 (BACK-9):
@@ -78,7 +84,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/progresso").hasAnyRole(ADMIN, GERENTE, NEGOCIOS, CODIGO)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/campanhas/*/orcamento").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/encaminhar-gerente").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/aprovacao-codigo").hasAnyRole(ADMIN, CODIGO, NEGOCIOS)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/aprovacao-codigo").hasAnyRole(ADMIN, CODIGO)
                         .requestMatchers("/api/v1/campanhas/*/preparacao-bases/**", "/api/v1/campanhas/*/anexos-base/**", "/api/v1/campanhas/*/cobertura-fechamento/**").hasAnyRole(ADMIN, GERENTE, NEGOCIOS)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/ativar", "/api/v1/comissoes/calcular/**",
                                 "/api/v1/execucoes/**", "/api/v1/comissoes/fechamento/**").hasAnyRole(ADMIN, GERENTE)

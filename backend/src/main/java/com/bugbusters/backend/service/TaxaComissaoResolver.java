@@ -86,17 +86,17 @@ public class TaxaComissaoResolver {
 
     public ResolucaoTaxaResult resolverTaxa(Sale sale, ContextoCompetencia contexto) {
         if (sale == null) {
-            return ResolucaoTaxaResult.impedido("Dados da venda não informados");
+            return ResolucaoTaxaResult.impedido("DADOS_VENDA_AUSENTES", "Dados da venda não informados");
         }
 
         Registration registration = sale.getRegistration();
         if (registration == null || registration.getRegistration() == null || registration.getRegistration().isBlank()) {
-            return ResolucaoTaxaResult.impedido("Venda sem vínculo com colaborador (matrícula ausente ou não efetivada)");
+            return ResolucaoTaxaResult.impedido("MATRICULA_NAO_VINCULADA", "Venda sem vínculo com colaborador (matrícula ausente ou não efetivada)");
         }
 
         Position position = registration.getPosition();
         if (position == null) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("CARGO_AUSENTE", String.format(
                     "Colaborador de matrícula '%s' sem cargo vinculado",
                     registration.getRegistration()
             ));
@@ -104,18 +104,18 @@ public class TaxaComissaoResolver {
 
         LocalDate saleDate = sale.getSaleDate();
         if (saleDate == null) {
-            return ResolucaoTaxaResult.impedido("Data da venda não informada");
+            return ResolucaoTaxaResult.impedido("DATA_VENDA_AUSENTE", "Data da venda não informada");
         }
 
         if (registration.getAdmissDate() != null && saleDate.isBefore(registration.getAdmissDate())) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("COLABORADOR_ADMISSAO_POSTERIOR", String.format(
                     "Data da venda (%s) é anterior à admissão do colaborador (%s)",
                     saleDate, registration.getAdmissDate()
             ));
         }
 
         if (registration.getDemissDate() != null && saleDate.isAfter(registration.getDemissDate())) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("COLABORADOR_DEMISSAO_ANTERIOR", String.format(
                     "Data da venda (%s) é posterior à demissão do colaborador (%s)",
                     saleDate, registration.getDemissDate()
             ));
@@ -123,11 +123,11 @@ public class TaxaComissaoResolver {
 
         Brand brand = sale.getBrand();
         if (brand == null) {
-            return ResolucaoTaxaResult.impedido("Venda sem marca vinculada");
+            return ResolucaoTaxaResult.impedido("MARCA_AUSENTE", "Venda sem marca vinculada");
         }
 
         if (sale.getValue() == null || sale.getValue().compareTo(BigDecimal.ZERO) <= 0) {
-            return ResolucaoTaxaResult.impedido("Valor da venda inválido: deve ser estritamente positivo");
+            return ResolucaoTaxaResult.impedido("VALOR_VENDA_INVALIDO", "Valor da venda inválido: deve ser estritamente positivo");
         }
 
         // 1ª Prioridade: Buscar regras ativas em tb_regra (Campanhas promocionais ou regras específicas)
@@ -190,7 +190,7 @@ public class TaxaComissaoResolver {
                 List<Long> idsConflitantes = regrasMaisEspecificas.stream().map(Regra::getId).toList();
                 log.warn("Conflito de regras ativas para a venda ID {}: múltiplas regras no nível de especificidade {} (IDs: {})",
                         sale.getId(), maiorEspecificidade, idsConflitantes);
-                return ResolucaoTaxaResult.impedido(String.format(
+                return ResolucaoTaxaResult.impedido("CONFLITO_REGRAS", String.format(
                         "Conflito de regras: múltiplas regras ativas concorrentes encontradas com o mesmo nível de especificidade (Regras IDs: %s). Resolução bloqueada por ambiguidade.",
                         idsConflitantes
                 ));
@@ -211,7 +211,7 @@ public class TaxaComissaoResolver {
         }
 
         // Se nem regra nem basecomiss forem encontradas: impedimento contratual
-        return ResolucaoTaxaResult.impedido(String.format(
+        return ResolucaoTaxaResult.impedido("BASE_COMISS_AUSENTE", String.format(
                 "Taxa de comissão não encontrada: nenhuma regra ativa aplicável em tb_regra nem taxa padrão cadastrada em tb_basecomiss (Marca: %s, Cargo: %s) para a venda",
                 brand.getDescription() != null ? brand.getDescription() : brand.getCode(),
                 position.getDescription() != null ? position.getDescription() : position.getCode()
@@ -262,13 +262,13 @@ public class TaxaComissaoResolver {
         if (operacao == TipoOperacaoBase.DEFINIR_TAXA) {
             BigDecimal taxa = regra.getTaxa() != null ? regra.getTaxa() : regra.getValorAjuste();
             if (taxa == null || taxa.compareTo(BigDecimal.ZERO) <= 0) {
-                return ResolucaoTaxaResult.impedido(String.format(
+                return ResolucaoTaxaResult.impedido("TAXA_REGRA_INVALIDA", String.format(
                         "Taxa de comissão inválida na regra ID %d ('%s'): percentual não definido ou menor/igual a zero.",
                         regra.getId(), regra.getNome()
                 ));
             }
             if (taxa.compareTo(BigDecimal.ONE) > 0) {
-                return ResolucaoTaxaResult.impedido(String.format(
+                return ResolucaoTaxaResult.impedido("TAXA_REGRA_INVALIDA", String.format(
                         "Taxa de comissão inválida na regra ID %d ('%s'): percentual (%s) superior a 100%%.",
                         regra.getId(), regra.getNome(), taxa
                 ));
@@ -284,7 +284,7 @@ public class TaxaComissaoResolver {
 
         Optional<BigDecimal> baseRateOpt = buscarTaxaBase(brand, position, saleDate, contexto);
         if (baseRateOpt.isEmpty()) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("BASE_COMISS_AUSENTE", String.format(
                     "Impedimento de cálculo: a regra ID %d ('%s') requer taxa base contratual para o ajuste (%s), mas nenhuma taxa padrão foi encontrada em tb_basecomiss para Marca '%s' e Cargo '%s' na competência.",
                     regra.getId(),
                     regra.getNome(),
@@ -297,7 +297,7 @@ public class TaxaComissaoResolver {
         BigDecimal taxaBase = baseRateOpt.get();
         BigDecimal valorAjuste = regra.getValorAjuste();
         if (valorAjuste == null) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("VALOR_AJUSTE_AUSENTE", String.format(
                     "Impedimento de cálculo: a regra ID %d ('%s') com operação '%s' não possui valor de ajuste definido.",
                     regra.getId(), regra.getNome(), operacao
             ));
@@ -316,13 +316,13 @@ public class TaxaComissaoResolver {
                 break;
             case DIVISOR_BASE:
                 if (valorAjuste.compareTo(BigDecimal.ZERO) == 0) {
-                    return ResolucaoTaxaResult.impedido(String.format(
+                    return ResolucaoTaxaResult.impedido("DIVISOR_INVALIDO", String.format(
                             "Impedimento de cálculo: divisão por zero na operação DIVISOR_BASE da regra ID %d ('%s').",
                             regra.getId(), regra.getNome()
                     ));
                 }
                 if (valorAjuste.compareTo(BigDecimal.ZERO) < 0) {
-                    return ResolucaoTaxaResult.impedido(String.format(
+                    return ResolucaoTaxaResult.impedido("DIVISOR_INVALIDO", String.format(
                             "Impedimento de cálculo: fator divisor negativo na operação DIVISOR_BASE da regra ID %d ('%s').",
                             regra.getId(), regra.getNome()
                     ));
@@ -337,14 +337,14 @@ public class TaxaComissaoResolver {
         taxaCalculada = taxaCalculada.setScale(4, RoundingMode.HALF_UP);
 
         if (taxaCalculada.compareTo(BigDecimal.ZERO) <= 0) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("TAXA_CALCULADA_INVALIDA", String.format(
                     "Impedimento de cálculo: a regra ID %d ('%s') com ajuste %s resultou em taxa percentual inválida (%s). A taxa final deve ser estritamente positiva.",
                     regra.getId(), regra.getNome(), operacao, taxaCalculada
             ));
         }
 
         if (taxaCalculada.compareTo(BigDecimal.ONE) > 0) {
-            return ResolucaoTaxaResult.impedido(String.format(
+            return ResolucaoTaxaResult.impedido("TAXA_CALCULADA_INVALIDA", String.format(
                     "Impedimento de cálculo: a regra ID %d ('%s') com ajuste %s resultou em taxa percentual superior a 100%% (%s).",
                     regra.getId(), regra.getNome(), operacao, taxaCalculada
             ));

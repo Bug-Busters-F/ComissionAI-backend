@@ -174,6 +174,94 @@ class CampanhaEsteiraIntegrationTest {
     }
 
     @Test
+    @DisplayName("FRONT-9: POST /api/v1/campanhas/{id}/devolver deve devolver para etapa 1 após encaminhamento e invalidar aprovações")
+    void deveDevolverParaEtapa1MesmoAposEncaminhamentoEDevolverCampanhaResponse() throws Exception {
+        String createBody = mockMvc.perform(post("/api/v1/campanhas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "titulo": "Campanha Devolucao FRONT-9 Etapa 1",
+                                  "textoOriginal": "Comissão de 5% no canal ecommerce",
+                                  "dataInicio": "2026-06-01",
+                                  "dataFim": "2026-06-30",
+                                  "estado": "DRAFT",
+                                  "orcamento": 100000.00,
+                                  "orcamentoConfirmado": true,
+                                  "regras": [
+                                    {
+                                      "identificadorLogico": "bloco-1",
+                                      "nome": "Regra E-commerce 5%",
+                                      "canal": "ECOMMERCE",
+                                      "taxa": 0.05,
+                                      "completa": true
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        Long campanhaId = objectMapper.readTree(createBody).get("id").asLong();
+
+        // Simular, aceitar e aprovar código antes de encaminhar ao gerente
+        String simJson = mockMvc.perform(post("/api/v1/simulacoes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format("{\"competencia\":\"2026-06\",\"campanhaId\":%d}", campanhaId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String simId = objectMapper.readTree(simJson).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/simulacoes/{simId}/aceite", simId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aceitoPor\":\"negocios@empresa.com\",\"motivo\":\"Aceito para aprovação gerencial\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/aprovacao-codigo", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Código conferido\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/{id}/encaminhar-gerente", campanhaId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.encaminhadaGerente").value(true));
+
+        // Devolve usando exatamente o payload esperado pelo frontend: { motivo, paraEtapa: 1 }
+        mockMvc.perform(post("/api/v1/campanhas/{id}/devolver", campanhaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"motivo\":\"Ajustar escopo e faixa inicial\",\"paraEtapa\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(campanhaId))
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.devolvida").value(true))
+                .andExpect(jsonPath("$.estadoEsteira").value("DEVOLVIDA"))
+                .andExpect(jsonPath("$.motivoDevolucao").value("Ajustar escopo e faixa inicial"))
+                .andExpect(jsonPath("$.etapaDevolucao").value(1))
+                .andExpect(jsonPath("$.ultimaEtapa").value(1))
+                .andExpect(jsonPath("$.encaminhadaGerente").value(false))
+                .andExpect(jsonPath("$.simulacaoAceitaId").value(nullValue()));
+
+        // GET /api/v1/campanhas/{id} expõe metadados completos de devolução e invalida aprovações
+        mockMvc.perform(get("/api/v1/campanhas/{id}", campanhaId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("DRAFT"))
+                .andExpect(jsonPath("$.devolvida").value(true))
+                .andExpect(jsonPath("$.estadoEsteira").value("DEVOLVIDA"))
+                .andExpect(jsonPath("$.motivoDevolucao").value("Ajustar escopo e faixa inicial"))
+                .andExpect(jsonPath("$.etapaDevolucao").value(1))
+                .andExpect(jsonPath("$.devolvidoPor").isNotEmpty())
+                .andExpect(jsonPath("$.devolvidoEm").isNotEmpty())
+                .andExpect(jsonPath("$.encaminhadaGerente").value(false));
+
+        // Consulta de aprovação de código reflete invalidação após devolução para etapa <= 2
+        mockMvc.perform(get("/api/v1/campanhas/{id}/aprovacao-codigo", campanhaId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusAprovacaoCodigo").value("INVALIDADO"));
+
+        // Ativação permanece bloqueada até nova simulação e aprovação de código
+        mockMvc.perform(post("/api/v1/campanhas/{id}/ativar", campanhaId))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("Deve permitir devolução da proposta pelo gerente com justificativa obrigatória (FRONT-9 / BACK-4)")
     void devePermitirDevolucaoPeloGerenteComJustificativa() throws Exception {
         Long campanhaId = criarCampanhaTeste("Campanha Devolução Gerente");
