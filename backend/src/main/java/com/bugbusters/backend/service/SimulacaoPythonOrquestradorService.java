@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.programapython.ProgramaPythonResponse;
 import com.bugbusters.backend.dto.simulacao.SimulacaoCenariosRequest;
@@ -206,17 +207,23 @@ public class SimulacaoPythonOrquestradorService {
         }
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    ator,
-                    TipoAcaoAuditoria.EXECUCAO_SIMULACAO,
-                    TipoEntidadeAuditoria.SIMULACAO,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    String.format("Simulação executada no sandbox Python (programa v%d) com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
-                            programa.getVersaoPrograma(), resp.protocolo(), resp.totalVendasRecortadas(), resp.valorTotalRecortado()),
-                    String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"vendas\": %d, \"motor\": \"PYTHON_SANDBOX\"}",
-                            resp.protocolo(), request.competencia(), resp.totalVendasRecortadas())
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(ator)
+                    .tipoAcao(TipoAcaoAuditoria.EXECUCAO_SIMULACAO)
+                    .tipoEntidade(TipoEntidadeAuditoria.SIMULACAO)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .simulacaoId(resp.id())
+                    .protocoloCalculo(resp.protocolo())
+                    .competencia(request.competencia())
+                    .descricao(String.format("Simulação executada no sandbox Python (programa v%d) com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
+                            programa.getVersaoPrograma(), resp.protocolo(), resp.totalVendasRecortadas(), resp.valorTotalRecortado()))
+                    .dadosNovos(String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"vendas\": %d, \"motor\": \"PYTHON_SANDBOX\"}",
+                            resp.protocolo(), request.competencia(), resp.totalVendasRecortadas()))
+                    .sucesso(true));
         }
 
         log.info("Simulação executada no sandbox Python (programa v{}) concluída e persistida para campanha {} versão {}. Protocolo: {}",

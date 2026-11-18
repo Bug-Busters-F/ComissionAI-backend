@@ -58,9 +58,58 @@ public record AuditoriaResponseDTO(
         boolean sucesso,
 
         @Schema(description = "Detalhe de erro em caso de falha")
-        String detalheErro
+        String detalheErro,
+
+        Long campanhaId,
+        Long campanhaVersaoId,
+        Long envioArquivoId,
+        UUID arquivoImportacaoId,
+        UUID lotePreparacaoId,
+        String idLote,
+        Long reportId,
+        String nomeArquivo,
+        UUID simulacaoId,
+        UUID apuracaoCampanhaId,
+        UUID execucaoCalculoId,
+        UUID fechamentoId,
+        UUID protocoloCalculo,
+        UUID logCalculoId,
+        String competencia,
+
+        @Schema(description = "Relacionamentos resolvidos com campanhas, arquivos/lotes e cálculos")
+        AuditoriaRelacionamentosDTO relacionamentos
 ) {
+    /**
+     * Construtor de compatibilidade com os 16 parâmetros originais.
+     */
+    public AuditoriaResponseDTO(
+            UUID id,
+            UUID protocolo,
+            OffsetDateTime dataHora,
+            String usuario,
+            String perfilUsuario,
+            TipoAcaoAuditoria tipoAcao,
+            TipoEntidadeAuditoria tipoEntidade,
+            String entidadeId,
+            Integer versaoEntidade,
+            String descricao,
+            String dadosAnteriores,
+            String dadosNovos,
+            String ipOrigem,
+            String userAgent,
+            boolean sucesso,
+            String detalheErro
+    ) {
+        this(id, protocolo, dataHora, usuario, perfilUsuario, tipoAcao, tipoEntidade, entidadeId, versaoEntidade,
+                descricao, dadosAnteriores, dadosNovos, ipOrigem, userAgent, sucesso, detalheErro,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
     public static AuditoriaResponseDTO de(AuditoriaGeral a) {
+        return de(a, null);
+    }
+
+    public static AuditoriaResponseDTO de(AuditoriaGeral a, AuditoriaRelacionamentosDTO relacionamentos) {
         return new AuditoriaResponseDTO(
                 a.getId(),
                 a.getProtocolo(),
@@ -77,7 +126,23 @@ public record AuditoriaResponseDTO(
                 a.getIpOrigem(),
                 a.getUserAgent(),
                 a.isSucesso(),
-                a.getDetalheErro()
+                a.getDetalheErro(),
+                a.getCampanhaId(),
+                a.getCampanhaVersaoId(),
+                a.getEnvioArquivoId(),
+                a.getArquivoImportacaoId(),
+                a.getLotePreparacaoId(),
+                a.getIdLote(),
+                a.getReportId(),
+                a.getNomeArquivo(),
+                a.getSimulacaoId(),
+                a.getApuracaoCampanhaId(),
+                a.getExecucaoCalculoId(),
+                a.getFechamentoId(),
+                a.getProtocoloCalculo(),
+                a.getLogCalculoId(),
+                a.getCompetencia(),
+                relacionamentos != null && !relacionamentos.vazio() ? relacionamentos : null
         );
     }
 }

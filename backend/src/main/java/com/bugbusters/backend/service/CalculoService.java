@@ -6,12 +6,15 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
-import java.util.List;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -26,13 +29,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
-import com.bugbusters.backend.auth.PapelUsuario;
+import com.bugbusters.backend.auth.PerfilPermissoes;
 import com.bugbusters.backend.auth.Usuario;
+import com.bugbusters.backend.auth.UsuarioRepository;
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
+import com.bugbusters.backend.dto.auditoria.RelacionamentoArquivoResumoDTO;
+import com.bugbusters.backend.dto.auditoria.RelacionamentoCampanhaResumoDTO;
+import com.bugbusters.backend.dto.calculo.CalculoComissaoRequest;
 import com.bugbusters.backend.dto.calculo.CalculoComissaoResponse;
 import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoImpedimentoDTO;
@@ -40,17 +49,23 @@ import com.bugbusters.backend.dto.calculo.CalculoIndividualResponseDTO;
 import com.bugbusters.backend.dto.calculo.CalculoItemResponseDTO;
 import com.bugbusters.backend.dto.calculo.LogCalculoResponse;
 import com.bugbusters.backend.dto.calculo.SnapshotResultadoCalculoDTO;
-import com.bugbusters.backend.model.SnapshotResultadoCalculo;
-import com.bugbusters.backend.repository.SnapshotResultadoCalculoRepository;
-import com.bugbusters.backend.exception.BusinessException;
-import com.bugbusters.backend.exception.ResourceNotFoundException;
+import com.bugbusters.backend.model.Campanha;
+import com.bugbusters.backend.model.CampanhaVersao;
+import com.bugbusters.backend.model.EnvioArquivo;
 import com.bugbusters.backend.model.LogCalculoImutavel;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.model.ResultadoCalculo;
+import com.bugbusters.backend.model.SnapshotResultadoCalculo;
+import com.bugbusters.backend.model.TipoAcaoAuditoria;
+import com.bugbusters.backend.model.TipoEntidadeAuditoria;
+import com.bugbusters.backend.repository.EnvioArquivoRepository;
 import com.bugbusters.backend.repository.LogCalculoRepository;
 import com.bugbusters.backend.repository.LogCalculoSpecification;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.ResultadoCalculoRepository;
+import com.bugbusters.backend.repository.SnapshotResultadoCalculoRepository;
+import com.bugbusters.backend.exception.BusinessException;
+import com.bugbusters.backend.exception.ResourceNotFoundException;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.registration.Registration;
@@ -93,6 +108,15 @@ public class CalculoService {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AuditoriaGeralService auditoriaService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private EnvioArquivoRepository envioArquivoRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private UsuarioRepository usuarioRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
     public CalculoService(ResultadoCalculoRepository resultadoCalculoRepository,
@@ -349,7 +373,9 @@ public class CalculoService {
             logImutavel.setOrigemTaxa(resolucao.origemTaxa());
             logImutavel.setValorBonusPercentual(calculada.bonusPercentual());
             logImutavel.setValorBonusFixo(calculada.bonusFixo());
-            logCalculoRepository.save(logImutavel);
+            logImutavel = logCalculoRepository.save(logImutavel);
+
+            registrarAuditoriaCalculoIndividual(salvo, logImutavel, sale);
 
             return CalculoIndividualResponseDTO.sucesso(
                     salvo.getProtocoloCalculo(),
@@ -633,6 +659,24 @@ public class CalculoService {
 
         // Persistência em blocos
         salvarEmBlocos(resultadosParaSalvar, logsParaSalvar);
+
+        if (fechamentoId == null && progresso == null && auditoriaService != null && !logsParaSalvar.isEmpty()) {
+            LogCalculoImutavel ultimo = logsParaSalvar.get(logsParaSalvar.size() - 1);
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(ultimo.getUsuarioExecutor())
+                    .perfilUsuario(ultimo.getPerfilExecutor())
+                    .tipoAcao(TipoAcaoAuditoria.CALCULO_COMISSAO)
+                    .tipoEntidade(TipoEntidadeAuditoria.CALCULO)
+                    .entidadeId(ym.toString())
+                    .competencia(ym.toString())
+                    .protocoloCalculo(ultimo.getProtocolo())
+                    .logCalculoId(ultimo.getId())
+                    .descricao(String.format("Cálculo de comissões da competência %s processado: %d vendas, %d calculadas, %d impedimentos.",
+                            ym, vendas.size(), sucessos.size(), impedimentos.size()))
+                    .dadosNovos(String.format("{\"competencia\":\"%s\",\"recalcular\":%s,\"totalVendas\":%d,\"calculados\":%d,\"impedimentos\":%d,\"totalComissao\":\"%s\"}",
+                            ym, recalcular, vendas.size(), sucessos.size(), impedimentos.size(), totalComissoesCalculadas))
+                    .sucesso(true));
+        }
 
         return new CalculoCompetenciaResponseDTO(
                 competenciaStr,
@@ -1039,7 +1083,9 @@ public class CalculoService {
             logImutavel.setOrigemTaxa(resolucao.origemTaxa());
             logImutavel.setValorBonusPercentual(calculada.bonusPercentual());
             logImutavel.setValorBonusFixo(calculada.bonusFixo());
-            logCalculoRepository.save(logImutavel);
+            logImutavel = logCalculoRepository.save(logImutavel);
+
+            registrarAuditoriaCalculoIndividual(resultadoSalvo, logImutavel, sale);
 
             return new CalculoComissaoResponse(
                     resultadoSalvo.getProtocoloCalculo(),
@@ -1116,17 +1162,99 @@ public class CalculoService {
             String idLoteOrigem,
             Pageable pageable
     ) {
-        if (dataInicio != null && dataFim != null && dataInicio.isAfter(dataFim)) {
-            throw new BusinessException("Data de início não pode ser posterior à data de término.");
+        return listarLogs(idVenda, matricula, idRegra, dataInicio, dataFim, tipoVenda, idLoteOrigem,
+                null, null, null, null, null, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LogCalculoResponse> listarLogs(
+            UUID idVenda,
+            String matricula,
+            Long idRegra,
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            String tipoVenda,
+            String idLoteOrigem,
+            String usuarioExecutor,
+            String perfilExecutor,
+            UUID protocolo,
+            Long campanhaId,
+            OffsetDateTime execucaoInicio,
+            OffsetDateTime execucaoFim,
+            Pageable pageable
+    ) {
+        validarIntervalosLogs(dataInicio, dataFim, execucaoInicio, execucaoFim);
+        List<String> perfisPermitidos = perfisPermitidosDaSessao();
+
+        if (perfilExecutor != null && !perfilExecutor.isBlank() && perfisPermitidos != null
+                && !perfisPermitidos.contains(perfilExecutor.trim().toUpperCase())) {
+            return Page.empty(pageable);
         }
 
-        Specification<LogCalculoImutavel> spec = LogCalculoSpecification.comFiltros(
-                idVenda, matricula, idRegra, dataInicio, dataFim, tipoVenda, idLoteOrigem
-        );
-        spec = spec.and(LogCalculoSpecification.perfisExecutores(perfisPermitidosDaSessao()));
+        Collection<Long> regraIdsCampanha = resolverRegrasPorCampanha(campanhaId);
+
+        Specification<LogCalculoImutavel> spec = LogCalculoSpecification.comFiltrosAvancados(
+                idVenda, matricula, idRegra, dataInicio, dataFim, tipoVenda, idLoteOrigem,
+                usuarioExecutor, perfilExecutor, protocolo, regraIdsCampanha, execucaoInicio, execucaoFim
+        ).and(LogCalculoSpecification.perfisExecutores(perfisPermitidos));
 
         Page<LogCalculoImutavel> page = logCalculoRepository.findAll(spec, pageable);
-        return page.map(LogCalculoResponse::fromEntity);
+        return new PageImpl<>(hidratarLogs(page.getContent()), pageable, page.getTotalElements());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LogCalculoResponse> listarLogsPorUsuario(
+            String usuarioOuId,
+            UUID idVenda,
+            String matricula,
+            Long idRegra,
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            String tipoVenda,
+            String idLoteOrigem,
+            UUID protocolo,
+            Long campanhaId,
+            OffsetDateTime execucaoInicio,
+            OffsetDateTime execucaoFim,
+            Pageable pageable
+    ) {
+        if (usuarioOuId == null || usuarioOuId.isBlank()) {
+            throw new BusinessException("Identificador do usuário é obrigatório.");
+        }
+        validarIntervalosLogs(dataInicio, dataFim, execucaoInicio, execucaoFim);
+        List<String> perfisPermitidos = perfisPermitidosDaSessao();
+
+        String usuarioAlvo = usuarioOuId.trim();
+        Usuario entidadeAlvo = resolverUsuarioAlvo(usuarioAlvo);
+        if (entidadeAlvo != null) {
+            usuarioAlvo = entidadeAlvo.getEmail();
+        }
+
+        if (perfisPermitidos != null && entidadeAlvo == null && "SISTEMA".equalsIgnoreCase(usuarioAlvo)) {
+            throw new AccessDeniedException("Seu perfil não possui permissão para consultar logs de cálculo deste usuário.");
+        }
+
+        if (perfisPermitidos != null && entidadeAlvo != null
+                && (entidadeAlvo.getPapel() == null || !perfisPermitidos.contains(entidadeAlvo.getPapel().name()))) {
+            long visiveis = logCalculoRepository.count(
+                    LogCalculoSpecification.usuarioExato(usuarioAlvo)
+                            .and(LogCalculoSpecification.perfisExecutores(perfisPermitidos))
+            );
+            if (visiveis == 0) {
+                throw new AccessDeniedException("Seu perfil não possui permissão para consultar logs de cálculo deste usuário.");
+            }
+        }
+
+        Collection<Long> regraIdsCampanha = resolverRegrasPorCampanha(campanhaId);
+        Specification<LogCalculoImutavel> spec = LogCalculoSpecification.comFiltrosAvancados(
+                        idVenda, matricula, idRegra, dataInicio, dataFim, tipoVenda, idLoteOrigem,
+                        null, null, protocolo, regraIdsCampanha, execucaoInicio, execucaoFim
+                )
+                .and(LogCalculoSpecification.usuarioExato(usuarioAlvo))
+                .and(LogCalculoSpecification.perfisExecutores(perfisPermitidos));
+
+        Page<LogCalculoImutavel> page = logCalculoRepository.findAll(spec, pageable);
+        return new PageImpl<>(hidratarLogs(page.getContent()), pageable, page.getTotalElements());
     }
 
     @Transactional(readOnly = true)
@@ -1155,7 +1283,7 @@ public class CalculoService {
                 .or(() -> logCalculoRepository.findByProtocolo(id).stream().findFirst())
                 .orElseThrow(() -> new ResourceNotFoundException("Log de cálculo não encontrado com o identificador ou protocolo: " + id));
         validarAcessoAoLog(log);
-        return LogCalculoResponse.fromEntity(log);
+        return hidratarLogs(List.of(log)).get(0);
     }
 
     /**
@@ -1165,15 +1293,215 @@ public class CalculoService {
     @Transactional(readOnly = true)
     public List<LogCalculoResponse> listarLogs() {
         if (!haUsuarioAutenticado()) {
-            return logCalculoRepository.findAllByOrderByExecutadoEmDesc()
-                    .stream()
-                    .map(LogCalculoResponse::fromEntity)
-                    .toList();
+            return hidratarLogs(logCalculoRepository.findAllByOrderByExecutadoEmDesc());
         }
-        return logCalculoRepository.findAll(LogCalculoSpecification.perfisExecutores(perfisPermitidosDaSessao()))
-                .stream()
-                .map(LogCalculoResponse::fromEntity)
-                .toList();
+        return hidratarLogs(logCalculoRepository.findAll(
+                LogCalculoSpecification.perfisExecutores(perfisPermitidosDaSessao()),
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "executadoEm")
+        ));
+    }
+
+    private void validarIntervalosLogs(
+            LocalDate dataInicio,
+            LocalDate dataFim,
+            OffsetDateTime execucaoInicio,
+            OffsetDateTime execucaoFim
+    ) {
+        if (dataInicio != null && dataFim != null && dataInicio.isAfter(dataFim)) {
+            throw new BusinessException("Data de início não pode ser posterior à data de término.");
+        }
+        if (execucaoInicio != null && execucaoFim != null && execucaoInicio.isAfter(execucaoFim)) {
+            throw new BusinessException("Data/hora inicial de execução não pode ser posterior à final.");
+        }
+    }
+
+    private Collection<Long> resolverRegrasPorCampanha(Long campanhaId) {
+        if (campanhaId == null) {
+            return null;
+        }
+        if (regraRepository == null) {
+            return List.of();
+        }
+        return regraRepository.findDistinctIdsByCampanhaId(campanhaId);
+    }
+
+    private Usuario resolverUsuarioAlvo(String usuarioOuId) {
+        if (usuarioRepository == null || usuarioOuId == null || usuarioOuId.isBlank()) {
+            return null;
+        }
+        try {
+            UUID id = UUID.fromString(usuarioOuId.trim());
+            return usuarioRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado com ID: " + usuarioOuId));
+        } catch (IllegalArgumentException ignored) {
+            return usuarioRepository.findByEmailIgnoreCase(usuarioOuId.trim()).orElse(null);
+        }
+    }
+
+    private List<LogCalculoResponse> hidratarLogs(List<LogCalculoImutavel> logs) {
+        if (logs == null || logs.isEmpty()) {
+            return List.of();
+        }
+
+        Set<Long> regraIds = new HashSet<>();
+        Set<String> idLotes = new HashSet<>();
+        Set<UUID> protocolos = new HashSet<>();
+        for (LogCalculoImutavel item : logs) {
+            if (item.getIdRegra() != null) regraIds.add(item.getIdRegra());
+            if (item.getIdLoteOrigem() != null && !item.getIdLoteOrigem().isBlank()) idLotes.add(item.getIdLoteOrigem());
+            if (item.getProtocolo() != null) protocolos.add(item.getProtocolo());
+        }
+
+        Map<Long, RelacionamentoCampanhaResumoDTO> campanhasPorRegra = new HashMap<>();
+        if (regraRepository != null && !regraIds.isEmpty()) {
+            for (Regra regra : regraRepository.findAllWithCampanhaByIdIn(regraIds)) {
+                Campanha camp = regra.getCampanha() != null
+                        ? regra.getCampanha()
+                        : (regra.getCampanhaVersao() != null ? regra.getCampanhaVersao().getCampanha() : null);
+                if (camp != null) {
+                    CampanhaVersao cv = regra.getCampanhaVersao();
+                    campanhasPorRegra.put(regra.getId(), new RelacionamentoCampanhaResumoDTO(
+                            camp.getId(),
+                            camp.getTitulo(),
+                            camp.getEstado() != null ? camp.getEstado().name() : null,
+                            cv != null ? cv.getId() : null,
+                            cv != null ? cv.getNumero() : null,
+                            cv != null && cv.getStatus() != null ? cv.getStatus().name() : null,
+                            cv != null && cv.getEstadoEsteira() != null ? cv.getEstadoEsteira().name() : null
+                    ));
+                }
+            }
+        }
+
+        Map<String, RelacionamentoArquivoResumoDTO> arquivosPorLote = new HashMap<>();
+        if (envioArquivoRepository != null && !idLotes.isEmpty()) {
+            for (EnvioArquivo envio : envioArquivoRepository.findByIdLoteIn(idLotes)) {
+                if (envio.getIdLote() != null) {
+                    arquivosPorLote.putIfAbsent(envio.getIdLote(), new RelacionamentoArquivoResumoDTO(
+                            envio.getId(),
+                            envio.getReportId(),
+                            envio.getIdLote(),
+                            envio.getArquivoImportacaoId(),
+                            null,
+                            envio.getNomeArquivo(),
+                            envio.getTipoBase(),
+                            envio.getCompetencia(),
+                            envio.getStatus(),
+                            envio.getTotalLinhas(),
+                            envio.getLinhasValidas(),
+                            envio.getCriadoPor(),
+                            "EXCLUIDO".equalsIgnoreCase(envio.getStatus())
+                    ));
+                }
+            }
+        }
+
+        Map<UUID, ResultadoCalculo> resultadosPorProtocolo = new HashMap<>();
+        if (resultadoCalculoRepository != null && !protocolos.isEmpty()) {
+            for (ResultadoCalculo res : resultadoCalculoRepository.findByProtocoloCalculoIn(protocolos)) {
+                if (res.getProtocoloCalculo() != null) {
+                    resultadosPorProtocolo.putIfAbsent(res.getProtocoloCalculo(), res);
+                }
+            }
+        }
+
+        List<LogCalculoResponse> dtos = new ArrayList<>(logs.size());
+        for (LogCalculoImutavel item : logs) {
+            ResultadoCalculo res = item.getProtocolo() != null ? resultadosPorProtocolo.get(item.getProtocolo()) : null;
+            RelacionamentoCampanhaResumoDTO relCampanha = item.getIdRegra() != null ? campanhasPorRegra.get(item.getIdRegra()) : null;
+            if (relCampanha == null && res != null && res.getCampanhaId() != null) {
+                relCampanha = new RelacionamentoCampanhaResumoDTO(
+                        res.getCampanhaId(), null, null, null, res.getVersaoCampanhaNumero(), null, null
+                );
+            }
+            RelacionamentoArquivoResumoDTO relArquivo = item.getIdLoteOrigem() != null
+                    ? arquivosPorLote.get(item.getIdLoteOrigem())
+                    : null;
+            dtos.add(LogCalculoResponse.fromEntity(
+                    item,
+                    relCampanha,
+                    relArquivo,
+                    res != null ? res.getApuracaoCampanhaId() : null,
+                    res != null ? res.getFechamentoId() : null
+            ));
+        }
+        return dtos;
+    }
+
+    private void registrarAuditoriaCalculoIndividual(ResultadoCalculo resultado, LogCalculoImutavel logImutavel, Sale sale) {
+        if (auditoriaService == null || resultado == null || logImutavel == null) {
+            return;
+        }
+        try {
+            Long campanhaId = resultado.getCampanhaId();
+            Long campanhaVersaoId = null;
+            Integer versaoNumero = resultado.getVersaoCampanhaNumero();
+            String campanhaTitulo = null;
+
+            if ((campanhaId == null || campanhaTitulo == null) && logImutavel.getIdRegra() != null && regraRepository != null) {
+                Regra regra = regraRepository.findAllWithCampanhaByIdIn(List.of(logImutavel.getIdRegra()))
+                        .stream().findFirst().orElse(null);
+                if (regra != null) {
+                    Campanha camp = regra.getCampanha() != null
+                            ? regra.getCampanha()
+                            : (regra.getCampanhaVersao() != null ? regra.getCampanhaVersao().getCampanha() : null);
+                    if (camp != null) {
+                        if (campanhaId == null) campanhaId = camp.getId();
+                        campanhaTitulo = camp.getTitulo();
+                    }
+                    CampanhaVersao cv = regra.getCampanhaVersao();
+                    if (cv != null) {
+                        campanhaVersaoId = cv.getId();
+                        if (versaoNumero == null) versaoNumero = cv.getNumero();
+                    }
+                }
+            }
+
+            String idLote = logImutavel.getIdLoteOrigem();
+            Long envioArquivoId = null;
+            Long reportId = null;
+            UUID arquivoImportacaoId = null;
+            String nomeArquivo = null;
+            if (idLote != null && !idLote.isBlank() && envioArquivoRepository != null) {
+                EnvioArquivo envio = envioArquivoRepository.findByIdLote(idLote).orElse(null);
+                if (envio != null) {
+                    envioArquivoId = envio.getId();
+                    reportId = envio.getReportId();
+                    arquivoImportacaoId = envio.getArquivoImportacaoId();
+                    nomeArquivo = envio.getNomeArquivo();
+                }
+            }
+
+            String competencia = logImutavel.getDataVenda() != null ? YearMonth.from(logImutavel.getDataVenda()).toString() : null;
+
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(logImutavel.getUsuarioExecutor())
+                    .perfilUsuario(logImutavel.getPerfilExecutor())
+                    .tipoAcao(TipoAcaoAuditoria.CALCULO_COMISSAO)
+                    .tipoEntidade(TipoEntidadeAuditoria.CALCULO)
+                    .entidadeId(logImutavel.getProtocolo() != null ? logImutavel.getProtocolo().toString() : String.valueOf(logImutavel.getId()))
+                    .versaoEntidade(versaoNumero)
+                    .campanhaId(campanhaId)
+                    .campanhaVersaoId(campanhaVersaoId)
+                    .campanhaTitulo(campanhaTitulo)
+                    .envioArquivoId(envioArquivoId)
+                    .arquivoImportacaoId(arquivoImportacaoId)
+                    .idLote(idLote)
+                    .reportId(reportId)
+                    .nomeArquivo(nomeArquivo)
+                    .protocoloCalculo(logImutavel.getProtocolo())
+                    .logCalculoId(logImutavel.getId())
+                    .competencia(competencia)
+                    .descricao(String.format("Comissão calculada para matrícula %s (venda %s, taxa %s, comissão %s).",
+                            logImutavel.getMatricula(),
+                            logImutavel.getValorVenda(),
+                            logImutavel.getTaxaAplicada(),
+                            logImutavel.getValorComissao()))
+                    .dadosNovos(logImutavel.getParametrosAplicados())
+                    .sucesso(true));
+        } catch (Exception ex) {
+            log.warn("Falha ao registrar trilha de auditoria para cálculo individual {}: {}", logImutavel.getId(), ex.getMessage());
+        }
     }
 
     private boolean haUsuarioAutenticado() {
@@ -1188,18 +1516,13 @@ public class CalculoService {
         // Chamadas HTTP já são protegidas pelo SecurityFilterChain. Sem principal,
         // trata-se de execução interna (job/teste), que não deve ser bloqueada aqui.
         if (!(principal instanceof Usuario usuario)) return null;
-        return switch (usuario.getPapel()) {
-            case ADMINISTRADOR -> null;
-            case GERENTE_VENDAS -> List.of(PapelUsuario.ANALISTA_NEGOCIOS.name(), PapelUsuario.ANALISTA_CODIGO.name());
-            case AUDITOR -> List.of(PapelUsuario.ANALISTA_NEGOCIOS.name(), PapelUsuario.ANALISTA_CODIGO.name(), PapelUsuario.GERENTE_VENDAS.name());
-            default -> throw new BusinessException("Profile is not permitted to view logs.");
-        };
+        return PerfilPermissoes.perfisLogsVisiveis(usuario.getPapel());
     }
 
     private void validarAcessoAoLog(LogCalculoImutavel log) {
         List<String> perfis = perfisPermitidosDaSessao();
-        if (perfis != null && !perfis.contains(log.getPerfilExecutor())) {
-            throw new ResourceNotFoundException("Log not found.");
+        if (perfis != null && (log.getPerfilExecutor() == null || !perfis.contains(log.getPerfilExecutor()))) {
+            throw new AccessDeniedException("Seu perfil não possui permissão para visualizar este log de cálculo.");
         }
     }
 

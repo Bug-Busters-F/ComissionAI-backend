@@ -1,7 +1,10 @@
 package com.bugbusters.backend.service.preparacao;
 
+import com.bugbusters.backend.auth.Usuario;
+import com.bugbusters.backend.auth.UsuarioRepository;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandResolver;
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.error.ApiErrorResponse.CampoInvalidoDTO;
 import com.bugbusters.backend.dto.preparacao.*;
 import com.bugbusters.backend.dto.preparacao.impacto.*;
@@ -24,6 +27,7 @@ import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.repository.*;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import com.bugbusters.backend.service.AuditoriaGeralService;
 import com.bugbusters.backend.service.CoberturaFechamentoService;
 import com.bugbusters.backend.service.FechamentoService;
 import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
@@ -35,9 +39,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -87,6 +94,12 @@ public class PreparacaoBaseService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.bugbusters.backend.repository.ResultadoCalculoRepository resultadoCalculoRepository;
+
+    @Autowired(required = false)
+    private AuditoriaGeralService auditoriaService;
+
+    @Autowired(required = false)
+    private UsuarioRepository usuarioRepository;
 
     private synchronized long obterProximoReportId() {
         if (jdbcTemplate != null) {
@@ -223,6 +236,16 @@ public class PreparacaoBaseService {
             throw new BusinessException("Falha ao processar arquivo para preparação: " + ex.getMessage());
         }
 
+        registrarAuditoriaPreparacao(
+                TipoAcaoAuditoria.PREPARACAO_BASE,
+                autor,
+                campanha,
+                lote,
+                null,
+                String.format("Lote de preparação iniciado via upload (%s - %s) na campanha '%s'.",
+                        tipoNorm, filename, campanha.getTitulo())
+        );
+
         return toLoteDTO(lote);
     }
 
@@ -277,6 +300,16 @@ public class PreparacaoBaseService {
         } catch (Exception ex) {
             throw new BusinessException("Falha ao reprocessar arquivo do lote: " + ex.getMessage());
         }
+
+        registrarAuditoriaPreparacao(
+                TipoAcaoAuditoria.PREPARACAO_BASE,
+                autor,
+                campanha,
+                lote,
+                envioOrigem,
+                String.format("Lote de preparação iniciado a partir do reportId %d (%s) na campanha '%s'.",
+                        reportIdOrigem, tipoNorm, campanha.getTitulo())
+        );
 
         return toLoteDTO(lote);
     }
@@ -873,6 +906,8 @@ public class PreparacaoBaseService {
         // 4. Criação do EnvioArquivo (Lote oficial)
         long proximoReportId = obterProximoReportId();
 
+        String perfilCriador = resolverPerfilUsuario(autor);
+
         EnvioArquivo novoEnvio = new EnvioArquivo();
         novoEnvio.setIdLote(idLoteGerado);
         novoEnvio.setReportId(proximoReportId);
@@ -882,6 +917,8 @@ public class PreparacaoBaseService {
         novoEnvio.setHashConteudo(lote.getHashConteudo());
         novoEnvio.setArquivoImportacaoId(lote.getArquivoImportacao().getId());
         novoEnvio.setOrigemLote("PREPARACAO_CAMPANHA");
+        novoEnvio.setCriadoPor(autor);
+        novoEnvio.setPerfilCriador(perfilCriador);
         novoEnvio.setStatus("CONCLUIDO");
         novoEnvio.setTotalLinhas(linhasAtivas.size());
         novoEnvio.setLinhasValidas(registrosInseridos + registrosAtualizados);
@@ -938,6 +975,31 @@ public class PreparacaoBaseService {
         lotePreparacaoRepository.save(lote);
         alertaEstatisticoService.analisarLoteEfetivado(lote);
 
+        if (auditoriaService != null) {
+            try {
+                auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                        .usuario(autor)
+                        .perfilUsuario(perfilCriador)
+                        .tipoAcao(TipoAcaoAuditoria.IMPORTACAO_BASE)
+                        .tipoEntidade(TipoEntidadeAuditoria.LOTE_IMPORTACAO)
+                        .entidadeId(String.valueOf(proximoReportId))
+                        .campanhaId(campanha.getId())
+                        .campanhaTitulo(campanha.getTitulo())
+                        .lotePreparacaoId(lote.getId())
+                        .envioArquivoId(novoEnvio.getId())
+                        .arquivoImportacaoId(lote.getArquivoImportacao() != null ? lote.getArquivoImportacao().getId() : null)
+                        .reportId(proximoReportId)
+                        .idLote(idLoteGerado)
+                        .nomeArquivo(lote.getNomeArquivo())
+                        .competencia(lote.getCompetencia())
+                        .descricao(String.format("Lote de preparação efetivado (reportId %d, %d inseridos, %d atualizados).",
+                                proximoReportId, registrosInseridos, registrosAtualizados))
+                        .dadosNovos(String.format("{\"reportId\":%d,\"inseridos\":%d,\"atualizados\":%d}",
+                                proximoReportId, registrosInseridos, registrosAtualizados))
+                        .sucesso(true));
+            } catch (Exception ignored) {}
+        }
+
         // 7. Propagação dos impactos confirmados para campanhas, simulações e cálculos
         ResumoPropagacaoImpactoDTO resumoImpactos = null;
         if (previa.possuiImpactos()) {
@@ -986,7 +1048,63 @@ public class PreparacaoBaseService {
         lote.setMotivoDescarte(motivo);
 
         lote = lotePreparacaoRepository.save(lote);
+        registrarAuditoriaPreparacao(
+                TipoAcaoAuditoria.EXCLUSAO_BASE,
+                autor,
+                lote.getCampanha(),
+                lote,
+                lote.getEnvioArquivoOrigem(),
+                String.format("Lote de preparação %s descartado. Motivo: %s",
+                        preparacaoId, motivo != null ? motivo : "não informado")
+        );
         return toLoteDTO(lote);
+    }
+
+    private String resolverPerfilUsuario(String email) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof Usuario u && u.getPapel() != null) {
+            if ("SISTEMA".equalsIgnoreCase(email) || (u.getEmail() != null && u.getEmail().equalsIgnoreCase(email))) {
+                return u.getPapel().name();
+            }
+        }
+        if (usuarioRepository != null && email != null && !"SISTEMA".equalsIgnoreCase(email)) {
+            return usuarioRepository.findByEmailIgnoreCase(email.trim())
+                    .map(u -> u.getPapel() != null ? u.getPapel().name() : null)
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    private void registrarAuditoriaPreparacao(
+            TipoAcaoAuditoria acao,
+            String autor,
+            Campanha campanha,
+            LotePreparacao lote,
+            EnvioArquivo envioOrigem,
+            String descricao
+    ) {
+        if (auditoriaService == null || lote == null) {
+            return;
+        }
+        try {
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(autor)
+                    .perfilUsuario(resolverPerfilUsuario(autor))
+                    .tipoAcao(acao)
+                    .tipoEntidade(TipoEntidadeAuditoria.LOTE_PREPARACAO)
+                    .entidadeId(lote.getId().toString())
+                    .campanhaId(campanha != null ? campanha.getId() : null)
+                    .campanhaTitulo(campanha != null ? campanha.getTitulo() : null)
+                    .lotePreparacaoId(lote.getId())
+                    .envioArquivoId(envioOrigem != null ? envioOrigem.getId() : null)
+                    .reportId(envioOrigem != null ? envioOrigem.getReportId() : null)
+                    .idLote(envioOrigem != null ? envioOrigem.getIdLote() : null)
+                    .arquivoImportacaoId(lote.getArquivoImportacao() != null ? lote.getArquivoImportacao().getId() : null)
+                    .nomeArquivo(lote.getNomeArquivo())
+                    .competencia(lote.getCompetencia())
+                    .descricao(descricao)
+                    .sucesso(true));
+        } catch (Exception ignored) {}
     }
 
     /**

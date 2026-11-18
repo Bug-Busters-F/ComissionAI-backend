@@ -38,6 +38,12 @@ public class ExecucaoCalculo {
     @Column(name = "resumo_orcamento_json", columnDefinition = "TEXT")
     private String resumoOrcamentoJson;
 
+    @Column(name = "solicitado_por", nullable = false, length = 150)
+    private String solicitadoPor = "SISTEMA";
+
+    @Column(name = "perfil_solicitante", length = 50)
+    private String perfilSolicitante;
+
     public UUID getTentativa(){return tentativa;} public void setTentativa(UUID v){tentativa=v;}
 
     public UUID getId(){return id;} public String getChaveIdempotencia(){return chaveIdempotencia;} public void setChaveIdempotencia(String v){chaveIdempotencia=v;}
@@ -55,4 +61,8 @@ public class ExecucaoCalculo {
     public void setStatusEnquadramentoExecucao(StatusEnquadramentoOrcamento statusEnquadramentoExecucao) { this.statusEnquadramentoExecucao = statusEnquadramentoExecucao; }
     public String getResumoOrcamentoJson() { return resumoOrcamentoJson; }
     public void setResumoOrcamentoJson(String resumoOrcamentoJson) { this.resumoOrcamentoJson = resumoOrcamentoJson; }
+    public String getSolicitadoPor() { return solicitadoPor; }
+    public void setSolicitadoPor(String solicitadoPor) { this.solicitadoPor = (solicitadoPor != null && !solicitadoPor.isBlank()) ? solicitadoPor.trim() : "SISTEMA"; }
+    public String getPerfilSolicitante() { return perfilSolicitante; }
+    public void setPerfilSolicitante(String perfilSolicitante) { this.perfilSolicitante = perfilSolicitante; }
 }

@@ -1,6 +1,7 @@
 package com.bugbusters.backend.controller;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -95,7 +96,7 @@ public class CalculoController {
 
     @Operation(
             summary = "Consultar logs imutáveis de cálculos com paginação e filtros",
-            description = "Recupera o histórico paginado de logs para auditoria e conferência financeira, com filtros opcionais por venda (idVenda ou matrícula), regra (idRegra) e período de venda (dataInicio e dataFim). Retorna valores históricos preservados sem recalcular os dados."
+            description = "Recupera o histórico paginado de logs para auditoria e conferência financeira, com autorização por perfil no servidor, filtros combináveis e relacionamentos resolvidos com campanha e arquivo."
     )
     @ApiResponse(responseCode = "200", description = "Página de logs recuperada com sucesso (ou vazia caso nenhum registro atenda aos critérios)")
     @ApiResponse(responseCode = "400", description = "Parâmetros inválidos (ex: período inicial posterior ao final)", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
@@ -125,13 +126,66 @@ public class CalculoController {
             @Parameter(description = "Identificador do lote de origem da venda")
             @RequestParam(required = false) String idLoteOrigem,
 
+            @Parameter(description = "E-mail/identificador parcial do usuário executor")
+            @RequestParam(required = false) String usuarioExecutor,
+
+            @Parameter(description = "Perfil de acesso do usuário executor")
+            @RequestParam(required = false) String perfilExecutor,
+
+            @Parameter(description = "Protocolo de execução do cálculo")
+            @RequestParam(required = false) UUID protocolo,
+
+            @Parameter(description = "Identificador da campanha associada à regra")
+            @RequestParam(required = false) Long campanhaId,
+
+            @Parameter(description = "Início do período de execução do cálculo (ISO-8601)")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime execucaoInicio,
+
+            @Parameter(description = "Fim do período de execução do cálculo (ISO-8601)")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime execucaoFim,
+
             @PageableDefault(size = 20, sort = "executadoEm", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         LocalDate inicio = dataVenda != null ? dataVenda : dataInicio;
         LocalDate fim = dataVenda != null ? dataVenda : dataFim;
 
-        Page<LogCalculoResponse> logs = calculoService.listarLogs(idVenda, matricula, idRegra, inicio, fim, tipoVenda, idLoteOrigem, pageable);
+        Page<LogCalculoResponse> logs = calculoService.listarLogs(
+                idVenda, matricula, idRegra, inicio, fim, tipoVenda, idLoteOrigem,
+                usuarioExecutor, perfilExecutor, protocolo, campanhaId, execucaoInicio, execucaoFim, pageable
+        );
         return ResponseEntity.ok(logs);
+    }
+
+    @Operation(
+            summary = "Consultar logs imutáveis de cálculo de um usuário específico",
+            description = "Retorna a trilha paginada de logs de cálculo executados pelo usuário informado (e-mail ou UUID), respeitando a visibilidade por perfil no servidor."
+    )
+    @ApiResponse(responseCode = "200", description = "Página de logs de cálculo do usuário recuperada com sucesso")
+    @ApiResponse(responseCode = "403", description = "Perfil sem permissão para consultar logs deste usuário", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    @GetMapping("/logs-calculo/usuarios/{usuario}")
+    public ResponseEntity<Page<LogCalculoResponse>> listarLogsPorUsuario(
+            @Parameter(description = "E-mail ou UUID do usuário")
+            @PathVariable String usuario,
+            @RequestParam(required = false) UUID idVenda,
+            @RequestParam(required = false) String matricula,
+            @RequestParam(required = false) Long idRegra,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicio,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFim,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataVenda,
+            @RequestParam(required = false) String tipoVenda,
+            @RequestParam(required = false) String idLoteOrigem,
+            @RequestParam(required = false) UUID protocolo,
+            @RequestParam(required = false) Long campanhaId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime execucaoInicio,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime execucaoFim,
+            @PageableDefault(size = 20, sort = "executadoEm", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        LocalDate inicio = dataVenda != null ? dataVenda : dataInicio;
+        LocalDate fim = dataVenda != null ? dataVenda : dataFim;
+        return ResponseEntity.ok(calculoService.listarLogsPorUsuario(
+                usuario, idVenda, matricula, idRegra, inicio, fim, tipoVenda, idLoteOrigem,
+                protocolo, campanhaId, execucaoInicio, execucaoFim, pageable
+        ));
     }
 
     @Operation(
