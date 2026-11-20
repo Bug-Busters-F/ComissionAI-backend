@@ -7,16 +7,27 @@ import com.bugbusters.backend.model.*;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.registration.RegistrationRepository;
 import com.bugbusters.backend.repository.AlertaEstatisticoRepository;
+import com.bugbusters.backend.repository.CampanhaAnexoBaseRepository;
 import com.bugbusters.backend.repository.HistoricoVersaoRegistroRepository;
+import com.bugbusters.backend.repository.LinhaPreparacaoRepository;
 import com.bugbusters.backend.repository.LotePreparacaoRepository;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.*;
 import java.nio.charset.StandardCharsets;
@@ -28,8 +39,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class AlertaEstatisticoService {
+    private static final Logger log = LoggerFactory.getLogger(AlertaEstatisticoService.class);
     /** Uma venda é comparada com pelo menos três outras observações do grupo. */
     private static final int AMOSTRA_MINIMA = 4;
+    private static final int TAMANHO_LOTE_IN = 1000;
     private static final BigDecimal LIMIAR_Z_SCORE = BigDecimal.valueOf(3);
     private static final MathContext CALCULO = new MathContext(18, RoundingMode.HALF_UP);
     private static final Set<String> CAMPOS_ORDENAVEIS = Set.of("geradoEm", "dataReferencia", "tipo", "matricula", "tamanhoAmostra", "score");
@@ -39,19 +52,115 @@ public class AlertaEstatisticoService {
     private final SaleRepository vendas;
     private final RegistrationRepository matriculas;
     private final HistoricoVersaoRegistroRepository historicos;
+    private final LinhaPreparacaoRepository linhasPreparacao;
+    private final CampanhaAnexoBaseRepository anexosCampanha;
+    private final TaskExecutor alertaExecutor;
+    private final TransactionTemplate requiresNewTx;
+    private final Object monitorAnalises = new Object();
+    private int analisesEmAndamento = 0;
 
     public AlertaEstatisticoService(AlertaEstatisticoRepository alertas, LotePreparacaoRepository lotes,
-            SaleRepository vendas, RegistrationRepository matriculas, HistoricoVersaoRegistroRepository historicos) {
+            SaleRepository vendas, RegistrationRepository matriculas, HistoricoVersaoRegistroRepository historicos,
+            LinhaPreparacaoRepository linhasPreparacao,
+            CampanhaAnexoBaseRepository anexosCampanha,
+            @Qualifier("alertaEstatisticoExecutor") TaskExecutor alertaExecutor,
+            PlatformTransactionManager transactionManager) {
         this.alertas = alertas;
         this.lotes = lotes;
         this.vendas = vendas;
         this.matriculas = matriculas;
         this.historicos = historicos;
+        this.linhasPreparacao = linhasPreparacao;
+        this.anexosCampanha = anexosCampanha;
+        this.alertaExecutor = alertaExecutor;
+        this.requiresNewTx = new TransactionTemplate(transactionManager);
+        this.requiresNewTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     @Transactional
     public ReprocessamentoAlertasResponse analisarLoteEfetivado(LotePreparacao lote) {
         return analisar(lote);
+    }
+
+    /**
+     * Agenda a análise estatística para execução assíncrona após o commit da efetivação,
+     * evitando que o cálculo de alertas bloqueie a transação e o retorno HTTP ao usuário.
+     */
+    public void agendarAnalisePosCommit(UUID loteId) {
+        if (loteId == null) return;
+        Runnable tarefa = () -> executarAnaliseAssincrona(loteId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    despacharAssincrono(tarefa);
+                }
+            });
+        } else {
+            despacharAssincrono(tarefa);
+        }
+    }
+
+    private void despacharAssincrono(Runnable tarefa) {
+        synchronized (monitorAnalises) {
+            analisesEmAndamento++;
+        }
+        Runnable envolvida = () -> {
+            try {
+                tarefa.run();
+            } finally {
+                synchronized (monitorAnalises) {
+                    analisesEmAndamento = Math.max(0, analisesEmAndamento - 1);
+                    if (analisesEmAndamento == 0) {
+                        monitorAnalises.notifyAll();
+                    }
+                }
+            }
+        };
+        if (alertaExecutor != null) {
+            try {
+                alertaExecutor.execute(envolvida);
+            } catch (RuntimeException ex) {
+                synchronized (monitorAnalises) {
+                    analisesEmAndamento = Math.max(0, analisesEmAndamento - 1);
+                    if (analisesEmAndamento == 0) {
+                        monitorAnalises.notifyAll();
+                    }
+                }
+                throw ex;
+            }
+        } else {
+            envolvida.run();
+        }
+    }
+
+    /**
+     * Aguarda a conclusão de análises estatísticas assíncronas em andamento (útil em testes e desligamento gracioso).
+     */
+    public void aguardarAnalisesPendentes(long timeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(0L, timeoutMs);
+        synchronized (monitorAnalises) {
+            while (analisesEmAndamento > 0) {
+                long restante = deadline - System.currentTimeMillis();
+                if (restante <= 0) break;
+                try {
+                    monitorAnalises.wait(restante);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    private void executarAnaliseAssincrona(UUID loteId) {
+        try {
+            requiresNewTx.executeWithoutResult(status -> lotes.findById(loteId)
+                    .filter(l -> "EFETIVADO".equals(l.getStatus()))
+                    .ifPresent(this::analisar));
+        } catch (Exception ex) {
+            log.error("Falha na análise estatística assíncrona do lote {}: {}", loteId, ex.getMessage(), ex);
+        }
     }
 
     @Transactional
@@ -85,19 +194,59 @@ public class AlertaEstatisticoService {
     }
 
     private ReprocessamentoAlertasResponse analisar(LotePreparacao lote) {
-        List<Sale> afetadas = vendasAfetadas(lote);
+        List<YearMonth> competenciasAlvo = resolverCompetenciasAnalise(lote);
         List<Registration> registrosLote = registrosAfetados(lote);
-        List<Sale> todasVendas = vendas.findAll();
-        String versaoBases = versaoBases(todasVendas, matriculas.findAll());
+        List<Sale> afetadas = vendasAfetadas(lote, registrosLote, competenciasAlvo);
+
+        TreeSet<YearMonth> competenciasNecessarias = new TreeSet<>(competenciasAlvo);
+        for (Sale venda : afetadas) {
+            if (venda.getSaleDate() != null) {
+                competenciasNecessarias.add(YearMonth.from(venda.getSaleDate()));
+            }
+        }
+
+        List<Sale> vendasReferencia;
+        if (competenciasNecessarias.isEmpty()) {
+            vendasReferencia = List.of();
+        } else {
+            LocalDate inicioRef = competenciasNecessarias.first().atDay(1);
+            LocalDate fimRef = competenciasNecessarias.last().atEndOfMonth();
+            vendasReferencia = vendas.findVendasPorPeriodoComRelacionamentos(inicioRef, fimRef).stream()
+                    .filter(s -> s.getSaleDate() != null && competenciasNecessarias.contains(YearMonth.from(s.getSaleDate())))
+                    .toList();
+        }
+
+        Map<UUID, Registration> matriculasReferenciaMap = new LinkedHashMap<>();
+        for (Registration r : registrosLote) {
+            if (r != null && r.getId() != null) matriculasReferenciaMap.put(r.getId(), r);
+        }
+        for (Sale s : vendasReferencia) {
+            if (s.getRegistration() != null && s.getRegistration().getId() != null) {
+                matriculasReferenciaMap.putIfAbsent(s.getRegistration().getId(), s.getRegistration());
+            }
+        }
+
+        String versaoBases = versaoBases(vendasReferencia, new ArrayList<>(matriculasReferenciaMap.values()));
         List<AlertaEstatistico> novos = new ArrayList<>();
 
         if ("HR".equalsIgnoreCase(lote.getTipoBase())) {
-            Set<UUID> comVendas = afetadas.stream().map(Sale::getRegistration).filter(Objects::nonNull)
-                    .map(Registration::getId).collect(Collectors.toSet());
-            registrosLote.stream().filter(r -> !comVendas.contains(r.getId()))
-                    .forEach(r -> novos.add(alertaSemVendasRh(lote, r, versaoBases)));
+            if (competenciasAlvo.isEmpty()) {
+                Set<UUID> comVendas = afetadas.stream().map(Sale::getRegistration).filter(Objects::nonNull)
+                        .map(Registration::getId).collect(Collectors.toSet());
+                registrosLote.stream().filter(r -> !comVendas.contains(r.getId()))
+                        .forEach(r -> novos.add(alertaSemVendasRh(lote, r, null, versaoBases)));
+            } else {
+                for (YearMonth comp : competenciasAlvo) {
+                    Set<UUID> comVendasNaComp = afetadas.stream()
+                            .filter(s -> s.getSaleDate() != null && comp.equals(YearMonth.from(s.getSaleDate())))
+                            .map(Sale::getRegistration).filter(Objects::nonNull)
+                            .map(Registration::getId).collect(Collectors.toSet());
+                    registrosLote.stream().filter(r -> !comVendasNaComp.contains(r.getId()))
+                            .forEach(r -> novos.add(alertaSemVendasRh(lote, r, comp, versaoBases)));
+                }
+            }
         }
-        Map<String, List<Sale>> grupos = todasVendas.stream().collect(Collectors.groupingBy(this::grupo));
+        Map<String, List<Sale>> grupos = vendasReferencia.stream().collect(Collectors.groupingBy(this::grupo));
         for (Sale venda : afetadas) {
             List<Sale> amostra = grupos.getOrDefault(grupo(venda), List.of());
             List<Sale> referencias = amostra.stream().filter(s -> !Objects.equals(s.getId(), venda.getId())).toList();
@@ -133,21 +282,130 @@ public class AlertaEstatisticoService {
                 salvos.stream().anyMatch(a -> a.getTipo() != TipoAlertaEstatistico.OUTLIER_VENDA));
     }
 
-    private List<Sale> vendasAfetadas(LotePreparacao lote) {
-        List<HistoricoVersaoRegistro> historico = historicos.findAllByLotePreparacaoId(lote.getId());
-        if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
-            List<UUID> ids = historico.stream().map(HistoricoVersaoRegistro::getRegistroId).distinct().toList();
-            return ids.isEmpty() ? vendas.findByIdLoteUltimaAlteracao(idLote(lote)) : vendas.findAllById(ids);
+    private List<YearMonth> resolverCompetenciasAnalise(LotePreparacao lote) {
+        if (lote.getCompetencia() != null && !lote.getCompetencia().isBlank()) {
+            return List.of(YearMonth.parse(lote.getCompetencia().trim()));
         }
-        List<Registration> regs = registrosAfetados(lote);
-        return regs.isEmpty() ? List.of() : vendas.findByRegistrationIdIn(regs.stream().map(Registration::getId).toList());
+        if ("HR".equalsIgnoreCase(lote.getTipoBase()) && lote.getCampanha() != null) {
+            Campanha campanha = lote.getCampanha();
+            TreeSet<YearMonth> competenciasAnexadas = new TreeSet<>();
+            if (anexosCampanha != null && campanha.getId() != null) {
+                List<CampanhaAnexoBase> anexosVendas = anexosCampanha
+                        .findByCampanhaIdAndTipoBaseAndDesanexadoEmIsNull(campanha.getId(), "SALES");
+                for (CampanhaAnexoBase anexo : anexosVendas) {
+                    if (anexo.getCompetencia() != null && anexo.getCompetencia().matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                        competenciasAnexadas.add(YearMonth.parse(anexo.getCompetencia()));
+                    }
+                }
+            }
+            if (!competenciasAnexadas.isEmpty()) {
+                return new ArrayList<>(competenciasAnexadas);
+            }
+            LocalDate dataInicio;
+            if (campanha.getVersaoVigente() != null && campanha.getVersaoVigente().getDataInicio() != null) {
+                dataInicio = campanha.getVersaoVigente().getDataInicio();
+            } else if (campanha.getVersaoProposta() != null && campanha.getVersaoProposta().getDataInicio() != null) {
+                dataInicio = campanha.getVersaoProposta().getDataInicio();
+            } else {
+                dataInicio = campanha.getDataInicio();
+            }
+            if (dataInicio != null) {
+                return List.of(YearMonth.from(dataInicio));
+            }
+        }
+        return List.of();
+    }
+
+    private List<Sale> vendasAfetadas(LotePreparacao lote, List<Registration> regs, List<YearMonth> competenciasAlvo) {
+        if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
+            List<HistoricoVersaoRegistro> historico = historicos.findAllByLotePreparacaoId(lote.getId());
+            List<UUID> ids = historico.stream().map(HistoricoVersaoRegistro::getRegistroId).distinct().toList();
+            if (!ids.isEmpty()) {
+                return buscarVendasPorIdsEmLotes(ids);
+            }
+            List<Sale> porLote = vendas.findByIdLoteUltimaAlteracao(idLote(lote));
+            if (!porLote.isEmpty() || competenciasAlvo.isEmpty()) {
+                return porLote;
+            }
+            LocalDate inicio = competenciasAlvo.get(0).atDay(1);
+            LocalDate fim = competenciasAlvo.get(competenciasAlvo.size() - 1).atEndOfMonth();
+            return vendas.findVendasPorPeriodoComRelacionamentos(inicio, fim);
+        }
+        if (regs.isEmpty()) return List.of();
+        List<UUID> regIds = regs.stream().map(Registration::getId).filter(Objects::nonNull).distinct().toList();
+        if (regIds.isEmpty()) return List.of();
+        if (competenciasAlvo.isEmpty()) {
+            return buscarVendasPorRegistrationsEmLotes(regIds, null, null);
+        }
+        LocalDate inicio = competenciasAlvo.get(0).atDay(1);
+        LocalDate fim = competenciasAlvo.get(competenciasAlvo.size() - 1).atEndOfMonth();
+        Set<YearMonth> alvoSet = new HashSet<>(competenciasAlvo);
+        return buscarVendasPorRegistrationsEmLotes(regIds, inicio, fim).stream()
+                .filter(s -> s.getSaleDate() != null && alvoSet.contains(YearMonth.from(s.getSaleDate())))
+                .toList();
+    }
+
+    private List<Sale> buscarVendasPorIdsEmLotes(List<UUID> ids) {
+        List<Sale> resultado = new ArrayList<>(ids.size());
+        for (int i = 0; i < ids.size(); i += TAMANHO_LOTE_IN) {
+            List<UUID> sub = ids.subList(i, Math.min(i + TAMANHO_LOTE_IN, ids.size()));
+            resultado.addAll(vendas.findByIdIn(sub));
+        }
+        return resultado;
+    }
+
+    private List<Sale> buscarVendasPorRegistrationsEmLotes(List<UUID> regIds, LocalDate inicio, LocalDate fim) {
+        List<Sale> resultado = new ArrayList<>();
+        for (int i = 0; i < regIds.size(); i += TAMANHO_LOTE_IN) {
+            List<UUID> sub = regIds.subList(i, Math.min(i + TAMANHO_LOTE_IN, regIds.size()));
+            if (inicio != null && fim != null) {
+                resultado.addAll(vendas.findByRegistrationIdInAndSaleDateBetween(sub, inicio, fim));
+            } else {
+                resultado.addAll(vendas.findByRegistrationIdIn(sub));
+            }
+        }
+        return resultado;
     }
 
     private List<Registration> registrosAfetados(LotePreparacao lote) {
         if (!"HR".equalsIgnoreCase(lote.getTipoBase())) return List.of();
-        List<UUID> ids = historicos.findAllByLotePreparacaoId(lote.getId()).stream()
-                .map(HistoricoVersaoRegistro::getRegistroId).distinct().toList();
-        return ids.isEmpty() ? matriculas.findByIdLoteUltimaAlteracao(idLote(lote)) : matriculas.findAllById(ids);
+        Map<UUID, Registration> porId = new LinkedHashMap<>();
+
+        List<UUID> idsHistorico = historicos.findAllByLotePreparacaoId(lote.getId()).stream()
+                .map(HistoricoVersaoRegistro::getRegistroId).filter(Objects::nonNull).distinct().toList();
+        if (!idsHistorico.isEmpty()) {
+            matriculas.findAllById(idsHistorico).forEach(r -> porId.put(r.getId(), r));
+        }
+
+        if (linhasPreparacao != null) {
+            List<LinhaPreparacao> linhasAtivas = linhasPreparacao.findByLotePreparacaoIdOrderByNumeroLinhaAsc(lote.getId())
+                    .stream().filter(l -> !l.isIgnorarNaEfetivacao()).toList();
+            List<UUID> idsAlvo = linhasAtivas.stream().map(LinhaPreparacao::getRegistroAlvoId)
+                    .filter(Objects::nonNull).filter(id -> !porId.containsKey(id)).distinct().toList();
+            for (int i = 0; i < idsAlvo.size(); i += TAMANHO_LOTE_IN) {
+                matriculas.findAllById(idsAlvo.subList(i, Math.min(i + TAMANHO_LOTE_IN, idsAlvo.size())))
+                        .forEach(r -> porId.putIfAbsent(r.getId(), r));
+            }
+            Set<String> matsFaltantes = linhasAtivas.stream()
+                    .filter(l -> l.getRegistroAlvoId() == null && l.getMatricula() != null && !l.getMatricula().isBlank())
+                    .map(l -> l.getMatricula().trim())
+                    .collect(Collectors.toSet());
+            if (!matsFaltantes.isEmpty()) {
+                List<String> matsList = new ArrayList<>(matsFaltantes);
+                for (int i = 0; i < matsList.size(); i += TAMANHO_LOTE_IN) {
+                    matriculas.findByRegistrationIn(matsList.subList(i, Math.min(i + TAMANHO_LOTE_IN, matsList.size())))
+                            .forEach(r -> porId.putIfAbsent(r.getId(), r));
+                }
+            }
+        }
+
+        if (porId.isEmpty()) {
+            String loteIdStr = idLote(lote);
+            if (loteIdStr != null) {
+                matriculas.findByIdLoteUltimaAlteracao(loteIdStr).forEach(r -> porId.putIfAbsent(r.getId(), r));
+            }
+        }
+        return new ArrayList<>(porId.values());
     }
 
     private String idLote(LotePreparacao lote) {
@@ -162,17 +420,18 @@ public class AlertaEstatisticoService {
         return criar(lote, venda, TipoAlertaEstatistico.OUTLIER_VENDA, n, e.media(), e.desvio(), z, base);
     }
 
-    private AlertaEstatistico alertaSemVendasRh(LotePreparacao lote, Registration registro, String base) {
+    private AlertaEstatistico alertaSemVendasRh(LotePreparacao lote, Registration registro, YearMonth competencia, String base) {
         AlertaEstatistico alerta = new AlertaEstatistico();
         alerta.setLotePreparacao(lote);
         alerta.setMatricula(registro.getRegistration());
-        alerta.setDataReferencia(dataReferenciaLote(lote));
+        alerta.setDataReferencia(competencia != null ? competencia.atDay(1) : dataReferenciaLote(lote));
         alerta.setTipo(TipoAlertaEstatistico.SEM_VENDAS_PARA_RH);
         alerta.setMetodo("Z_SCORE_LEAVE_ONE_OUT_V2");
         alerta.setGrupoComparavel("SEM_VENDAS_ASSOCIADAS");
         alerta.setTamanhoAmostra(0);
         alerta.setVersaoBases(base);
-        alerta.setAssinatura(hash(lote.getId() + "|" + registro.getId() + "|SEM_VENDAS|" + base));
+        String compChave = competencia != null ? competencia.toString() : "GLOBAL";
+        alerta.setAssinatura(hash(lote.getId() + "|" + registro.getId() + "|" + compChave + "|SEM_VENDAS|" + base));
         return alerta;
     }
 
@@ -184,26 +443,27 @@ public class AlertaEstatisticoService {
     private AlertaEstatistico criar(LotePreparacao lote, Sale venda, TipoAlertaEstatistico tipo, int n,
             BigDecimal media, BigDecimal desvio, BigDecimal score, String base) {
         AlertaEstatistico alerta = new AlertaEstatistico();
+        String grupoComparavel = grupo(venda);
         alerta.setLotePreparacao(lote);
         alerta.setVenda(venda);
         alerta.setMatricula(venda.getRegistration().getRegistration());
         alerta.setDataReferencia(venda.getSaleDate());
         alerta.setTipo(tipo);
         alerta.setMetodo("Z_SCORE_LEAVE_ONE_OUT_V2");
-        alerta.setGrupoComparavel(grupo(venda));
+        alerta.setGrupoComparavel(grupoComparavel);
         alerta.setTamanhoAmostra(n);
         alerta.setValorObservado(venda.getValue());
         alerta.setMediaGrupo(media);
         alerta.setDesvioPadrao(desvio);
         alerta.setScore(score);
         alerta.setVersaoBases(base);
-        alerta.setAssinatura(hash(lote.getId() + "|" + venda.getId() + "|" + tipo + "|" + base));
+        alerta.setAssinatura(hash(lote.getId() + "|" + venda.getId() + "|" + tipo + "|" + grupoComparavel + "|" + base));
         return alerta;
     }
 
     private String grupo(Sale venda) {
-        return YearMonth.from(venda.getSaleDate()) + "|loja=" + venda.getStore().getId()
-                + "|cargo=" + venda.getRegistration().getPosition().getId() + "|marca=" + venda.getBrand().getId();
+        return YearMonth.from(venda.getSaleDate()) + "|loja=" + venda.getStore().getCode()
+                + "|cargo=" + venda.getRegistration().getPosition().getCode() + "|marca=" + venda.getBrand().getCode();
     }
 
     private Estatistica estatistica(List<Sale> referencias) {
@@ -234,7 +494,8 @@ public class AlertaEstatisticoService {
     }
 
     private String chaveRegistro(AlertaEstatistico alerta) {
-        return alerta.getVenda() != null ? "V:" + alerta.getVenda().getId() : "R:" + alerta.getMatricula();
+        if (alerta.getVenda() != null) return "V:" + alerta.getVenda().getId();
+        return "R:" + alerta.getMatricula() + ":" + (alerta.getDataReferencia() != null ? alerta.getDataReferencia() : "SEM_DATA");
     }
 
     private void validarCompetencia(String competencia) {

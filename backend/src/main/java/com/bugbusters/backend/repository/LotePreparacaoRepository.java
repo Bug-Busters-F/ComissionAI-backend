@@ -27,14 +27,16 @@ public interface LotePreparacaoRepository extends JpaRepository<LotePreparacao, 
         return findAll((root, query, cb) -> {
             List<Predicate> filters = new ArrayList<>();
             filters.add(cb.equal(root.get("campanha").get("id"), campanhaId));
-            if (tipoBase != null) filters.add(cb.equal(cb.upper(root.get("tipoBase")), tipoBase.toUpperCase(Locale.ROOT)));
-            if (competencia != null) filters.add(cb.equal(root.get("competencia"), competencia));
-            if (status != null) filters.add(cb.equal(cb.upper(root.get("status")), status.toUpperCase(Locale.ROOT)));
+            if (tipoBase != null && !tipoBase.isBlank()) filters.add(cb.equal(cb.upper(root.get("tipoBase")), tipoBase.trim().toUpperCase(Locale.ROOT)));
+            if (competencia != null && !competencia.isBlank()) filters.add(cb.equal(root.get("competencia"), competencia.trim()));
+            if (status != null && !status.isBlank()) filters.add(cb.equal(cb.upper(root.get("status")), status.trim().toUpperCase(Locale.ROOT)));
             return cb.and(filters.toArray(Predicate[]::new));
         }, Sort.by(Sort.Direction.DESC, "criadoEm"));
     }
 
     Optional<LotePreparacao> findByIdAndCampanhaId(UUID id, Long campanhaId);
+
+    Optional<LotePreparacao> findFirstByEnvioArquivoEfetivadoIdOrderByEfetivadoEmDesc(Long envioArquivoEfetivadoId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT l FROM LotePreparacao l WHERE l.id = :id AND l.campanha.id = :campanhaId")
