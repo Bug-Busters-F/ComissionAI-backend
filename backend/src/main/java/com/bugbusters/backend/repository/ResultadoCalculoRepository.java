@@ -34,6 +34,8 @@ public interface ResultadoCalculoRepository extends JpaRepository<ResultadoCalcu
      */
     Optional<ResultadoCalculo> findByProtocoloCalculo(UUID protocoloCalculo);
 
+    List<ResultadoCalculo> findByProtocoloCalculoIn(Collection<UUID> protocolosCalculo);
+
     /**
      * Lista todos os cálculos associados a uma matrícula.
      */

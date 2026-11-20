@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.programapython.AprovarProgramaPythonRequest;
 import com.bugbusters.backend.dto.programapython.AtualizarProgramaPythonRequest;
 import com.bugbusters.backend.dto.programapython.ProgramaPythonResponse;
@@ -208,15 +209,18 @@ public class CampanhaProgramaPythonService {
         }
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    aprovadoPor,
-                    TipoAcaoAuditoria.APROVACAO_PROGRAMA_PYTHON,
-                    TipoEntidadeAuditoria.PROGRAMA_PYTHON,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    String.format("Programa Python v%d homologado e aprovado com checksum %s", programa.getVersaoPrograma(), programa.getChecksumSha256()),
-                    String.format("{\"checksum\": \"%s\", \"versaoPrograma\": %d}", programa.getChecksumSha256(), programa.getVersaoPrograma())
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(aprovadoPor)
+                    .tipoAcao(TipoAcaoAuditoria.APROVACAO_PROGRAMA_PYTHON)
+                    .tipoEntidade(TipoEntidadeAuditoria.PROGRAMA_PYTHON)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .descricao(String.format("Programa Python v%d homologado e aprovado com checksum %s", programa.getVersaoPrograma(), programa.getChecksumSha256()))
+                    .dadosNovos(String.format("{\"checksum\": \"%s\", \"versaoPrograma\": %d}", programa.getChecksumSha256(), programa.getVersaoPrograma()))
+                    .sucesso(true));
         }
 
         log.info("Programa Python (versão {}) da campanha {} versão {} aprovado por {}.",
@@ -281,15 +285,18 @@ public class CampanhaProgramaPythonService {
         }
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    rejeitadoPor,
-                    TipoAcaoAuditoria.REJEICAO_PROGRAMA_PYTHON,
-                    TipoEntidadeAuditoria.PROGRAMA_PYTHON,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    "Programa Python rejeitado: " + request.justificativa(),
-                    String.format("{\"motivo\": \"%s\"}", request.justificativa())
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(rejeitadoPor)
+                    .tipoAcao(TipoAcaoAuditoria.REJEICAO_PROGRAMA_PYTHON)
+                    .tipoEntidade(TipoEntidadeAuditoria.PROGRAMA_PYTHON)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .descricao("Programa Python rejeitado: " + request.justificativa())
+                    .dadosNovos(String.format("{\"motivo\": \"%s\"}", request.justificativa()))
+                    .sucesso(true));
         }
 
         log.info("Programa Python (versão {}) da campanha {} versão {} rejeitado por {}. Motivo: {}",

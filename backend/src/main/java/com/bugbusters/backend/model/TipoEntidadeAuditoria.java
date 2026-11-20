@@ -8,9 +8,14 @@ public enum TipoEntidadeAuditoria {
     PENDENCIA,
     SIMULACAO,
     APURACAO,
+    CALCULO,
+    EXECUCAO_CALCULO,
     FECHAMENTO,
     RELATORIO,
     BASE_CADASTRO,
+    LOTE_IMPORTACAO,
+    LOTE_PREPARACAO,
+    ARQUIVO_IMPORTACAO,
     GERAL
 }
 

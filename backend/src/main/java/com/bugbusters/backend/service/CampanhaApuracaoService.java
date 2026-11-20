@@ -4,6 +4,7 @@ import com.bugbusters.backend.basecomiss.BaseComiss;
 import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.dto.apuracao.*;
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.calculo.CalculoImpedimentoDTO;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
@@ -452,17 +453,23 @@ public class CampanhaApuracaoService {
         }
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    executadoPor,
-                    TipoAcaoAuditoria.CALCULO_DEFINITIVO_CAMPANHA,
-                    TipoEntidadeAuditoria.APURACAO,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    String.format("Apuração definitiva executada com sucesso. Protocolo: %s, Total Vendas: %d, Sucessos: %d, Impedimentos: %d",
-                            apuracao.getProtocolo(), vendasCampanha.size(), resultadosParaSalvar.size(), impedimentos.size()),
-                    String.format("{\"protocolo\": \"%s\", \"totalVendas\": %d, \"totalComissao\": \"%s\", \"motor\": \"PYTHON_SANDBOX\"}",
-                            apuracao.getProtocolo(), vendasCampanha.size(), totalComissao)
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(executadoPor)
+                    .tipoAcao(TipoAcaoAuditoria.CALCULO_DEFINITIVO_CAMPANHA)
+                    .tipoEntidade(TipoEntidadeAuditoria.APURACAO)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .apuracaoCampanhaId(apuracao.getId())
+                    .protocoloCalculo(apuracao.getProtocolo())
+                    .competencia(apuracao.getCompetencia())
+                    .descricao(String.format("Apuração definitiva executada com sucesso. Protocolo: %s, Total Vendas: %d, Sucessos: %d, Impedimentos: %d",
+                            apuracao.getProtocolo(), vendasCampanha.size(), resultadosParaSalvar.size(), impedimentos.size()))
+                    .dadosNovos(String.format("{\"protocolo\": \"%s\", \"totalVendas\": %d, \"totalComissao\": \"%s\", \"motor\": \"PYTHON_SANDBOX\"}",
+                            apuracao.getProtocolo(), vendasCampanha.size(), totalComissao))
+                    .sucesso(true));
         }
 
         log.info("Cálculo definitivo concluído com sucesso para campanha {} versão {}. Protocolo: {}, Sucessos: {}, Impedimentos: {}",

@@ -62,6 +62,54 @@ public class AuditoriaGeral {
     @Column(name = "detalhe_erro", columnDefinition = "TEXT")
     private String detalheErro;
 
+    @Column(name = "campanha_id")
+    private Long campanhaId;
+
+    @Column(name = "campanha_versao_id")
+    private Long campanhaVersaoId;
+
+    @Column(name = "campanha_titulo", length = 255)
+    private String campanhaTitulo;
+
+    @Column(name = "envio_arquivo_id")
+    private Long envioArquivoId;
+
+    @Column(name = "arquivo_importacao_id")
+    private UUID arquivoImportacaoId;
+
+    @Column(name = "lote_preparacao_id")
+    private UUID lotePreparacaoId;
+
+    @Column(name = "id_lote", length = 100)
+    private String idLote;
+
+    @Column(name = "report_id")
+    private Long reportId;
+
+    @Column(name = "nome_arquivo", length = 255)
+    private String nomeArquivo;
+
+    @Column(name = "simulacao_id")
+    private UUID simulacaoId;
+
+    @Column(name = "apuracao_campanha_id")
+    private UUID apuracaoCampanhaId;
+
+    @Column(name = "execucao_calculo_id")
+    private UUID execucaoCalculoId;
+
+    @Column(name = "fechamento_id")
+    private UUID fechamentoId;
+
+    @Column(name = "protocolo_calculo")
+    private UUID protocoloCalculo;
+
+    @Column(name = "log_calculo_id")
+    private UUID logCalculoId;
+
+    @Column(name = "competencia", length = 7)
+    private String competencia;
+
     public AuditoriaGeral() {
         this.protocolo = UUID.randomUUID();
         this.dataHora = OffsetDateTime.now();
@@ -225,5 +273,53 @@ public class AuditoriaGeral {
     public void setDetalheErro(String detalheErro) {
         this.detalheErro = detalheErro;
     }
+
+    public Long getCampanhaId() { return campanhaId; }
+    public void setCampanhaId(Long campanhaId) { this.campanhaId = campanhaId; }
+
+    public Long getCampanhaVersaoId() { return campanhaVersaoId; }
+    public void setCampanhaVersaoId(Long campanhaVersaoId) { this.campanhaVersaoId = campanhaVersaoId; }
+
+    public String getCampanhaTitulo() { return campanhaTitulo; }
+    public void setCampanhaTitulo(String campanhaTitulo) { this.campanhaTitulo = campanhaTitulo; }
+
+    public Long getEnvioArquivoId() { return envioArquivoId; }
+    public void setEnvioArquivoId(Long envioArquivoId) { this.envioArquivoId = envioArquivoId; }
+
+    public UUID getArquivoImportacaoId() { return arquivoImportacaoId; }
+    public void setArquivoImportacaoId(UUID arquivoImportacaoId) { this.arquivoImportacaoId = arquivoImportacaoId; }
+
+    public UUID getLotePreparacaoId() { return lotePreparacaoId; }
+    public void setLotePreparacaoId(UUID lotePreparacaoId) { this.lotePreparacaoId = lotePreparacaoId; }
+
+    public String getIdLote() { return idLote; }
+    public void setIdLote(String idLote) { this.idLote = idLote; }
+
+    public Long getReportId() { return reportId; }
+    public void setReportId(Long reportId) { this.reportId = reportId; }
+
+    public String getNomeArquivo() { return nomeArquivo; }
+    public void setNomeArquivo(String nomeArquivo) { this.nomeArquivo = nomeArquivo; }
+
+    public UUID getSimulacaoId() { return simulacaoId; }
+    public void setSimulacaoId(UUID simulacaoId) { this.simulacaoId = simulacaoId; }
+
+    public UUID getApuracaoCampanhaId() { return apuracaoCampanhaId; }
+    public void setApuracaoCampanhaId(UUID apuracaoCampanhaId) { this.apuracaoCampanhaId = apuracaoCampanhaId; }
+
+    public UUID getExecucaoCalculoId() { return execucaoCalculoId; }
+    public void setExecucaoCalculoId(UUID execucaoCalculoId) { this.execucaoCalculoId = execucaoCalculoId; }
+
+    public UUID getFechamentoId() { return fechamentoId; }
+    public void setFechamentoId(UUID fechamentoId) { this.fechamentoId = fechamentoId; }
+
+    public UUID getProtocoloCalculo() { return protocoloCalculo; }
+    public void setProtocoloCalculo(UUID protocoloCalculo) { this.protocoloCalculo = protocoloCalculo; }
+
+    public UUID getLogCalculoId() { return logCalculoId; }
+    public void setLogCalculoId(UUID logCalculoId) { this.logCalculoId = logCalculoId; }
+
+    public String getCompetencia() { return competencia; }
+    public void setCompetencia(String competencia) { this.competencia = competencia; }
 }
 

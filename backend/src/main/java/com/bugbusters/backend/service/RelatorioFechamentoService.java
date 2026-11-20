@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.relatorio.*;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
@@ -25,6 +26,7 @@ import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.Cola
 import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.EquipeGrupoRow;
 import com.bugbusters.backend.repository.RelatorioFechamentoQueryRepository.TotaisGeraisRow;
 import com.bugbusters.backend.repository.ResultadoCalculoRepository;
+import com.bugbusters.backend.auth.Usuario;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.sales.SaleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,7 +34,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -269,18 +272,26 @@ public class RelatorioFechamentoService {
             }
 
             if (auditoriaService != null) {
-                String usuario = relatorio.resumo() != null && relatorio.resumo().executadoPor() != null
-                        ? relatorio.resumo().executadoPor() : "SISTEMA";
-                auditoriaService.registrarAcao(
-                        usuario,
-                        TipoAcaoAuditoria.EXPORTACAO_RELATORIO,
-                        TipoEntidadeAuditoria.RELATORIO,
-                        relatorio.resumo() != null && relatorio.resumo().protocolo() != null
-                                ? relatorio.resumo().protocolo().toString() : "GERAL",
-                        null,
-                        String.format("Exportação de relatório CSV no modo %s", modo),
-                        String.format("{\"modo\": \"%s\", \"delimitador\": \"%s\"}", modo, delim)
-                );
+                UUID proto = relatorio.protocolo() != null ? relatorio.protocolo()
+                        : (relatorio.resumo() != null ? relatorio.resumo().protocolo() : null);
+                String comp = relatorio.competencia() != null ? relatorio.competencia()
+                        : (relatorio.resumo() != null ? relatorio.resumo().competencia() : null);
+                Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+                String usuarioExportador = (auth != null && auth.getPrincipal() instanceof Usuario u
+                        && u.getEmail() != null && !u.getEmail().isBlank())
+                        ? u.getEmail().trim()
+                        : relatorio.executadoPor();
+                auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                        .usuario(usuarioExportador)
+                        .tipoAcao(TipoAcaoAuditoria.EXPORTACAO_RELATORIO)
+                        .tipoEntidade(TipoEntidadeAuditoria.RELATORIO)
+                        .entidadeId(proto != null ? proto.toString() : "GERAL")
+                        .fechamentoId(relatorio.fechamentoId())
+                        .protocoloCalculo(proto)
+                        .competencia(comp)
+                        .descricao(String.format("Exportação de relatório CSV no modo %s", modo))
+                        .dadosNovos(String.format("{\"modo\": \"%s\", \"delimitador\": \"%s\"}", modo, delim))
+                        .sucesso(true));
             }
 
             return baos.toByteArray();

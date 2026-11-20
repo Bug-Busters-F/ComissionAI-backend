@@ -45,5 +45,14 @@ public interface AuditoriaGeralRepository extends JpaRepository<AuditoriaGeral, 
 
     @org.springframework.data.jpa.repository.Query("SELECT a.tipoEntidade, COUNT(a) FROM AuditoriaGeral a GROUP BY a.tipoEntidade")
     List<Object[]> contarPorTipoEntidade();
+
+    @org.springframework.data.jpa.repository.Query("""
+        SELECT LOWER(a.usuario), a.perfilUsuario, COUNT(a),
+               SUM(CASE WHEN a.sucesso = true THEN 1 ELSE 0 END),
+               MAX(a.dataHora)
+        FROM AuditoriaGeral a
+        GROUP BY LOWER(a.usuario), a.perfilUsuario
+    """)
+    List<Object[]> agruparAtividadePorUsuarioEPerfil();
 }
 

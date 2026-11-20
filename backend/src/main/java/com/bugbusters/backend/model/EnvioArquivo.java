@@ -61,6 +61,18 @@ public class EnvioArquivo {
     @Column(name = "excluido_por", length = 100)
     private String excluidoPor;
 
+    @Column(name = "motivo_exclusao", columnDefinition = "TEXT")
+    private String motivoExclusao;
+
+    @Column(name = "perfil_exclusao", length = 50)
+    private String perfilExclusao;
+
+    @Column(name = "criado_por", nullable = false, length = 150)
+    private String criadoPor = "SISTEMA";
+
+    @Column(name = "perfil_criador", length = 50)
+    private String perfilCriador;
+
     @Column(name = "arquivo_importacao_id")
     private java.util.UUID arquivoImportacaoId;
 
@@ -129,6 +141,18 @@ public class EnvioArquivo {
 
     public String getExcluidoPor() { return excluidoPor; }
     public void setExcluidoPor(String excluidoPor) { this.excluidoPor = excluidoPor; }
+
+    public String getMotivoExclusao() { return motivoExclusao; }
+    public void setMotivoExclusao(String motivoExclusao) { this.motivoExclusao = motivoExclusao; }
+
+    public String getPerfilExclusao() { return perfilExclusao; }
+    public void setPerfilExclusao(String perfilExclusao) { this.perfilExclusao = perfilExclusao; }
+
+    public String getCriadoPor() { return criadoPor; }
+    public void setCriadoPor(String criadoPor) { this.criadoPor = (criadoPor != null && !criadoPor.isBlank()) ? criadoPor.trim() : "SISTEMA"; }
+
+    public String getPerfilCriador() { return perfilCriador; }
+    public void setPerfilCriador(String perfilCriador) { this.perfilCriador = perfilCriador; }
 
     public java.util.UUID getArquivoImportacaoId() { return arquivoImportacaoId; }
     public void setArquivoImportacaoId(java.util.UUID arquivoImportacaoId) { this.arquivoImportacaoId = arquivoImportacaoId; }

@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.bugbusters.backend.basecomiss.BaseComiss;
 import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
 import com.bugbusters.backend.dto.referencia.RecortePublicoRequest;
@@ -33,6 +34,8 @@ import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.SimulacaoVenda;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
+import com.bugbusters.backend.model.TipoAcaoAuditoria;
+import com.bugbusters.backend.model.TipoEntidadeAuditoria;
 import com.bugbusters.backend.auth.Usuario;
 import org.springframework.security.core.context.SecurityContextHolder;
 import com.bugbusters.backend.position.Position;
@@ -89,6 +92,9 @@ public class SimulacaoCenariosService {
     private final CampanhaSimulacaoValidator campanhaSimulacaoValidator;
     private final CampanhaService campanhaService;
     private final ObjectMapper objectMapper;
+
+    @Autowired(required = false)
+    private AuditoriaGeralService auditoriaService;
 
     @Autowired
     public SimulacaoCenariosService(
@@ -400,6 +406,29 @@ public class SimulacaoCenariosService {
             simulacaoVendaRepository.saveAll(itens);
         }
 
+        if (motorExterno == null && auditoriaService != null) {
+            try {
+                Campanha campSim = simulacao.getCampanha();
+                var cvSim = simulacao.getCampanhaVersao();
+                auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                        .tipoAcao(TipoAcaoAuditoria.EXECUCAO_SIMULACAO)
+                        .tipoEntidade(TipoEntidadeAuditoria.SIMULACAO)
+                        .entidadeId(simulacao.getId().toString())
+                        .versaoEntidade(cvSim != null ? cvSim.getNumero() : null)
+                        .campanhaId(campSim != null ? campSim.getId() : null)
+                        .campanhaVersaoId(cvSim != null ? cvSim.getId() : null)
+                        .campanhaTitulo(resp.tituloCampanha())
+                        .simulacaoId(simulacao.getId())
+                        .protocoloCalculo(simulacao.getProtocolo())
+                        .competencia(resp.competencia())
+                        .descricao(String.format("Simulação executada (%s) com protocolo %s. Vendas: %d, Total Recortado: R$ %s",
+                                resp.tituloCampanha(), simulacao.getProtocolo(), resp.totalVendasRecortadas(), resp.valorTotalRecortado()))
+                        .dadosNovos(String.format("{\"protocolo\":\"%s\",\"competencia\":\"%s\",\"vendas\":%d}",
+                                simulacao.getProtocolo(), resp.competencia(), resp.totalVendasRecortadas()))
+                        .sucesso(true));
+            } catch (Exception ignored) {}
+        }
+
         return new SimulacaoCenariosResponse(
                 simulacao.getId(),
                 simulacao.getProtocolo(),
@@ -525,6 +554,29 @@ public class SimulacaoCenariosService {
             }
             // O aceite não publica. A ativação exige a confirmação final após a revisão.
             campanhaRepository.save(campanha);
+        }
+
+        if (auditoriaService != null) {
+            try {
+                var cvAceite = campanha != null ? campanha.versaoParaRevisao() : salva.getCampanhaVersao();
+                auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                        .usuario(salva.getAceitoPor())
+                        .tipoAcao(TipoAcaoAuditoria.ACEITE_SIMULACAO)
+                        .tipoEntidade(TipoEntidadeAuditoria.SIMULACAO)
+                        .entidadeId(salva.getId().toString())
+                        .versaoEntidade(cvAceite != null ? cvAceite.getNumero() : null)
+                        .campanhaId(campanha != null ? campanha.getId() : null)
+                        .campanhaVersaoId(cvAceite != null ? cvAceite.getId() : null)
+                        .campanhaTitulo(campanha != null ? campanha.tituloParaRevisao() : salva.getTituloCampanha())
+                        .simulacaoId(salva.getId())
+                        .protocoloCalculo(salva.getProtocolo())
+                        .competencia(salva.getCompetencia())
+                        .descricao(String.format("Aceite formal da simulação %s registrado.", salva.getProtocolo()))
+                        .dadosNovos(String.format("{\"protocolo\":\"%s\",\"status\":\"ACEITA\",\"motivo\":\"%s\"}",
+                                salva.getProtocolo(),
+                                salva.getMotivoAceite() != null ? salva.getMotivoAceite().replace("\"", "'") : ""))
+                        .sucesso(true));
+            } catch (Exception ignored) {}
         }
 
         return new AceiteSimulacaoResponse(

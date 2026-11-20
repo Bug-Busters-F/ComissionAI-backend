@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.campanha.PendenciaRastreabilidadeDTO;
 import com.bugbusters.backend.dto.campanha.RastreabilidadeRegraDTO;
 import com.bugbusters.backend.dto.interpretador.proposta.SeveridadePendencia;
@@ -125,17 +126,21 @@ public class CampanhaPendenciaService {
         reavaliarCompletudeRegras(versao);
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    aceitoPor,
-                    TipoAcaoAuditoria.ACEITE_PENDENCIA,
-                    TipoEntidadeAuditoria.PENDENCIA,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    String.format("Aceite rastreável concedido para pendência '%s' (%s). Motivo: %s",
-                            request.codigo(), request.severidade(), request.motivo()),
-                    String.format("{\"codigoPendencia\": \"%s\", \"severidade\": \"%s\", \"motivo\": \"%s\"}",
-                            request.codigo(), request.severidade(), request.motivo())
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(aceitoPor)
+                    .tipoAcao(TipoAcaoAuditoria.ACEITE_PENDENCIA)
+                    .tipoEntidade(TipoEntidadeAuditoria.PENDENCIA)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .envioArquivoId(aceite.getEnvioArquivoId())
+                    .descricao(String.format("Aceite rastreável concedido para pendência '%s' (%s). Motivo: %s",
+                            request.codigo(), request.severidade(), request.motivo()))
+                    .dadosNovos(String.format("{\"codigoPendencia\": \"%s\", \"severidade\": \"%s\", \"motivo\": \"%s\"}",
+                            request.codigo(), request.severidade(), request.motivo()))
+                    .sucesso(true));
         }
 
         log.info("Aceite rastreável registrado para pendência '{}' (Código: {}) da campanha {} por '{}'.",
@@ -181,16 +186,20 @@ public class CampanhaPendenciaService {
         }
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    revogadoPor,
-                    TipoAcaoAuditoria.REVOGACAO_ACEITE_PENDENCIA,
-                    TipoEntidadeAuditoria.PENDENCIA,
-                    String.valueOf(campanhaId),
-                    versao != null ? versao.getNumero() : null,
-                    String.format("Aceite da pendência '%s' revogado. Motivo: %s", aceite.getCodigo(), request.motivo()),
-                    String.format("{\"aceiteId\": %d, \"codigoPendencia\": \"%s\", \"motivo\": \"%s\"}",
-                            aceite.getId(), aceite.getCodigo(), request.motivo())
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(revogadoPor)
+                    .tipoAcao(TipoAcaoAuditoria.REVOGACAO_ACEITE_PENDENCIA)
+                    .tipoEntidade(TipoEntidadeAuditoria.PENDENCIA)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao != null ? versao.getNumero() : null)
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao != null ? versao.getId() : null)
+                    .campanhaTitulo(campanha.getTitulo())
+                    .envioArquivoId(aceite.getEnvioArquivoId())
+                    .descricao(String.format("Aceite da pendência '%s' revogado. Motivo: %s", aceite.getCodigo(), request.motivo()))
+                    .dadosNovos(String.format("{\"aceiteId\": %d, \"codigoPendencia\": \"%s\", \"motivo\": \"%s\"}",
+                            aceite.getId(), aceite.getCodigo(), request.motivo()))
+                    .sucesso(true));
         }
 
         log.warn("Aceite de pendência {} da campanha {} revogado por '{}'. Motivo: {}",

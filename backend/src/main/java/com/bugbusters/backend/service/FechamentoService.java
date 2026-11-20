@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoRequestDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoResponseDTO;
@@ -126,17 +127,19 @@ public class FechamentoService {
                 }
 
                 if (auditoriaService != null) {
-                    auditoriaService.registrarAcao(
-                            fechamento.getExecutadoPor(),
-                            TipoAcaoAuditoria.FECHAMENTO_COMPETENCIA,
-                            TipoEntidadeAuditoria.FECHAMENTO,
-                            competencia,
-                            null,
-                            String.format("Fechamento oficial de competência %s concluído com sucesso. Protocolo: %s, Vendas: %d",
-                                    competencia, fechamento.getProtocolo(), fechamento.getTotalVendasProcessadas()),
-                            String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"totalVendas\": %d}",
-                                    fechamento.getProtocolo(), competencia, fechamento.getTotalVendasProcessadas())
-                    );
+                    auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                            .usuario(fechamento.getExecutadoPor())
+                            .tipoAcao(TipoAcaoAuditoria.FECHAMENTO_COMPETENCIA)
+                            .tipoEntidade(TipoEntidadeAuditoria.FECHAMENTO)
+                            .entidadeId(fechamento.getId().toString())
+                            .fechamentoId(fechamento.getId())
+                            .protocoloCalculo(fechamento.getProtocolo())
+                            .competencia(competencia)
+                            .descricao(String.format("Fechamento oficial de competência %s concluído com sucesso. Protocolo: %s, Vendas: %d",
+                                    competencia, fechamento.getProtocolo(), fechamento.getTotalVendasProcessadas()))
+                            .dadosNovos(String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"totalVendas\": %d}",
+                                    fechamento.getProtocolo(), competencia, fechamento.getTotalVendasProcessadas()))
+                            .sucesso(true));
                 }
 
                 return new FechamentoResponseDTO(fechamento.getId(), fechamento.getProtocolo(), competencia,
@@ -157,6 +160,19 @@ public class FechamentoService {
                     fechamento.setMotivoFalha(ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
                     fechamento.setConcluidoEm(OffsetDateTime.now());
                     fechamentoCompetenciaRepository.save(fechamento);
+                    if (auditoriaService != null) {
+                        auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                                .usuario(fechamento.getExecutadoPor())
+                                .tipoAcao(TipoAcaoAuditoria.FECHAMENTO_COMPETENCIA)
+                                .tipoEntidade(TipoEntidadeAuditoria.FECHAMENTO)
+                                .entidadeId(fechamento.getId().toString())
+                                .fechamentoId(fechamento.getId())
+                                .protocoloCalculo(fechamento.getProtocolo())
+                                .competencia(competencia)
+                                .descricao(String.format("Falha no fechamento da competência %s.", competencia))
+                                .sucesso(false)
+                                .detalheErro(fechamento.getMotivoFalha()));
+                    }
                 }
             });
             if (ex instanceof BusinessException be) throw be;

@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.basecomiss.ReferenciaFaltanteDTO;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.cobertura.*;
@@ -19,6 +20,7 @@ import com.bugbusters.backend.service.pendencia.AceitePendenciaProvider;
 import com.bugbusters.backend.service.pendencia.StatusAceitePendenciaDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -51,6 +53,9 @@ public class CoberturaFechamentoService {
     private final FechamentoService fechamentoService;
     private final UsuarioAtualProvider usuarioAtualProvider;
     private final AceitePendenciaProvider aceitePendenciaProvider;
+
+    @Autowired(required = false)
+    private AuditoriaGeralService auditoriaService;
 
     public CoberturaFechamentoService(
             CampanhaRepository campanhaRepository,
@@ -525,6 +530,28 @@ public class CoberturaFechamentoService {
         );
 
         campanhaAnexoBaseRepository.save(anexo);
+        if (auditoriaService != null) {
+            try {
+                auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                        .usuario(responsavel)
+                        .tipoAcao(TipoAcaoAuditoria.ANEXACAO_BASE)
+                        .tipoEntidade(TipoEntidadeAuditoria.CAMPANHA)
+                        .entidadeId(String.valueOf(campanhaId))
+                        .campanhaId(campanha.getId())
+                        .campanhaTitulo(campanha.getTitulo())
+                        .envioArquivoId(lote.getId())
+                        .arquivoImportacaoId(lote.getArquivoImportacaoId())
+                        .reportId(lote.getReportId())
+                        .idLote(lote.getIdLote())
+                        .nomeArquivo(lote.getNomeArquivo())
+                        .competencia(lote.getCompetencia())
+                        .descricao(String.format("Lote reportId %d (%s - %s) anexado à campanha '%s'.",
+                                lote.getReportId(), lote.getTipoBase(), lote.getCompetencia(), campanha.getTitulo()))
+                        .dadosNovos(String.format("{\"anexoId\":\"%s\",\"reportId\":%d,\"tipoBase\":\"%s\"}",
+                                anexo.getId(), lote.getReportId(), lote.getTipoBase()))
+                        .sucesso(true));
+            } catch (Exception ignored) {}
+        }
         log.info("Lote reportId {} ({}) anexado com sucesso à campanha {}", request.reportId(), lote.getTipoBase(), campanhaId);
 
         return toAnexoResponseDTO(anexo);
@@ -550,6 +577,30 @@ public class CoberturaFechamentoService {
         String autor = usuarioAtualProvider.obterUsuarioAtual(responsavel);
         anexo.desanexar(autor, OffsetDateTime.now());
         campanhaAnexoBaseRepository.save(anexo);
+
+        if (auditoriaService != null) {
+            try {
+                Campanha camp = anexo.getCampanha();
+                EnvioArquivo lote = anexo.getEnvioArquivo();
+                auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                        .usuario(autor)
+                        .tipoAcao(TipoAcaoAuditoria.DESANEXACAO_BASE)
+                        .tipoEntidade(TipoEntidadeAuditoria.CAMPANHA)
+                        .entidadeId(String.valueOf(campanhaId))
+                        .campanhaId(camp != null ? camp.getId() : campanhaId)
+                        .campanhaTitulo(camp != null ? camp.getTitulo() : null)
+                        .envioArquivoId(lote != null ? lote.getId() : null)
+                        .arquivoImportacaoId(lote != null ? lote.getArquivoImportacaoId() : null)
+                        .reportId(lote != null ? lote.getReportId() : null)
+                        .idLote(lote != null ? lote.getIdLote() : null)
+                        .nomeArquivo(lote != null ? lote.getNomeArquivo() : null)
+                        .competencia(anexo.getCompetencia())
+                        .descricao(String.format("Anexo %s (reportId %s) desanexado da campanha %d.",
+                                anexoId, lote != null ? lote.getReportId() : "-", campanhaId))
+                        .dadosNovos(String.format("{\"anexoId\":\"%s\",\"desanexado\":true}", anexoId))
+                        .sucesso(true));
+            } catch (Exception ignored) {}
+        }
 
         log.info("Anexo {} da campanha {} desanexado com sucesso por {}", anexoId, campanhaId, autor);
     }

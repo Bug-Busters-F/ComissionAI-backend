@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.campanha.AlterarEstadoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaResponse;
@@ -28,6 +29,8 @@ import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
 import com.bugbusters.backend.model.StatusAprovacaoCodigo;
 import com.bugbusters.backend.model.StatusVersaoCampanha;
+import com.bugbusters.backend.model.TipoAcaoAuditoria;
+import com.bugbusters.backend.model.TipoEntidadeAuditoria;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
@@ -58,6 +61,9 @@ public class CampanhaService {
 
     @Autowired(required = false)
     private CampanhaEsteiraService campanhaEsteiraService;
+
+    @Autowired(required = false)
+    private AuditoriaGeralService auditoriaService;
 
     @Autowired
     public CampanhaService(CampanhaRepository campanhaRepository,
@@ -183,6 +189,17 @@ public class CampanhaService {
         vincularAceiteExistente(campanhaSalva, request.simulacaoAceitaId());
 
         campanhaRepository.saveAndFlush(campanhaSalva);
+        registrarEventoCampanha(
+                TipoAcaoAuditoria.CRIACAO_CAMPANHA,
+                TipoEntidadeAuditoria.CAMPANHA,
+                null,
+                campanhaSalva,
+                proposta,
+                "Campanha criada: " + campanhaSalva.getTitulo(),
+                String.format("{\"titulo\":\"%s\",\"estado\":\"%s\",\"regras\":%d}",
+                        campanhaSalva.getTitulo().replace("\"", "'"), campanhaSalva.getEstado(), regrasSalvas.size()),
+                null
+        );
         return mapearParaResponse(campanhaSalva, regrasSalvas);
     }
 
@@ -278,6 +295,21 @@ public class CampanhaService {
             r.setAtualizadoEm(agora);
         }
         List<Regra> regrasAtualizadas = regraRepository.saveAll(regras);
+
+        TipoAcaoAuditoria acao = novoEstado == EstadoCampanha.CANCELADA
+                ? TipoAcaoAuditoria.CANCELAMENTO_CAMPANHA
+                : (novoEstado == EstadoCampanha.ATIVA ? TipoAcaoAuditoria.PUBLICACAO_CAMPANHA : TipoAcaoAuditoria.EDICAO_CAMPANHA);
+        CampanhaVersao vRef = campanhaAtualizada.versaoParaRevisao();
+        registrarEventoCampanha(
+                acao,
+                TipoEntidadeAuditoria.CAMPANHA,
+                null,
+                campanhaAtualizada,
+                vRef,
+                String.format("Estado da campanha '%s' alterado para %s.", campanhaAtualizada.getTitulo(), novoEstado),
+                String.format("{\"estado\":\"%s\"}", novoEstado),
+                simulacaoAceitaId
+        );
 
         return mapearParaResponse(campanhaAtualizada, regrasAtualizadas);
     }
@@ -389,6 +421,17 @@ public class CampanhaService {
         }
         campanha.setAtualizadoEm(OffsetDateTime.now());
         campanhaRepository.saveAndFlush(campanha);
+        CampanhaVersao vEdit = campanha.versaoParaRevisao();
+        registrarEventoCampanha(
+                TipoAcaoAuditoria.EDICAO_CAMPANHA,
+                TipoEntidadeAuditoria.CAMPANHA,
+                null,
+                campanha,
+                vEdit,
+                String.format("Campanha '%s' atualizada (%d regras).", campanha.getTitulo(), regrasSalvas.size()),
+                String.format("{\"titulo\":\"%s\",\"regras\":%d}", campanha.getTitulo().replace("\"", "'"), regrasSalvas.size()),
+                null
+        );
         return mapearParaResponse(campanha, regrasSalvas);
     }
 
@@ -413,6 +456,16 @@ public class CampanhaService {
             regra.setStatus(StatusRegra.INATIVA);
         }
         regraRepository.saveAll(regras);
+        registrarEventoCampanha(
+                TipoAcaoAuditoria.CANCELAMENTO_CAMPANHA,
+                TipoEntidadeAuditoria.CAMPANHA,
+                null,
+                campanha,
+                campanha.versaoParaRevisao(),
+                "Campanha encerrada/removida logicamente: " + campanha.getTitulo(),
+                "{\"estado\":\"CANCELADA\"}",
+                null
+        );
     }
 
     /** Faixa com mínimo acima do máximo nunca aceitaria venda nenhuma: é recusada em vez de salva. */
@@ -679,6 +732,16 @@ public class CampanhaService {
             versao.setMotivoInvalidacaoCodigo((request != null && request.motivo() != null) ? request.motivo() : "Aprovação de código rejeitada pelo usuário.");
         }
         campanhaVersaoRepository.save(versao);
+        registrarEventoCampanha(
+                aprovado ? TipoAcaoAuditoria.APROVACAO_CODIGO_CAMPANHA : TipoAcaoAuditoria.REJEICAO_CODIGO_CAMPANHA,
+                TipoEntidadeAuditoria.CAMPANHA_VERSAO,
+                autor,
+                campanha,
+                versao,
+                (aprovado ? "Aprovação de código da campanha " : "Rejeição de código da campanha ") + campanha.getTitulo(),
+                String.format("{\"statusAprovacaoCodigo\":\"%s\",\"hash\":\"%s\"}", novoStatus, hashVersao),
+                null
+        );
 
         return new AprovacaoCodigoCampanhaResponse(
                 campanha.getId(),
@@ -984,6 +1047,17 @@ public class CampanhaService {
         campanha.setObservacaoEncaminhamento(proposta.getObservacaoEncaminhamento());
         campanhaVersaoRepository.save(proposta);
         campanhaRepository.saveAndFlush(campanha); // @Version garante compare-and-swap no commit
+        registrarEventoCampanha(
+                TipoAcaoAuditoria.PUBLICACAO_CAMPANHA,
+                TipoEntidadeAuditoria.CAMPANHA,
+                usuarioAtualProvider != null ? usuarioAtualProvider.obterUsuarioAtual(proposta.getPublicadoPor()) : proposta.getPublicadoPor(),
+                campanha,
+                proposta,
+                String.format("Campanha '%s' V%d publicada e ativada.", campanha.getTitulo(), proposta.getNumero()),
+                String.format("{\"versao\":%d,\"estado\":\"ATIVA\",\"simulacaoId\":\"%s\"}",
+                        proposta.getNumero(), simulacao != null ? simulacao.getId() : ""),
+                simulacao != null ? simulacao.getId() : null
+        );
     }
 
     @Transactional(readOnly = true)
@@ -1057,6 +1131,47 @@ public class CampanhaService {
         }
         campanha.setAtualizadoEm(OffsetDateTime.now());
         campanhaVersaoRepository.save(proposta); campanhaRepository.saveAndFlush(campanha);
+        registrarEventoCampanha(
+                TipoAcaoAuditoria.CANCELAMENTO_CAMPANHA,
+                TipoEntidadeAuditoria.CAMPANHA_VERSAO,
+                null,
+                campanha,
+                proposta,
+                String.format("Proposta V%d da campanha '%s' cancelada.", proposta.getNumero(), campanha.getTitulo()),
+                String.format("{\"versaoCancelada\":%d}", proposta.getNumero()),
+                null
+        );
+    }
+
+    private void registrarEventoCampanha(
+            TipoAcaoAuditoria acao,
+            TipoEntidadeAuditoria entidade,
+            String usuario,
+            Campanha campanha,
+            CampanhaVersao versao,
+            String descricao,
+            String dadosNovos,
+            UUID simulacaoId
+    ) {
+        if (auditoriaService == null || campanha == null) {
+            return;
+        }
+        try {
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(usuario)
+                    .tipoAcao(acao)
+                    .tipoEntidade(entidade)
+                    .entidadeId(String.valueOf(campanha.getId()))
+                    .versaoEntidade(versao != null ? versao.getNumero() : null)
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao != null ? versao.getId() : null)
+                    .campanhaTitulo(campanha.getTitulo())
+                    .simulacaoId(simulacaoId)
+                    .descricao(descricao)
+                    .dadosNovos(dadosNovos)
+                    .sucesso(true));
+        } catch (Exception ignored) {
+        }
     }
 
     private CampanhaVersao criarVersao(Campanha c, int numero, com.bugbusters.backend.model.StatusVersaoCampanha status, PeriodoCalculado p, CampanhaRequest r) {

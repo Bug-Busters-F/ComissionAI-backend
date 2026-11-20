@@ -1,5 +1,6 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.esteira.*;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.exception.ResourceNotFoundException;
@@ -126,15 +127,18 @@ public class CampanhaEsteiraService {
         transicaoRepository.save(transicao);
 
         if (auditoriaService != null) {
-            auditoriaService.registrarAcao(
-                    responsavel,
-                    TipoAcaoAuditoria.AVANCO_ESTEIRA,
-                    TipoEntidadeAuditoria.ESTEIRA,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    String.format("Esteira avançada da etapa %d para %d (%s)", etapaOrigem, etapaAlvo, novoEstado),
-                    String.format("{\"etapaOrigem\": %d, \"etapaAlvo\": %d, \"novoEstado\": \"%s\"}", etapaOrigem, etapaAlvo, novoEstado)
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(responsavel)
+                    .tipoAcao(TipoAcaoAuditoria.AVANCO_ESTEIRA)
+                    .tipoEntidade(TipoEntidadeAuditoria.ESTEIRA)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .descricao(String.format("Esteira avançada da etapa %d para %d (%s)", etapaOrigem, etapaAlvo, novoEstado))
+                    .dadosNovos(String.format("{\"etapaOrigem\": %d, \"etapaAlvo\": %d, \"novoEstado\": \"%s\"}", etapaOrigem, etapaAlvo, novoEstado))
+                    .sucesso(true));
         }
 
         log.info("Campanha {} versão {} avançou da etapa {} para {} (Estado: {}). Responsável: {}",
@@ -272,15 +276,18 @@ public class CampanhaEsteiraService {
                     .replace("\"", "\\\"")
                     .replace("\r", "\\r")
                     .replace("\n", "\\n");
-            auditoriaService.registrarAcao(
-                    devolvidoPor,
-                    TipoAcaoAuditoria.DEVOLUCAO_ESTEIRA,
-                    TipoEntidadeAuditoria.ESTEIRA,
-                    String.valueOf(campanhaId),
-                    versao.getNumero(),
-                    String.format("Esteira devolvida da etapa %d para %d. Motivo: %s", etapaOrigem, etapaDestino, motivoLimpo),
-                    String.format("{\"etapaOrigem\": %d, \"etapaDestino\": %d, \"motivo\": \"%s\"}", etapaOrigem, etapaDestino, motivoEscapado)
-            );
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(devolvidoPor)
+                    .tipoAcao(TipoAcaoAuditoria.DEVOLUCAO_ESTEIRA)
+                    .tipoEntidade(TipoEntidadeAuditoria.ESTEIRA)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .descricao(String.format("Esteira devolvida da etapa %d para %d. Motivo: %s", etapaOrigem, etapaDestino, motivoLimpo))
+                    .dadosNovos(String.format("{\"etapaOrigem\": %d, \"etapaDestino\": %d, \"motivo\": \"%s\"}", etapaOrigem, etapaDestino, motivoEscapado))
+                    .sucesso(true));
         }
 
         log.warn("Campanha {} versão {} devolvida pelo gerente {} da etapa {} para etapa {}. Motivo: {}",
@@ -346,6 +353,24 @@ public class CampanhaEsteiraService {
                 request.parecer() != null ? request.parecer().trim() : "Aprovado pelo gerente."
         );
         transicaoRepository.save(transicao);
+
+        if (auditoriaService != null) {
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(aprovadoPor)
+                    .tipoAcao(TipoAcaoAuditoria.AVANCO_ESTEIRA)
+                    .tipoEntidade(TipoEntidadeAuditoria.ESTEIRA)
+                    .entidadeId(String.valueOf(campanhaId))
+                    .versaoEntidade(versao.getNumero())
+                    .campanhaId(campanha.getId())
+                    .campanhaVersaoId(versao.getId())
+                    .campanhaTitulo(campanha.getTitulo())
+                    .simulacaoId(versao.getSimulacaoAceita() != null ? versao.getSimulacaoAceita().getId() : null)
+                    .descricao(String.format("Aprovação gerencial concedida para campanha '%s' V%d.",
+                            campanha.getTitulo(), versao.getNumero()))
+                    .dadosNovos(String.format("{\"estadoEsteira\": \"APROVADA\", \"etapa\": 4, \"parecer\": \"%s\"}",
+                            versao.getParecerGerente() != null ? versao.getParecerGerente().replace("\"", "'") : ""))
+                    .sucesso(true));
+        }
 
         log.info("Campanha {} versão {} aprovada formalmente pelo gerente {}.",
                 campanhaId, versao.getNumero(), aprovadoPor);

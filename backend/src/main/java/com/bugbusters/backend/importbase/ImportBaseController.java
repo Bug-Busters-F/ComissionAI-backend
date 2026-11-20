@@ -4,20 +4,31 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.bugbusters.backend.dto.preparacao.ArquivoOriginalDownloadDTO;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.importbase.dto.ExclusaoLoteRequestDTO;
 import com.bugbusters.backend.importbase.dto.ExclusaoLoteResponseDTO;
+import com.bugbusters.backend.importbase.dto.InconsistenciaLoteDTO;
 import com.bugbusters.backend.importbase.dto.LoteImportacaoResponseDTO;
+import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 
 @RestController
 @RequestMapping("/api/v1/imports")
@@ -25,6 +36,10 @@ import com.bugbusters.backend.importbase.dto.LoteImportacaoResponseDTO;
 public class ImportBaseController {
     private final ImportService importService;
 
+    @Autowired(required = false)
+    private UsuarioAtualProvider usuarioAtualProvider;
+
+    @Autowired
     public ImportBaseController(ImportService importService) {
         this.importService = importService;
     }
@@ -77,7 +92,7 @@ public class ImportBaseController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(importService.consultarLote(reportId));
     }
 
-    @Operation(summary = "Listar lotes de importação", description = "Lista os lotes de importação persistidos de forma paginada com filtros opcionais por tipo de base, status e competência.")
+    @Operation(summary = "Listar lotes de importação", description = "Lista o histórico permanente de lotes de importação (concluídos, com falhas e excluídos) de forma paginada com filtros combináveis.")
     @ApiResponse(responseCode = "200", description = "Lotes listados com sucesso")
     @GetMapping
     public Page<LoteImportacaoResponseDTO> listarLotes(
@@ -87,12 +102,68 @@ public class ImportBaseController {
             @RequestParam(required = false) String status,
             @Parameter(description = "Competência no formato YYYY-MM", example = "2026-10")
             @RequestParam(required = false) String competencia,
+            @Parameter(description = "Filtro por e-mail/identificador do autor ou responsável pela exclusão")
+            @RequestParam(required = false) String usuario,
+            @Parameter(description = "Origem da geração do lote (IMPORTACAO_DIRETA ou PREPARACAO_CAMPANHA)")
+            @RequestParam(required = false) String origemLote,
+            @Parameter(description = "Data/hora inicial da criação (ISO-8601)")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime dataInicio,
+            @Parameter(description = "Data/hora final da criação (ISO-8601)")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime dataFim,
+            @Parameter(description = "Quando true, retorna apenas lotes com validações/inconsistências ou rejeição integral")
+            @RequestParam(required = false) Boolean somenteComInconsistencias,
+            @Parameter(description = "Busca textual em nome do arquivo, idLote, reportId, mensagem ou responsável")
+            @RequestParam(required = false) String busca,
             @Parameter(description = "Número da página, começando em 0", example = "0")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Tamanho da página", example = "20")
             @RequestParam(defaultValue = "20") int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        return importService.listarLotes(tipoBase, status, competencia, pageable);
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "criadoEm"));
+        return importService.listarLotes(
+                tipoBase, status, competencia, usuario, origemLote,
+                dataInicio, dataFim, somenteComInconsistencias, busca, pageable
+        );
+    }
+
+    @Operation(summary = "Listar validações e inconsistências persistidas de um lote", description = "Retorna paginadamente as falhas impeditivas e advertências registradas para o lote informado, inclusive em lotes com status FALHOU ou EXCLUIDO.")
+    @ApiResponse(responseCode = "200", description = "Validações do lote listadas com sucesso")
+    @ApiResponse(responseCode = "404", description = "Lote não encontrado")
+    @GetMapping({"/{reportId}/validacoes", "/{reportId}/inconsistencias", "/lotes/{reportId}/validacoes", "/lotes/{reportId}/inconsistencias"})
+    public Page<InconsistenciaLoteDTO> listarValidacoesLote(
+            @Parameter(description = "reportId do lote", example = "123")
+            @PathVariable long reportId,
+            @Parameter(description = "Severidade (IMPEDITIVO, ADVERTENCIA, AVISO)")
+            @RequestParam(required = false) String severidade,
+            @Parameter(description = "Filtro por campo da inconsistência")
+            @RequestParam(required = false) String campo,
+            @PageableDefault(size = 50, sort = {"linha", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
+        return importService.listarValidacoesLote(reportId, severidade, campo, pageable);
+    }
+
+    @Operation(summary = "Baixar arquivo original preservado de um lote", description = "Retorna o arquivo original associado ao reportId (preservado mesmo após falhas ou exclusão lógica do lote).")
+    @ApiResponse(responseCode = "200", description = "Arquivo original retornado com sucesso")
+    @ApiResponse(responseCode = "404", description = "Lote ou arquivo original não encontrado")
+    @GetMapping({"/{reportId}/arquivo", "/lotes/{reportId}/arquivo"})
+    public ResponseEntity<byte[]> baixarArquivoOriginal(
+            @Parameter(description = "reportId do lote", example = "123")
+            @PathVariable long reportId) {
+        ArquivoOriginalDownloadDTO arquivo = importService.baixarArquivoOriginal(reportId);
+        MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        if (arquivo.contentType() != null && !arquivo.contentType().isBlank()) {
+            try {
+                mediaType = MediaType.parseMediaType(arquivo.contentType());
+            } catch (Exception ignored) {}
+        }
+        String nomeLimpo = arquivo.nomeArquivo() != null && !arquivo.nomeArquivo().isBlank()
+                ? arquivo.nomeArquivo()
+                : "lote-" + reportId + ".xlsx";
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(nomeLimpo, StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(arquivo.conteudo());
     }
 
     @Operation(summary = "Excluir ou cancelar lote de importação", description = "Executa a exclusão transacional dos dados importados pelo lote. Valida dependências com execuções em andamento, vendas, cálculos e logs financeiros.")
@@ -104,9 +175,12 @@ public class ImportBaseController {
             @Parameter(description = "reportId retornado pelo upload", example = "123")
             @PathVariable long reportId,
             @RequestBody(required = false) ExclusaoLoteRequestDTO request) {
-        String usuario = (request != null && request.usuario() != null && !request.usuario().isBlank())
+        String paliativo = (request != null && request.usuario() != null && !request.usuario().isBlank())
                 ? request.usuario().trim()
                 : "SISTEMA";
+        String usuario = usuarioAtualProvider != null
+                ? usuarioAtualProvider.obterUsuarioAtual(paliativo)
+                : paliativo;
         String motivo = request != null ? request.motivo() : null;
         ExclusaoLoteResponseDTO response = importService.excluirLote(reportId, usuario, motivo);
         return ResponseEntity.ok(response);

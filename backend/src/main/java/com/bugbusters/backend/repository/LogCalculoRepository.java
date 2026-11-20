@@ -51,6 +51,15 @@ public interface LogCalculoRepository extends JpaRepository<LogCalculoImutavel, 
             @org.springframework.data.repository.query.Param("fim") java.time.LocalDate fim
     );
 
+    @org.springframework.data.jpa.repository.Query("""
+        SELECT LOWER(l.usuarioExecutor), l.perfilExecutor, COUNT(l), MAX(l.executadoEm)
+        FROM LogCalculoImutavel l
+        GROUP BY LOWER(l.usuarioExecutor), l.perfilExecutor
+    """)
+    List<Object[]> agruparAtividadePorUsuarioEPerfil();
+
+    List<LogCalculoImutavel> findByProtocoloIn(java.util.Collection<UUID> protocolos);
+
     /**
      * Blindagem de repositório contra exclusão acidental de registros imutáveis (BUG-23).
      */
