@@ -372,6 +372,23 @@ class PreparacaoBaseServiceTest {
                 .isInstanceOf(com.bugbusters.backend.exception.ResourceNotFoundException.class);
     }
 
+    @Test
+    @DisplayName("Listagem aceita filtros ausentes, combina filtros sem diferenciar caixa e isola a campanha")
+    void listaLotesComFiltrosOpcionais() throws Exception {
+        var file = criarExcelHr(new Object[][] {
+                {"2026-05-01", 10, "Marca Alpha", 20, "Loja Centro", "M-LISTA", "2025-01-01", null, 30, "Consultor"}
+        });
+        var lote = preparacaoBaseService.iniciarPreparacaoUpload(campanha.getId(), file, "HR", "2026-05", "MANUAL", null, "teste");
+        assertThat(preparacaoBaseService.listarLotes(campanha.getId(), null, null, null))
+                .extracting(LotePreparacaoResponseDTO::id).containsExactly(lote.id());
+        assertThat(preparacaoBaseService.listarLotes(campanha.getId(), "hr", null, "em_preparacao"))
+                .extracting(LotePreparacaoResponseDTO::id).containsExactly(lote.id());
+        assertThat(preparacaoBaseService.listarLotes(campanha.getId(), "SALES", null, null)).isEmpty();
+        assertThat(preparacaoBaseService.listarLotes(campanha.getId(), null, "2026-06", null)).isEmpty();
+        assertThat(preparacaoBaseService.listarLotes(campanha.getId(), null, null, "EFETIVADO")).isEmpty();
+        assertThat(lotePreparacaoRepository.findByCampanhaIdAndFiltros(-1L, null, null, null)).isEmpty();
+    }
+
     private MockMultipartFile criarExcelHr(Object[][] rows) throws Exception {
         try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet();
