@@ -83,6 +83,7 @@ public class PropagacaoImpactoCorrecaoService {
         }
 
         List<String> bloqueiosFechamento = new ArrayList<>();
+        List<String> bloqueiosChaveAmbigua = new ArrayList<>();
         Set<String> competenciasAtingidas = new TreeSet<>();
         Set<String> matriculasAtingidas = new TreeSet<>();
         Set<Integer> lojasAtingidas = new TreeSet<>();
@@ -170,18 +171,94 @@ public class PropagacaoImpactoCorrecaoService {
                     .map(LinhaPreparacao::getRegistroAlvoId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
-            Map<UUID, Sale> salesPorId = idsAlvo.isEmpty() ? Collections.emptyMap() :
-                    saleRepository.findAllById(idsAlvo).stream().collect(Collectors.toMap(Sale::getId, s -> s));
+            Map<UUID, Sale> salesPorId = new HashMap<>();
+            if (!idsAlvo.isEmpty()) {
+                List<UUID> idsAlvoList = new ArrayList<>(idsAlvo);
+                for (int i = 0; i < idsAlvoList.size(); i += 1000) {
+                    saleRepository.findByIdIn(idsAlvoList.subList(i, Math.min(i + 1000, idsAlvoList.size())))
+                            .forEach(s -> salesPorId.put(s.getId(), s));
+                }
+            }
 
-            List<UUID> regIds = colaboradores.values().stream()
-                    .map(Registration::getId)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .toList();
-            Map<UUID, List<Sale>> salesPorRegId = regIds.isEmpty() ? Collections.emptyMap() :
-                    saleRepository.findByRegistrationIdIn(regIds).stream()
-                            .filter(s -> s.getRegistration() != null && s.getRegistration().getId() != null)
-                            .collect(Collectors.groupingBy(s -> s.getRegistration().getId()));
+            List<Sale> salesEscopo;
+            if (lote.getCompetencia() != null && !lote.getCompetencia().isBlank()) {
+                YearMonth compYm = YearMonth.parse(lote.getCompetencia().trim());
+                salesEscopo = saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(compYm.atDay(1), compYm.atEndOfMonth());
+            } else {
+                List<UUID> regIds = colaboradores.values().stream()
+                        .map(Registration::getId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList();
+                salesEscopo = regIds.isEmpty() ? Collections.emptyList() : saleRepository.findByRegistrationIdIn(regIds);
+            }
+
+            Map<String, Deque<Sale>> salesPorChaveExata = new HashMap<>();
+            Map<String, List<Sale>> salesPorChaveNegocio = new HashMap<>();
+            for (Sale s : salesEscopo) {
+                salesPorId.putIfAbsent(s.getId(), s);
+                if (s.getRegistration() == null || s.getRegistration().getId() == null || s.getSaleDate() == null
+                        || s.getStore() == null || s.getBrand() == null || s.getValue() == null) {
+                    continue;
+                }
+                String chaveNegocio = chaveNegocioVendaPrevia(s.getRegistration().getId(), s.getSaleDate(),
+                        s.getStore().getCode(), s.getBrand().getCode());
+                String chaveExata = chaveNegocio + "|" + s.getValue().stripTrailingZeros().toPlainString();
+                salesPorChaveExata.computeIfAbsent(chaveExata, k -> new ArrayDeque<>()).add(s);
+                salesPorChaveNegocio.computeIfAbsent(chaveNegocio, k -> new ArrayList<>()).add(s);
+            }
+
+            // Resolução em 2 passagens (espelhando efetivarLote):
+            // 1) registroAlvoId e correspondência exata; 2) chave de negócio sem valor quando inequívoca.
+            Map<UUID, Sale> vendaResolvidaPorLinha = new HashMap<>();
+            Set<UUID> salesConsumidas = new HashSet<>();
+            List<LinhaPreparacao> pendentesChaveNegocio = new ArrayList<>();
+
+            for (LinhaPreparacao l : linhasAtivas) {
+                if (l.getMatricula() == null || l.getDataReferencia() == null || l.getValorVenda() == null) continue;
+                String mat = l.getMatricula().trim();
+                Registration reg = colaboradores.get(mat.toUpperCase());
+                if (reg == null) continue;
+
+                if (l.getRegistroAlvoId() != null) {
+                    Sale alvo = salesPorId.get(l.getRegistroAlvoId());
+                    if (alvo != null) {
+                        vendaResolvidaPorLinha.put(l.getId(), alvo);
+                        salesConsumidas.add(alvo.getId());
+                        continue;
+                    }
+                }
+
+                String chaveNegocio = chaveNegocioVendaPrevia(reg.getId(), l.getDataReferencia(), l.getCodLoja(), l.getCodMarca());
+                String chaveExata = chaveNegocio + "|" + l.getValorVenda().stripTrailingZeros().toPlainString();
+                Sale exata = proximaNaoConsumida(salesPorChaveExata.get(chaveExata), salesConsumidas);
+                if (exata != null) {
+                    vendaResolvidaPorLinha.put(l.getId(), exata);
+                    salesConsumidas.add(exata.getId());
+                } else {
+                    pendentesChaveNegocio.add(l);
+                }
+            }
+
+            Set<UUID> linhasComChaveAmbigua = new HashSet<>();
+            for (LinhaPreparacao l : pendentesChaveNegocio) {
+                Registration reg = colaboradores.get(l.getMatricula().trim().toUpperCase());
+                if (reg == null) continue;
+                String chaveNegocio = chaveNegocioVendaPrevia(reg.getId(), l.getDataReferencia(), l.getCodLoja(), l.getCodMarca());
+                List<Sale> candidatas = salesPorChaveNegocio.getOrDefault(chaveNegocio, Collections.emptyList())
+                        .stream().filter(s -> !salesConsumidas.contains(s.getId())).toList();
+                if (candidatas.size() == 1) {
+                    Sale alvo = candidatas.get(0);
+                    vendaResolvidaPorLinha.put(l.getId(), alvo);
+                    salesConsumidas.add(alvo.getId());
+                } else if (candidatas.size() > 1) {
+                    linhasComChaveAmbigua.add(l.getId());
+                    bloqueiosChaveAmbigua.add(String.format(
+                            "Linha %d: chave de venda ambígua para matrícula %s em %s (loja %s, marca %s) — %d vendas candidatas na base. Abra a preparação a partir do lote ou informe o registroAlvoId para evitar duplicação.",
+                            l.getNumeroLinha(), l.getMatricula().trim(), l.getDataReferencia(),
+                            l.getCodLoja(), l.getCodMarca(), candidatas.size()));
+                }
+            }
 
             for (LinhaPreparacao l : linhasAtivas) {
                 if (l.getMatricula() == null || l.getDataReferencia() == null || l.getValorVenda() == null) continue;
@@ -190,6 +267,9 @@ public class PropagacaoImpactoCorrecaoService {
 
                 if (reg == null) {
                     continue; // Linha inválida (advertência) não é persistida em tb_sales
+                }
+                if (linhasComChaveAmbigua.contains(l.getId())) {
+                    continue; // Linha ambígua será bloqueada na efetivação; não contabilizar como nova venda
                 }
 
                 if (l.getDataReferencia() != null) {
@@ -200,18 +280,7 @@ public class PropagacaoImpactoCorrecaoService {
                 if (l.getCodMarca() != null) marcasAtingidas.add(l.getCodMarca());
                 if (reg.getPosition() != null && reg.getPosition().getCode() != null) cargosAtingidos.add(reg.getPosition().getCode());
 
-                Sale saleAlvo = null;
-                if (l.getRegistroAlvoId() != null) {
-                    saleAlvo = salesPorId.get(l.getRegistroAlvoId());
-                } else if (reg != null && l.getDataReferencia() != null) {
-                    List<Sale> existentes = salesPorRegId.getOrDefault(reg.getId(), Collections.emptyList());
-                    saleAlvo = existentes.stream()
-                            .filter(s -> Objects.equals(s.getSaleDate(), l.getDataReferencia())
-                                    && s.getStore() != null && Objects.equals(s.getStore().getCode(), l.getCodLoja())
-                                    && s.getBrand() != null && Objects.equals(s.getBrand().getCode(), l.getCodMarca())
-                                    && s.getValue() != null && l.getValorVenda() != null && s.getValue().compareTo(l.getValorVenda()) == 0)
-                            .findFirst().orElse(null);
-                }
+                Sale saleAlvo = vendaResolvidaPorLinha.get(l.getId());
 
                 if (saleAlvo != null) {
                     boolean mudou = saleAlvo.getValue().compareTo(l.getValorVenda()) != 0
@@ -283,6 +352,10 @@ public class PropagacaoImpactoCorrecaoService {
         String mensagem;
         if (!bloqueiosFechamento.isEmpty()) {
             mensagem = "Efetivação impedida por competência bloqueada por fechamento.";
+        } else if (!bloqueiosChaveAmbigua.isEmpty()) {
+            mensagem = String.format(
+                    "Efetivação impedida: %d linha(s) possuem chave de venda ambígua na base geral. Abra a preparação a partir do lote ou informe o registroAlvoId antes de efetivar.",
+                    bloqueiosChaveAmbigua.size());
         } else if (possuiImpactos) {
             mensagem = String.format("A correção atinge %d campanha(s), %d simulação(ões), %d competência(s) calculada(s) e %d aprovação(ões) de código. Exige confirmação explícita.",
                     campanhasAfetadas.size(), simulacoesAfetadas.size(), calculosAfetados.size(), aprovacoesCodigoAfetadas.size());
@@ -299,6 +372,8 @@ public class PropagacaoImpactoCorrecaoService {
                 exigeConfirmacaoExplicita,
                 !bloqueiosFechamento.isEmpty(),
                 bloqueiosFechamento,
+                !bloqueiosChaveAmbigua.isEmpty(),
+                bloqueiosChaveAmbigua,
                 resumoAlteracoes,
                 campanhasAfetadas,
                 simulacoesAfetadas,
@@ -751,5 +826,20 @@ public class PropagacaoImpactoCorrecaoService {
         }
 
         return aprovacoes;
+    }
+
+    private String chaveNegocioVendaPrevia(UUID registrationId, LocalDate saleDate, Integer codLoja, Integer codMarca) {
+        return registrationId + "|" + saleDate + "|" + (codLoja != null ? codLoja : 0) + "|" + (codMarca != null ? codMarca : 0);
+    }
+
+    private Sale proximaNaoConsumida(Deque<Sale> fila, Set<UUID> consumidas) {
+        if (fila == null) return null;
+        while (!fila.isEmpty()) {
+            Sale candidata = fila.pollFirst();
+            if (candidata != null && !consumidas.contains(candidata.getId())) {
+                return candidata;
+            }
+        }
+        return null;
     }
 }
