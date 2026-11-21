@@ -70,6 +70,9 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     List<Sale> findByRegistrationIdIn(Collection<UUID> registrationIds);
 
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
+    List<Sale> findByRegistrationIdInAndSaleDateBetween(Collection<UUID> registrationIds, LocalDate inicio, LocalDate fim);
+
     boolean existsByBrandId(UUID brandId);
 
     boolean existsByStoreId(UUID storeId);
@@ -83,6 +86,7 @@ public interface SaleRepository extends JpaRepository<Sale, UUID>, JpaSpecificat
     Optional<Sale> findByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValue(
             UUID registrationId, LocalDate saleDate, UUID storeId, UUID brandId, java.math.BigDecimal value);
 
+    @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })
     List<Sale> findByIdLoteOrigem(String idLoteOrigem);
 
     @EntityGraph(attributePaths = { "registration", "registration.position", "registration.store", "brand", "store" })

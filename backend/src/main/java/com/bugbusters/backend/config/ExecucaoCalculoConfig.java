@@ -14,4 +14,13 @@ public class ExecucaoCalculoConfig {
         executor.setWaitForTasksToCompleteOnShutdown(true); executor.setAwaitTerminationSeconds(30);
         return executor;
     }
+
+    @Bean("alertaEstatisticoExecutor")
+    TaskExecutor alertaEstatisticoExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2); executor.setMaxPoolSize(4); executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("alerta-estatistico-");
+        executor.setWaitForTasksToCompleteOnShutdown(true); executor.setAwaitTerminationSeconds(30);
+        return executor;
+    }
 }

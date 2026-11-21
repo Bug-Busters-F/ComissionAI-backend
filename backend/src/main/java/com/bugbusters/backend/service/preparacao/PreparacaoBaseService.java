@@ -293,12 +293,20 @@ public class PreparacaoBaseService {
         lote.setEnvioArquivoOrigem(envioOrigem);
         lote.setOrigemCriacao("CORRECAO_LOTE_ANTERIOR");
 
+        Optional<LotePreparacao> loteAnteriorOpt = lotePreparacaoRepository
+                .findFirstByEnvioArquivoEfetivadoIdOrderByEfetivadoEmDesc(envioOrigem.getId());
+        loteAnteriorOpt.ifPresent(lote::setLotePreparacaoAnterior);
+
         lote = lotePreparacaoRepository.save(lote);
 
-        try (InputStream is = new ByteArrayInputStream(arquivo.getConteudo())) {
-            processarELerLinhasParaPreparacao(lote, is);
-        } catch (Exception ex) {
-            throw new BusinessException("Falha ao reprocessar arquivo do lote: " + ex.getMessage());
+        if (loteAnteriorOpt.isPresent()) {
+            clonarLinhasDoLoteAnterior(lote, loteAnteriorOpt.get());
+        } else {
+            try (InputStream is = new ByteArrayInputStream(arquivo.getConteudo())) {
+                processarELerLinhasParaPreparacao(lote, is);
+            } catch (Exception ex) {
+                throw new BusinessException("Falha ao reprocessar arquivo do lote: " + ex.getMessage());
+            }
         }
 
         registrarAuditoriaPreparacao(
@@ -709,33 +717,50 @@ public class PreparacaoBaseService {
 
         int registrosInseridos = 0;
         int registrosAtualizados = 0;
+        int registrosInalterados = 0;
         int registrosIgnoradosDuplicados = 0;
         int advertenciasRegistradas = 0;
         List<InconsistenciaImportacao> inconsistenciasParaLote = new ArrayList<>();
+        List<LinhaPreparacao> linhasComAlvoAtualizado = new ArrayList<>();
+        Map<Integer, Store> storeCache = new HashMap<>();
+        Map<Integer, Position> positionCache = new HashMap<>();
+        Map<Integer, Brand> brandCache = new HashMap<>();
 
         if ("HR".equalsIgnoreCase(lote.getTipoBase())) {
             // EFETIVAÇÃO DE RH
             Set<String> matriculasLote = linhasAtivas.stream()
                     .map(LinhaPreparacao::getMatricula)
                     .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
                     .collect(Collectors.toSet());
 
-            Map<String, Registration> existentes = registrationRepository.findByRegistrationIn(matriculasLote).stream()
-                    .collect(Collectors.toMap(r -> r.getRegistration().toUpperCase(), r -> r));
+            Map<String, Registration> existentes = new HashMap<>();
+            List<String> matList = new ArrayList<>(matriculasLote);
+            for (int i = 0; i < matList.size(); i += 1000) {
+                registrationRepository.findByRegistrationIn(matList.subList(i, Math.min(i + 1000, matList.size())))
+                        .forEach(r -> existentes.put(r.getRegistration().toUpperCase(), r));
+            }
+
+            List<Registration> novosRegs = new ArrayList<>();
+            List<LinhaPreparacao> linhasNovosRegs = new ArrayList<>();
+            List<Registration> regsAtualizados = new ArrayList<>();
+            List<HistoricoVersaoRegistro> historicosParaSalvar = new ArrayList<>();
 
             Set<String> processadasNesteLote = new HashSet<>();
             for (LinhaPreparacao l : linhasAtivas) {
                 String mat = l.getMatricula() != null ? l.getMatricula().trim() : null;
-                if (mat == null || !processadasNesteLote.add(mat.toUpperCase())) {
+                if (mat == null || mat.isEmpty() || !processadasNesteLote.add(mat.toUpperCase())) {
                     continue; // Deduplica matrícula dentro do lote de RH
                 }
 
-                Store store = storeResolver.resolveOrCreate(l.getCodLoja(), l.getDescrLoja());
-                Position position = positionResolver.resolveOrCreate(l.getCodCargo(), l.getDescrCargo());
+                Store store = storeCache.computeIfAbsent(l.getCodLoja(),
+                        c -> storeResolver.resolveOrCreate(c, l.getDescrLoja()));
+                Position position = positionCache.computeIfAbsent(l.getCodCargo(),
+                        c -> positionResolver.resolveOrCreate(c, l.getDescrCargo()));
 
                 Registration reg = existentes.get(mat.toUpperCase());
                 if (reg == null) {
-                    // Novo cadastro
                     reg = new Registration();
                     reg.setRegistration(mat);
                     reg.setStore(store);
@@ -749,16 +774,15 @@ public class PreparacaoBaseService {
                     reg.setAtualizadoEm(agora);
                     reg.setAtualizadoPor(autor);
 
-                    reg = registrationRepository.save(reg);
+                    existentes.put(mat.toUpperCase(), reg);
+                    novosRegs.add(reg);
+                    linhasNovosRegs.add(l);
                     registrosInseridos++;
-
-                    HistoricoVersaoRegistro hist = new HistoricoVersaoRegistro(
-                            "HR", reg.getId(), mat, 1, "CRIACAO", l.getOrigemUltimaEdicao(),
-                            campanha, lote, idLoteGerado, null, toJson(extrairValoresRegistroRh(reg)), autor
-                    );
-                    historicoVersaoRepository.save(hist);
                 } else {
-                    // Atualização de matrícula existente
+                    if (!Objects.equals(l.getRegistroAlvoId(), reg.getId())) {
+                        l.setRegistroAlvoId(reg.getId());
+                        linhasComAlvoAtualizado.add(l);
+                    }
                     Map<String, Object> valoresAntes = extrairValoresRegistroRh(reg);
                     boolean mudou = !Objects.equals(reg.getStore().getId(), store.getId())
                             || !Objects.equals(reg.getPosition().getId(), position.getId())
@@ -776,52 +800,126 @@ public class PreparacaoBaseService {
                         reg.setAtualizadoEm(agora);
                         reg.setAtualizadoPor(autor);
 
-                        reg = registrationRepository.save(reg);
+                        regsAtualizados.add(reg);
                         registrosAtualizados++;
 
-                        HistoricoVersaoRegistro hist = new HistoricoVersaoRegistro(
+                        historicosParaSalvar.add(new HistoricoVersaoRegistro(
                                 "HR", reg.getId(), mat, reg.getVersao(), "ATUALIZACAO", l.getOrigemUltimaEdicao(),
                                 campanha, lote, idLoteGerado, toJson(valoresAntes), toJson(extrairValoresRegistroRh(reg)), autor
-                        );
-                        historicoVersaoRepository.save(hist);
+                        ));
+                    } else {
+                        registrosInalterados++;
                     }
                 }
             }
 
+            if (!novosRegs.isEmpty()) {
+                List<Registration> salvos = registrationRepository.saveAll(novosRegs);
+                for (int i = 0; i < salvos.size(); i++) {
+                    Registration salvo = salvos.get(i);
+                    LinhaPreparacao linhaOrigem = linhasNovosRegs.get(i);
+                    linhaOrigem.setRegistroAlvoId(salvo.getId());
+                    linhasComAlvoAtualizado.add(linhaOrigem);
+                    historicosParaSalvar.add(new HistoricoVersaoRegistro(
+                            "HR", salvo.getId(), salvo.getRegistration(), 1, "CRIACAO", linhaOrigem.getOrigemUltimaEdicao(),
+                            campanha, lote, idLoteGerado, null, toJson(extrairValoresRegistroRh(salvo)), autor
+                    ));
+                }
+            }
+            if (!regsAtualizados.isEmpty()) {
+                registrationRepository.saveAll(regsAtualizados);
+            }
+            if (!historicosParaSalvar.isEmpty()) {
+                historicoVersaoRepository.saveAll(historicosParaSalvar);
+            }
+
         } else if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
-            // EFETIVAÇÃO DE VENDAS
+            // EFETIVAÇÃO DE VENDAS (com pré-carregamento em lote e correspondência em 2 passagens sem duplicação)
             Set<String> matriculasVendas = linhasAtivas.stream()
                     .map(LinhaPreparacao::getMatricula)
                     .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
                     .collect(Collectors.toSet());
 
-            Map<String, Registration> colaboradores = registrationRepository.findByRegistrationIn(matriculasVendas).stream()
-                    .collect(Collectors.toMap(r -> r.getRegistration().toUpperCase(), r -> r));
+            Map<String, Registration> colaboradores = new HashMap<>();
+            List<String> matVendasList = new ArrayList<>(matriculasVendas);
+            for (int i = 0; i < matVendasList.size(); i += 1000) {
+                registrationRepository.findByRegistrationIn(matVendasList.subList(i, Math.min(i + 1000, matVendasList.size())))
+                        .forEach(r -> colaboradores.put(r.getRegistration().toUpperCase(), r));
+            }
 
+            // Pré-carrega vendas existentes da competência e todos os registroAlvoId em 1-2 queries
+            Map<UUID, Sale> salesPorId = new HashMap<>();
+            List<Sale> salesEscopo = new ArrayList<>();
+            if (lote.getCompetencia() != null && !lote.getCompetencia().isBlank()) {
+                YearMonth ym = YearMonth.parse(lote.getCompetencia().trim());
+                salesEscopo.addAll(saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(ym.atDay(1), ym.atEndOfMonth()));
+            }
+            salesEscopo.forEach(s -> salesPorId.put(s.getId(), s));
+
+            List<UUID> idsAlvoFaltantes = linhasAtivas.stream()
+                    .map(LinhaPreparacao::getRegistroAlvoId)
+                    .filter(Objects::nonNull)
+                    .filter(id -> !salesPorId.containsKey(id))
+                    .distinct()
+                    .toList();
+            for (int i = 0; i < idsAlvoFaltantes.size(); i += 1000) {
+                saleRepository.findByIdIn(idsAlvoFaltantes.subList(i, Math.min(i + 1000, idsAlvoFaltantes.size())))
+                        .forEach(s -> {
+                            salesPorId.put(s.getId(), s);
+                            salesEscopo.add(s);
+                        });
+            }
+
+            // Pré-carrega caches de loja e marca já presentes nas vendas existentes
+            for (Sale s : salesEscopo) {
+                if (s.getStore() != null && s.getStore().getCode() != null) {
+                    storeCache.putIfAbsent(s.getStore().getCode(), s.getStore());
+                }
+                if (s.getBrand() != null && s.getBrand().getCode() != null) {
+                    brandCache.putIfAbsent(s.getBrand().getCode(), s.getBrand());
+                }
+            }
+
+            Map<String, Deque<Sale>> salesPorChaveExata = new HashMap<>();
+            Map<String, List<Sale>> salesPorChaveNegocio = new HashMap<>();
+            for (Sale s : salesEscopo) {
+                if (s.getRegistration() == null || s.getRegistration().getId() == null || s.getSaleDate() == null
+                        || s.getStore() == null || s.getBrand() == null || s.getValue() == null) {
+                    continue;
+                }
+                String chaveNegocio = chaveNegocioVenda(s.getRegistration().getId(), s.getSaleDate(),
+                        s.getStore().getCode(), s.getBrand().getCode());
+                String chaveExata = chaveNegocio + "|" + s.getValue().stripTrailingZeros().toPlainString();
+                salesPorChaveExata.computeIfAbsent(chaveExata, k -> new ArrayDeque<>()).add(s);
+                salesPorChaveNegocio.computeIfAbsent(chaveNegocio, k -> new ArrayList<>()).add(s);
+            }
+
+            // Filtra linhas elegíveis, deduplica duplicatas exatas no mesmo lote e coleta advertências
             Set<String> chavesDeduplicadasLote = new HashSet<>();
+            List<LinhaPreparacao> linhasElegiveis = new ArrayList<>();
+            Map<UUID, Registration> regPorLinha = new HashMap<>();
 
             for (LinhaPreparacao l : linhasAtivas) {
                 if (l.getMatricula() == null || l.getDataReferencia() == null || l.getValorVenda() == null) {
                     continue;
                 }
-
-                String chave = String.format("%s:%s:%d:%d:%s",
-                        l.getMatricula().trim().toUpperCase(),
-                        l.getDataReferencia(),
-                        l.getCodLoja() != null ? l.getCodLoja() : 0,
-                        l.getCodMarca() != null ? l.getCodMarca() : 0,
-                        l.getValorVenda()
-                );
-
-                if (!chavesDeduplicadasLote.add(chave)) {
+                String chaveDedup = l.getRegistroAlvoId() != null
+                        ? "ID:" + l.getRegistroAlvoId()
+                        : String.format("%s:%s:%d:%d:%s",
+                                l.getMatricula().trim().toUpperCase(),
+                                l.getDataReferencia(),
+                                l.getCodLoja() != null ? l.getCodLoja() : 0,
+                                l.getCodMarca() != null ? l.getCodMarca() : 0,
+                                l.getValorVenda().stripTrailingZeros().toPlainString());
+                if (!chavesDeduplicadasLote.add(chaveDedup)) {
                     registrosIgnoradosDuplicados++;
-                    continue; // Deduplica venda idêntica dentro do mesmo lote de preparação
+                    continue;
                 }
 
                 Registration reg = colaboradores.get(l.getMatricula().trim().toUpperCase());
-
                 if (reg == null) {
-                    // Venda com matrícula não cadastrada (ADVERTENCIA)
                     advertenciasRegistradas++;
                     inconsistenciasParaLote.add(new InconsistenciaImportacao(
                             null,
@@ -830,26 +928,102 @@ public class PreparacaoBaseService {
                             "Matrícula não cadastrada: " + l.getMatricula().trim(),
                             ImportInconsistencySeverity.ADVERTENCIA.name()
                     ));
-                    continue; // Não grava venda na base geral sem matrícula
+                    continue;
                 }
+                linhasElegiveis.add(l);
+                regPorLinha.put(l.getId(), reg);
+            }
 
-                Store store = storeResolver.resolveOrCreate(l.getCodLoja(), l.getDescrLoja());
-                Brand brand = brandResolver.resolveOrCreate(l.getCodMarca(), l.getDescrMarca());
+            // Passagem 1: reserva vendas com registroAlvoId explícito e correspondências exatas (com valor)
+            Map<UUID, Sale> vendaAlvoPorLinha = new HashMap<>();
+            Set<UUID> linhasMatchExatoSemAlvo = new HashSet<>();
+            Set<UUID> salesConsumidas = new HashSet<>();
+            List<LinhaPreparacao> pendentesChaveNegocio = new ArrayList<>();
 
-                Sale saleAlvo = null;
+            for (LinhaPreparacao l : linhasElegiveis) {
+                Registration reg = regPorLinha.get(l.getId());
                 if (l.getRegistroAlvoId() != null) {
-                    saleAlvo = saleRepository.findById(l.getRegistroAlvoId()).orElse(null);
+                    Sale alvo = salesPorId.get(l.getRegistroAlvoId());
+                    if (alvo != null) {
+                        vendaAlvoPorLinha.put(l.getId(), alvo);
+                        salesConsumidas.add(alvo.getId());
+                        continue;
+                    }
                 }
-                if (saleAlvo == null) {
-                    saleAlvo = saleRepository.findFirstByRegistrationIdAndSaleDateAndStoreIdAndBrandIdAndValueOrderByIdAsc(
-                            reg.getId(), l.getDataReferencia(), store.getId(), brand.getId(), l.getValorVenda()
-                    ).orElse(null);
+                String chaveNegocio = chaveNegocioVenda(reg.getId(), l.getDataReferencia(), l.getCodLoja(), l.getCodMarca());
+                String chaveExata = chaveNegocio + "|" + l.getValorVenda().stripTrailingZeros().toPlainString();
+                Sale exata = proximaSaleNaoConsumida(salesPorChaveExata.get(chaveExata), salesConsumidas);
+                if (exata != null) {
+                    vendaAlvoPorLinha.put(l.getId(), exata);
+                    linhasMatchExatoSemAlvo.add(l.getId());
+                    salesConsumidas.add(exata.getId());
+                } else {
+                    pendentesChaveNegocio.add(l);
                 }
+            }
 
+            // Passagem 2: para linhas sem registroAlvoId e sem match exato, busca por chave de negócio SEM valor
+            List<CampoInvalidoDTO> conflitosChave = new ArrayList<>();
+            for (LinhaPreparacao l : pendentesChaveNegocio) {
+                Registration reg = regPorLinha.get(l.getId());
+                String chaveNegocio = chaveNegocioVenda(reg.getId(), l.getDataReferencia(), l.getCodLoja(), l.getCodMarca());
+                List<Sale> candidatas = salesPorChaveNegocio.getOrDefault(chaveNegocio, Collections.emptyList())
+                        .stream().filter(s -> !salesConsumidas.contains(s.getId())).toList();
+                if (candidatas.size() == 1) {
+                    Sale alvo = candidatas.get(0);
+                    vendaAlvoPorLinha.put(l.getId(), alvo);
+                    salesConsumidas.add(alvo.getId());
+                } else if (candidatas.size() > 1) {
+                    conflitosChave.add(new CampoInvalidoDTO(
+                            "linha:" + l.getNumeroLinha(),
+                            String.format("Chave de venda ambígua para matrícula %s em %s (loja %s, marca %s): %d vendas candidatas encontradas na base. Abra a preparação a partir do lote ou informe o registroAlvoId para evitar duplicação.",
+                                    l.getMatricula().trim(), l.getDataReferencia(), l.getCodLoja(), l.getCodMarca(), candidatas.size())
+                    ));
+                }
+            }
+
+            if (!conflitosChave.isEmpty()) {
+                throw new ResourceConflictException(
+                        "Efetivação bloqueada: existem " + conflitosChave.size() + " linha(s) com chave de venda ambígua na base geral. Resolva o conflito antes de efetivar para evitar duplicidade.",
+                        conflitosChave
+                );
+            }
+
+            List<Sale> novasVendas = new ArrayList<>();
+            List<LinhaPreparacao> linhasNovasVendas = new ArrayList<>();
+            List<String> chavesNovasVendas = new ArrayList<>();
+            List<Sale> vendasAtualizadas = new ArrayList<>();
+            List<HistoricoVersaoRegistro> historicosParaSalvar = new ArrayList<>();
+
+            for (LinhaPreparacao l : linhasElegiveis) {
+                Registration reg = regPorLinha.get(l.getId());
+                Store store = storeCache.computeIfAbsent(l.getCodLoja(),
+                        c -> storeResolver.resolveOrCreate(c, l.getDescrLoja()));
+                Brand brand = brandCache.computeIfAbsent(l.getCodMarca(),
+                        c -> brandResolver.resolveOrCreate(c, l.getDescrMarca()));
+
+                String chaveHistorico = String.format("%s:%s:%d:%d:%s",
+                        l.getMatricula().trim().toUpperCase(),
+                        l.getDataReferencia(),
+                        l.getCodLoja() != null ? l.getCodLoja() : 0,
+                        l.getCodMarca() != null ? l.getCodMarca() : 0,
+                        l.getValorVenda()
+                );
+
+                Sale saleAlvo = vendaAlvoPorLinha.get(l.getId());
                 if (saleAlvo != null) {
-                    // Venda já existe na base geral com chave idêntica
-                    if (l.getRegistroAlvoId() != null) {
-                        // Atualização direcionada
+                    if (!Objects.equals(l.getRegistroAlvoId(), saleAlvo.getId())) {
+                        l.setRegistroAlvoId(saleAlvo.getId());
+                        linhasComAlvoAtualizado.add(l);
+                    }
+
+                    boolean mudou = !Objects.equals(saleAlvo.getRegistration().getId(), reg.getId())
+                            || !Objects.equals(saleAlvo.getStore().getId(), store.getId())
+                            || !Objects.equals(saleAlvo.getBrand().getId(), brand.getId())
+                            || saleAlvo.getValue().compareTo(l.getValorVenda()) != 0
+                            || !Objects.equals(saleAlvo.getSaleDate(), l.getDataReferencia());
+
+                    if (mudou) {
                         Map<String, Object> valoresAntes = extrairValoresRegistroVenda(saleAlvo);
 
                         saleAlvo.setRegistration(reg);
@@ -863,20 +1037,21 @@ public class PreparacaoBaseService {
                         saleAlvo.setAtualizadoEm(agora);
                         saleAlvo.setAtualizadoPor(autor);
 
-                        saleAlvo = saleRepository.save(saleAlvo);
+                        vendasAtualizadas.add(saleAlvo);
                         registrosAtualizados++;
 
-                        HistoricoVersaoRegistro hist = new HistoricoVersaoRegistro(
-                                "SALES", saleAlvo.getId(), chave, saleAlvo.getVersao(), "ATUALIZACAO",
+                        historicosParaSalvar.add(new HistoricoVersaoRegistro(
+                                "SALES", saleAlvo.getId(), chaveHistorico, saleAlvo.getVersao(), "ATUALIZACAO",
                                 l.getOrigemUltimaEdicao(), campanha, lote, idLoteGerado, toJson(valoresAntes),
                                 toJson(extrairValoresRegistroVenda(saleAlvo)), autor
-                        );
-                        historicoVersaoRepository.save(hist);
+                        ));
                     } else {
-                        registrosIgnoradosDuplicados++;
+                        registrosInalterados++;
+                        if (linhasMatchExatoSemAlvo.contains(l.getId())) {
+                            registrosIgnoradosDuplicados++;
+                        }
                     }
                 } else {
-                    // Nova venda inserida
                     Sale novaVenda = new Sale();
                     novaVenda.setRegistration(reg);
                     novaVenda.setStore(store);
@@ -891,16 +1066,36 @@ public class PreparacaoBaseService {
                     novaVenda.setAtualizadoEm(agora);
                     novaVenda.setAtualizadoPor(autor);
 
-                    novaVenda = saleRepository.save(novaVenda);
+                    novasVendas.add(novaVenda);
+                    linhasNovasVendas.add(l);
+                    chavesNovasVendas.add(chaveHistorico);
                     registrosInseridos++;
-
-                    HistoricoVersaoRegistro hist = new HistoricoVersaoRegistro(
-                            "SALES", novaVenda.getId(), chave, 1, "CRIACAO", l.getOrigemUltimaEdicao(),
-                            campanha, lote, idLoteGerado, null, toJson(extrairValoresRegistroVenda(novaVenda)), autor
-                    );
-                    historicoVersaoRepository.save(hist);
                 }
             }
+
+            if (!novasVendas.isEmpty()) {
+                List<Sale> salvas = saleRepository.saveAll(novasVendas);
+                for (int i = 0; i < salvas.size(); i++) {
+                    Sale salva = salvas.get(i);
+                    LinhaPreparacao linhaOrigem = linhasNovasVendas.get(i);
+                    linhaOrigem.setRegistroAlvoId(salva.getId());
+                    linhasComAlvoAtualizado.add(linhaOrigem);
+                    historicosParaSalvar.add(new HistoricoVersaoRegistro(
+                            "SALES", salva.getId(), chavesNovasVendas.get(i), 1, "CRIACAO", linhaOrigem.getOrigemUltimaEdicao(),
+                            campanha, lote, idLoteGerado, null, toJson(extrairValoresRegistroVenda(salva)), autor
+                    ));
+                }
+            }
+            if (!vendasAtualizadas.isEmpty()) {
+                saleRepository.saveAll(vendasAtualizadas);
+            }
+            if (!historicosParaSalvar.isEmpty()) {
+                historicoVersaoRepository.saveAll(historicosParaSalvar);
+            }
+        }
+
+        if (!linhasComAlvoAtualizado.isEmpty()) {
+            linhaPreparacaoRepository.saveAll(linhasComAlvoAtualizado);
         }
 
         // 4. Criação do EnvioArquivo (Lote oficial)
@@ -921,7 +1116,7 @@ public class PreparacaoBaseService {
         novoEnvio.setPerfilCriador(perfilCriador);
         novoEnvio.setStatus("CONCLUIDO");
         novoEnvio.setTotalLinhas(linhasAtivas.size());
-        novoEnvio.setLinhasValidas(registrosInseridos + registrosAtualizados);
+        novoEnvio.setLinhasValidas(registrosInseridos + registrosAtualizados + registrosInalterados);
         novoEnvio.setRejeicaoIntegral(false);
         novoEnvio.setCriadoEm(lote.getCriadoEm());
         novoEnvio.setIniciadoEm(agora);
@@ -973,7 +1168,7 @@ public class PreparacaoBaseService {
         lote.setEfetivadoEm(agora);
         lote.setEfetivadoPor(autor);
         lotePreparacaoRepository.save(lote);
-        alertaEstatisticoService.analisarLoteEfetivado(lote);
+        alertaEstatisticoService.agendarAnalisePosCommit(lote.getId());
 
         if (auditoriaService != null) {
             try {
@@ -1165,6 +1360,186 @@ public class PreparacaoBaseService {
     // MÉTODOS INTERNOS AUXILIARES
     // =========================================================================
 
+    private void clonarLinhasDoLoteAnterior(LotePreparacao loteNovo, LotePreparacao loteAnterior) {
+        List<LinhaPreparacao> anteriores = linhaPreparacaoRepository.findByLotePreparacaoIdOrderByNumeroLinhaAsc(loteAnterior.getId());
+
+        Map<UUID, Sale> salesPorId = new HashMap<>();
+        Map<String, Deque<Sale>> salesPorChaveExata = new HashMap<>();
+        Map<String, Deque<Sale>> salesPorChaveNegocio = new HashMap<>();
+        Set<UUID> salesConsumidas = new HashSet<>();
+
+        Map<UUID, Registration> regsPorId = new HashMap<>();
+        Map<String, Registration> regsPorMat = new HashMap<>();
+
+        if ("SALES".equalsIgnoreCase(loteNovo.getTipoBase())) {
+            List<Sale> salesEscopo = new ArrayList<>();
+            if (loteNovo.getCompetencia() != null && !loteNovo.getCompetencia().isBlank()) {
+                YearMonth ym = YearMonth.parse(loteNovo.getCompetencia().trim());
+                salesEscopo.addAll(saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(ym.atDay(1), ym.atEndOfMonth()));
+            }
+            salesEscopo.forEach(s -> salesPorId.put(s.getId(), s));
+
+            List<UUID> idsAlvoFaltantes = anteriores.stream()
+                    .map(LinhaPreparacao::getRegistroAlvoId)
+                    .filter(Objects::nonNull)
+                    .filter(id -> !salesPorId.containsKey(id))
+                    .distinct()
+                    .toList();
+            for (int i = 0; i < idsAlvoFaltantes.size(); i += 1000) {
+                saleRepository.findByIdIn(idsAlvoFaltantes.subList(i, Math.min(i + 1000, idsAlvoFaltantes.size())))
+                        .forEach(s -> {
+                            salesPorId.put(s.getId(), s);
+                            salesEscopo.add(s);
+                        });
+            }
+            for (Sale s : salesEscopo) {
+                if (s.getRegistration() == null || s.getRegistration().getRegistration() == null || s.getSaleDate() == null
+                        || s.getStore() == null || s.getBrand() == null || s.getValue() == null) continue;
+                String chaveNeg = chaveNegocioPorMatricula(s.getRegistration().getRegistration(), s.getSaleDate(),
+                        s.getStore().getCode(), s.getBrand().getCode());
+                String chaveExata = chaveNeg + "|" + s.getValue().stripTrailingZeros().toPlainString();
+                salesPorChaveExata.computeIfAbsent(chaveExata, k -> new ArrayDeque<>()).add(s);
+                salesPorChaveNegocio.computeIfAbsent(chaveNeg, k -> new ArrayDeque<>()).add(s);
+            }
+            anteriores.stream().map(LinhaPreparacao::getRegistroAlvoId).filter(Objects::nonNull).forEach(salesConsumidas::add);
+        } else if ("HR".equalsIgnoreCase(loteNovo.getTipoBase())) {
+            Set<String> mats = anteriores.stream().map(LinhaPreparacao::getMatricula)
+                    .filter(m -> m != null && !m.isBlank()).map(String::trim).collect(Collectors.toSet());
+            List<String> matList = new ArrayList<>(mats);
+            for (int i = 0; i < matList.size(); i += 1000) {
+                registrationRepository.findByRegistrationIn(matList.subList(i, Math.min(i + 1000, matList.size())))
+                        .forEach(r -> {
+                            regsPorId.put(r.getId(), r);
+                            regsPorMat.put(r.getRegistration().toUpperCase(), r);
+                        });
+            }
+        }
+
+        List<LinhaPreparacao> clones = new ArrayList<>(anteriores.size());
+        for (LinhaPreparacao orig : anteriores) {
+            LinhaPreparacao clone = new LinhaPreparacao(loteNovo, orig.getNumeroLinha(), orig.getConteudoOriginalJson());
+            clone.setIgnorarNaEfetivacao(orig.isIgnorarNaEfetivacao());
+            clone.setDataReferencia(orig.getDataReferencia());
+            clone.setCodMarca(orig.getCodMarca());
+            clone.setDescrMarca(orig.getDescrMarca());
+            clone.setCodLoja(orig.getCodLoja());
+            clone.setDescrLoja(orig.getDescrLoja());
+            clone.setMatricula(orig.getMatricula());
+            clone.setDataAdmissao(orig.getDataAdmissao());
+            clone.setDataDemissao(orig.getDataDemissao());
+            clone.setCodCargo(orig.getCodCargo());
+            clone.setDescrCargo(orig.getDescrCargo());
+            clone.setValorVenda(orig.getValorVenda());
+
+            UUID alvoId = orig.getRegistroAlvoId();
+            if ("SALES".equalsIgnoreCase(loteNovo.getTipoBase())) {
+                Sale atual = alvoId != null ? salesPorId.get(alvoId) : null;
+                if (atual == null && orig.getMatricula() != null && orig.getDataReferencia() != null) {
+                    String chaveNeg = chaveNegocioPorMatricula(orig.getMatricula(), orig.getDataReferencia(),
+                            orig.getCodLoja(), orig.getCodMarca());
+                    if (orig.getValorVenda() != null) {
+                        atual = proximaSaleNaoConsumida(
+                                salesPorChaveExata.get(chaveNeg + "|" + orig.getValorVenda().stripTrailingZeros().toPlainString()),
+                                salesConsumidas);
+                    }
+                    if (atual == null) {
+                        atual = proximaSaleNaoConsumida(salesPorChaveNegocio.get(chaveNeg), salesConsumidas);
+                    }
+                    if (atual != null) {
+                        alvoId = atual.getId();
+                        salesConsumidas.add(alvoId);
+                    }
+                }
+                if (atual != null) {
+                    clone.setDataReferencia(atual.getSaleDate());
+                    clone.setValorVenda(atual.getValue());
+                    if (atual.getStore() != null) {
+                        clone.setCodLoja(atual.getStore().getCode());
+                        clone.setDescrLoja(atual.getStore().getDescription());
+                    }
+                    if (atual.getBrand() != null) {
+                        clone.setCodMarca(atual.getBrand().getCode());
+                        clone.setDescrMarca(atual.getBrand().getDescription());
+                    }
+                    if (atual.getRegistration() != null) {
+                        clone.setMatricula(atual.getRegistration().getRegistration());
+                    }
+                }
+            } else if ("HR".equalsIgnoreCase(loteNovo.getTipoBase())) {
+                Registration atual = alvoId != null ? regsPorId.get(alvoId) : null;
+                if (atual == null && orig.getMatricula() != null) {
+                    atual = regsPorMat.get(orig.getMatricula().trim().toUpperCase());
+                    if (atual != null) alvoId = atual.getId();
+                }
+                if (atual != null) {
+                    clone.setDataAdmissao(atual.getAdmissDate());
+                    clone.setDataDemissao(atual.getDemissDate());
+                    if (atual.getStore() != null) {
+                        clone.setCodLoja(atual.getStore().getCode());
+                        clone.setDescrLoja(atual.getStore().getDescription());
+                    }
+                    if (atual.getPosition() != null) {
+                        clone.setCodCargo(atual.getPosition().getCode());
+                        clone.setDescrCargo(atual.getPosition().getDescription());
+                    }
+                }
+            }
+
+            clone.setRegistroAlvoId(alvoId);
+            clone.setStatusLinha(orig.getStatusLinha());
+            clone.setSeveridadeMaxima(orig.getSeveridadeMaxima());
+            clone.setErrosValidacaoJson(orig.getErrosValidacaoJson());
+            clone.setCamposComErro(orig.getCamposComErro());
+            clones.add(clone);
+        }
+
+        linhaPreparacaoRepository.saveAll(clones);
+        executarRevalidacaoCompleta(loteNovo);
+    }
+
+    private List<Sale> carregarVendasOrigemComFallback(LotePreparacao lote) {
+        if (lote.getEnvioArquivoOrigem() == null || !"SALES".equalsIgnoreCase(lote.getTipoBase())) {
+            return Collections.emptyList();
+        }
+        EnvioArquivo cursor = lote.getEnvioArquivoOrigem();
+        Set<Long> visitados = new HashSet<>();
+        while (cursor != null && visitados.add(cursor.getId())) {
+            if (cursor.getIdLote() != null) {
+                List<Sale> encontradas = saleRepository.findByIdLoteOrigem(cursor.getIdLote());
+                if (!encontradas.isEmpty()) {
+                    return encontradas;
+                }
+            }
+            Long anteriorId = cursor.getEnvioAnteriorId();
+            cursor = anteriorId != null ? envioArquivoRepository.findById(anteriorId).orElse(null) : null;
+        }
+        if (lote.getCompetencia() != null && !lote.getCompetencia().isBlank()) {
+            YearMonth ym = YearMonth.parse(lote.getCompetencia().trim());
+            return saleRepository.findBySaleDateBetweenOrderBySaleDateAsc(ym.atDay(1), ym.atEndOfMonth());
+        }
+        return Collections.emptyList();
+    }
+
+    private String chaveNegocioVenda(UUID registrationId, LocalDate saleDate, Integer codLoja, Integer codMarca) {
+        return registrationId + "|" + saleDate + "|" + (codLoja != null ? codLoja : 0) + "|" + (codMarca != null ? codMarca : 0);
+    }
+
+    private String chaveNegocioPorMatricula(String matricula, LocalDate saleDate, Integer codLoja, Integer codMarca) {
+        return (matricula != null ? matricula.trim().toUpperCase() : "") + "|" + saleDate + "|"
+                + (codLoja != null ? codLoja : 0) + "|" + (codMarca != null ? codMarca : 0);
+    }
+
+    private Sale proximaSaleNaoConsumida(Deque<Sale> fila, Set<UUID> consumidas) {
+        if (fila == null) return null;
+        while (!fila.isEmpty()) {
+            Sale candidata = fila.pollFirst();
+            if (candidata != null && !consumidas.contains(candidata.getId())) {
+                return candidata;
+            }
+        }
+        return null;
+    }
+
     private void processarELerLinhasParaPreparacao(LotePreparacao lote, InputStream input) {
         List<LinhaLidaPreparacao> linhasLidas = excelReader.lerLinhas(input, lote.getTipoBase());
 
@@ -1180,32 +1555,76 @@ public class PreparacaoBaseService {
                 .collect(Collectors.toSet());
 
         Set<String> matriculasNoArquivo = contagemMatriculas.keySet();
-        Map<String, Registration> colaboradoresBanco = Collections.emptyMap();
+        Map<String, Registration> colaboradoresBanco = new HashMap<>();
         if (!matriculasNoArquivo.isEmpty()) {
-            colaboradoresBanco = registrationRepository.findByRegistrationIn(matriculasNoArquivo).stream()
-                    .collect(Collectors.toMap(r -> r.getRegistration().toUpperCase(), r -> r));
-        }
-
-        List<Sale> vendasOrigemDisponiveis = new ArrayList<>();
-        if (lote.getEnvioArquivoOrigem() != null && "SALES".equalsIgnoreCase(lote.getTipoBase())) {
-            String idLoteOrigem = lote.getEnvioArquivoOrigem().getIdLote();
-            if (idLoteOrigem != null) {
-                vendasOrigemDisponiveis.addAll(saleRepository.findByIdLoteOrigem(idLoteOrigem));
+            List<String> matList = new ArrayList<>(matriculasNoArquivo);
+            for (int i = 0; i < matList.size(); i += 1000) {
+                registrationRepository.findByRegistrationIn(matList.subList(i, Math.min(i + 1000, matList.size())))
+                        .forEach(r -> colaboradoresBanco.put(r.getRegistration().toUpperCase(), r));
             }
         }
 
-        List<Registration> rhOrigemDisponiveis = new ArrayList<>();
+        // Indexação O(N) das vendas de origem (exata + negócio sem valor) em vez de varredura O(N^2)
+        List<Sale> vendasOrigemDisponiveis = carregarVendasOrigemComFallback(lote);
+        Map<String, Deque<Sale>> origemPorChaveExata = new HashMap<>();
+        Map<String, Deque<Sale>> origemPorChaveNegocio = new HashMap<>();
+        for (Sale s : vendasOrigemDisponiveis) {
+            if (s.getRegistration() == null || s.getRegistration().getRegistration() == null || s.getSaleDate() == null
+                    || s.getStore() == null || s.getBrand() == null || s.getValue() == null) continue;
+            String chaveNeg = chaveNegocioPorMatricula(s.getRegistration().getRegistration(), s.getSaleDate(),
+                    s.getStore().getCode(), s.getBrand().getCode());
+            String chaveExata = chaveNeg + "|" + s.getValue().stripTrailingZeros().toPlainString();
+            origemPorChaveExata.computeIfAbsent(chaveExata, k -> new ArrayDeque<>()).add(s);
+            origemPorChaveNegocio.computeIfAbsent(chaveNeg, k -> new ArrayDeque<>()).add(s);
+        }
+
+        Map<String, Registration> rhOrigemPorMat = new HashMap<>();
         if (lote.getEnvioArquivoOrigem() != null && "HR".equalsIgnoreCase(lote.getTipoBase())) {
             String idLoteOrigem = lote.getEnvioArquivoOrigem().getIdLote();
             if (idLoteOrigem != null) {
-                rhOrigemDisponiveis.addAll(registrationRepository.findByIdLoteOrigem(idLoteOrigem));
+                registrationRepository.findByIdLoteOrigem(idLoteOrigem).forEach(r -> {
+                    if (r.getRegistration() != null) rhOrigemPorMat.putIfAbsent(r.getRegistration().toUpperCase(), r);
+                });
+            }
+            if (rhOrigemPorMat.isEmpty()) {
+                colaboradoresBanco.forEach(rhOrigemPorMat::putIfAbsent);
+            }
+        }
+
+        // Pré-resolução em 2 passagens para vendas de origem: 1) exata (com valor), 2) chave de negócio sem valor
+        Map<Integer, UUID> alvoVendaPorNumeroLinha = new HashMap<>();
+        if (!vendasOrigemDisponiveis.isEmpty()) {
+            Set<UUID> consumidas = new HashSet<>();
+            List<LinhaLidaPreparacao> semMatchExato = new ArrayList<>();
+            for (LinhaLidaPreparacao l : linhasLidas) {
+                if (l.matricula() == null || l.dataReferencia() == null) continue;
+                String chaveNeg = chaveNegocioPorMatricula(l.matricula(), l.dataReferencia(), l.codLoja(), l.codMarca());
+                if (l.valorVenda() != null) {
+                    Sale exata = proximaSaleNaoConsumida(
+                            origemPorChaveExata.get(chaveNeg + "|" + l.valorVenda().stripTrailingZeros().toPlainString()),
+                            consumidas);
+                    if (exata != null) {
+                        alvoVendaPorNumeroLinha.put(l.numeroLinha(), exata.getId());
+                        consumidas.add(exata.getId());
+                        continue;
+                    }
+                }
+                semMatchExato.add(l);
+            }
+            for (LinhaLidaPreparacao l : semMatchExato) {
+                String chaveNeg = chaveNegocioPorMatricula(l.matricula(), l.dataReferencia(), l.codLoja(), l.codMarca());
+                Sale candidata = proximaSaleNaoConsumida(origemPorChaveNegocio.get(chaveNeg), consumidas);
+                if (candidata != null) {
+                    alvoVendaPorNumeroLinha.put(l.numeroLinha(), candidata.getId());
+                    consumidas.add(candidata.getId());
+                }
             }
         }
 
         Set<String> chavesVendas = new HashSet<>();
         YearMonth compYm = lote.getCompetencia() != null ? YearMonth.parse(lote.getCompetencia()) : null;
 
-        List<LinhaPreparacao> entidades = new ArrayList<>();
+        List<LinhaPreparacao> entidades = new ArrayList<>(linhasLidas.size());
         int validas = 0;
         int invalidas = 0;
         int impeditivas = 0;
@@ -1250,48 +1669,11 @@ public class PreparacaoBaseService {
             if ("AVISO".equals(severidadeMax)) avisos++;
 
             UUID registroAlvoId = null;
-            if (!vendasOrigemDisponiveis.isEmpty() && l.matricula() != null) {
-                String matUpper = l.matricula().trim().toUpperCase();
-                Iterator<Sale> it = vendasOrigemDisponiveis.iterator();
-                while (it.hasNext()) {
-                    Sale s = it.next();
-                    boolean match = (s.getRegistration() != null && s.getRegistration().getRegistration().equalsIgnoreCase(matUpper))
-                            && Objects.equals(s.getSaleDate(), l.dataReferencia())
-                            && (s.getStore() != null && Objects.equals(s.getStore().getCode(), l.codLoja()))
-                            && (s.getBrand() != null && Objects.equals(s.getBrand().getCode(), l.codMarca()))
-                            && (s.getValue() != null && l.valorVenda() != null && s.getValue().compareTo(l.valorVenda()) == 0);
-                    if (match) {
-                        registroAlvoId = s.getId();
-                        it.remove();
-                        break;
-                    }
-                }
-                if (registroAlvoId == null) {
-                    it = vendasOrigemDisponiveis.iterator();
-                    while (it.hasNext()) {
-                        Sale s = it.next();
-                        boolean match = (s.getRegistration() != null && s.getRegistration().getRegistration().equalsIgnoreCase(matUpper))
-                                && Objects.equals(s.getSaleDate(), l.dataReferencia())
-                                && (s.getStore() != null && Objects.equals(s.getStore().getCode(), l.codLoja()))
-                                && (s.getBrand() != null && Objects.equals(s.getBrand().getCode(), l.codMarca()));
-                        if (match) {
-                            registroAlvoId = s.getId();
-                            it.remove();
-                            break;
-                        }
-                    }
-                }
-            } else if (!rhOrigemDisponiveis.isEmpty() && l.matricula() != null) {
-                String matUpper = l.matricula().trim().toUpperCase();
-                Iterator<Registration> it = rhOrigemDisponiveis.iterator();
-                while (it.hasNext()) {
-                    Registration r = it.next();
-                    if (r.getRegistration() != null && r.getRegistration().equalsIgnoreCase(matUpper)) {
-                        registroAlvoId = r.getId();
-                        it.remove();
-                        break;
-                    }
-                }
+            if ("SALES".equalsIgnoreCase(lote.getTipoBase())) {
+                registroAlvoId = alvoVendaPorNumeroLinha.get(l.numeroLinha());
+            } else if (!rhOrigemPorMat.isEmpty() && l.matricula() != null) {
+                Registration r = rhOrigemPorMat.remove(l.matricula().trim().toUpperCase());
+                if (r != null) registroAlvoId = r.getId();
             }
 
             LinhaPreparacao linhaEntidade = new LinhaPreparacao(lote, l.numeroLinha(), l.conteudoOriginalJson());
@@ -1401,6 +1783,7 @@ public class PreparacaoBaseService {
         int avisos = 0;
         int editadas = 0;
         int ignoradas = 0;
+        List<LinhaPreparacao> linhasModificadas = new ArrayList<>();
 
         for (LinhaPreparacao linha : linhas) {
             if (linha.isEditada()) editadas++;
@@ -1442,13 +1825,25 @@ public class PreparacaoBaseService {
             if ("ADVERTENCIA".equals(severidadeMax)) advertencias++;
             if ("AVISO".equals(severidadeMax)) avisos++;
 
-            linha.setStatusLinha(isValid ? "VALIDA" : "INVALIDA");
-            linha.setSeveridadeMaxima(severidadeMax);
-            linha.setErrosValidacaoJson(toJson(erros));
-            linha.setCamposComErro(erros.stream().map(ErroValidacaoLinhaDTO::campo).distinct().collect(Collectors.joining(",")));
+            String novoStatus = isValid ? "VALIDA" : "INVALIDA";
+            String novosErrosJson = erros.isEmpty() ? "[]" : toJson(erros);
+            String novosCamposComErro = erros.isEmpty() ? "" : erros.stream().map(ErroValidacaoLinhaDTO::campo).distinct().collect(Collectors.joining(","));
+
+            if (!Objects.equals(linha.getStatusLinha(), novoStatus)
+                    || !Objects.equals(linha.getSeveridadeMaxima(), severidadeMax)
+                    || !Objects.equals(linha.getErrosValidacaoJson(), novosErrosJson)
+                    || !Objects.equals(linha.getCamposComErro(), novosCamposComErro)) {
+                linha.setStatusLinha(novoStatus);
+                linha.setSeveridadeMaxima(severidadeMax);
+                linha.setErrosValidacaoJson(novosErrosJson);
+                linha.setCamposComErro(novosCamposComErro);
+                linhasModificadas.add(linha);
+            }
         }
 
-        linhaPreparacaoRepository.saveAll(linhas);
+        if (!linhasModificadas.isEmpty()) {
+            linhaPreparacaoRepository.saveAll(linhasModificadas);
+        }
 
         lote.setTotalLinhas(linhas.size());
         lote.setLinhasValidas(validas);
