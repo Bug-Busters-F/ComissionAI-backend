@@ -83,6 +83,7 @@ public class PropagacaoImpactoCorrecaoService {
         }
 
         List<String> bloqueiosFechamento = new ArrayList<>();
+        List<String> bloqueiosChaveAmbigua = new ArrayList<>();
         Set<String> competenciasAtingidas = new TreeSet<>();
         Set<String> matriculasAtingidas = new TreeSet<>();
         Set<Integer> lojasAtingidas = new TreeSet<>();
@@ -239,6 +240,7 @@ public class PropagacaoImpactoCorrecaoService {
                 }
             }
 
+            Set<UUID> linhasComChaveAmbigua = new HashSet<>();
             for (LinhaPreparacao l : pendentesChaveNegocio) {
                 Registration reg = colaboradores.get(l.getMatricula().trim().toUpperCase());
                 if (reg == null) continue;
@@ -249,6 +251,12 @@ public class PropagacaoImpactoCorrecaoService {
                     Sale alvo = candidatas.get(0);
                     vendaResolvidaPorLinha.put(l.getId(), alvo);
                     salesConsumidas.add(alvo.getId());
+                } else if (candidatas.size() > 1) {
+                    linhasComChaveAmbigua.add(l.getId());
+                    bloqueiosChaveAmbigua.add(String.format(
+                            "Linha %d: chave de venda ambígua para matrícula %s em %s (loja %s, marca %s) — %d vendas candidatas na base. Abra a preparação a partir do lote ou informe o registroAlvoId para evitar duplicação.",
+                            l.getNumeroLinha(), l.getMatricula().trim(), l.getDataReferencia(),
+                            l.getCodLoja(), l.getCodMarca(), candidatas.size()));
                 }
             }
 
@@ -259,6 +267,9 @@ public class PropagacaoImpactoCorrecaoService {
 
                 if (reg == null) {
                     continue; // Linha inválida (advertência) não é persistida em tb_sales
+                }
+                if (linhasComChaveAmbigua.contains(l.getId())) {
+                    continue; // Linha ambígua será bloqueada na efetivação; não contabilizar como nova venda
                 }
 
                 if (l.getDataReferencia() != null) {
@@ -341,6 +352,10 @@ public class PropagacaoImpactoCorrecaoService {
         String mensagem;
         if (!bloqueiosFechamento.isEmpty()) {
             mensagem = "Efetivação impedida por competência bloqueada por fechamento.";
+        } else if (!bloqueiosChaveAmbigua.isEmpty()) {
+            mensagem = String.format(
+                    "Efetivação impedida: %d linha(s) possuem chave de venda ambígua na base geral. Abra a preparação a partir do lote ou informe o registroAlvoId antes de efetivar.",
+                    bloqueiosChaveAmbigua.size());
         } else if (possuiImpactos) {
             mensagem = String.format("A correção atinge %d campanha(s), %d simulação(ões), %d competência(s) calculada(s) e %d aprovação(ões) de código. Exige confirmação explícita.",
                     campanhasAfetadas.size(), simulacoesAfetadas.size(), calculosAfetados.size(), aprovacoesCodigoAfetadas.size());
@@ -357,6 +372,8 @@ public class PropagacaoImpactoCorrecaoService {
                 exigeConfirmacaoExplicita,
                 !bloqueiosFechamento.isEmpty(),
                 bloqueiosFechamento,
+                !bloqueiosChaveAmbigua.isEmpty(),
+                bloqueiosChaveAmbigua,
                 resumoAlteracoes,
                 campanhasAfetadas,
                 simulacoesAfetadas,

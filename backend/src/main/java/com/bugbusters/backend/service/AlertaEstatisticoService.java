@@ -155,7 +155,7 @@ public class AlertaEstatisticoService {
 
     private void executarAnaliseAssincrona(UUID loteId) {
         try {
-            requiresNewTx.executeWithoutResult(status -> lotes.findById(loteId)
+            requiresNewTx.executeWithoutResult(status -> lotes.findByIdForUpdate(loteId)
                     .filter(l -> "EFETIVADO".equals(l.getStatus()))
                     .ifPresent(this::analisar));
         } catch (Exception ex) {
@@ -165,7 +165,7 @@ public class AlertaEstatisticoService {
 
     @Transactional
     public ReprocessamentoAlertasResponse reprocessar(UUID loteId) {
-        LotePreparacao lote = lotes.findById(loteId)
+        LotePreparacao lote = lotes.findByIdForUpdate(loteId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lote de preparação não encontrado: " + loteId));
         if (!"EFETIVADO".equals(lote.getStatus())) {
             throw new BusinessException("A análise só pode ser reprocessada para lote EFETIVADO.");
@@ -193,7 +193,11 @@ public class AlertaEstatisticoService {
         return alertas.findAll(filtro, pageable).map(this::toResponse);
     }
 
-    private ReprocessamentoAlertasResponse analisar(LotePreparacao lote) {
+    private ReprocessamentoAlertasResponse analisar(LotePreparacao loteParam) {
+        // Adquire trava pessimista no lote para serializar análises concorrentes (pós-commit + reprocessar)
+        LotePreparacao lote = loteParam.getId() != null
+                ? lotes.findByIdForUpdate(loteParam.getId()).orElse(loteParam)
+                : loteParam;
         List<YearMonth> competenciasAlvo = resolverCompetenciasAnalise(lote);
         List<Registration> registrosLote = registrosAfetados(lote);
         List<Sale> afetadas = vendasAfetadas(lote, registrosLote, competenciasAlvo);
@@ -261,23 +265,39 @@ public class AlertaEstatisticoService {
             }
         }
 
+        // Deduplica novos alertas por assinatura em memória para garantir unicidade antes da persistência
+        Map<String, AlertaEstatistico> novosUnicosPorAssinatura = new LinkedHashMap<>();
+        for (AlertaEstatistico novo : novos) {
+            novosUnicosPorAssinatura.putIfAbsent(novo.getAssinatura(), novo);
+        }
+        List<AlertaEstatistico> novosUnicos = new ArrayList<>(novosUnicosPorAssinatura.values());
+
         List<AlertaEstatistico> atuais = alertas.findByLotePreparacaoIdAndSubstituidoEmIsNull(lote.getId());
-        Set<String> assinaturasNovas = novos.stream().map(AlertaEstatistico::getAssinatura).collect(Collectors.toSet());
+        Set<String> assinaturasNovas = novosUnicosPorAssinatura.keySet();
         Set<String> assinaturasAtuais = atuais.stream().map(AlertaEstatistico::getAssinatura).collect(Collectors.toSet());
-        if (assinaturasAtuais.equals(assinaturasNovas)) {
+        boolean semDuplicatasAtivas = atuais.size() == assinaturasAtuais.size();
+        if (semDuplicatasAtivas && atuais.size() == novosUnicos.size() && assinaturasAtuais.equals(assinaturasNovas)) {
             return new ReprocessamentoAlertasResponse(lote.getId(), versaoBases, 0, 0,
-                    novos.stream().anyMatch(a -> a.getTipo() != TipoAlertaEstatistico.OUTLIER_VENDA));
+                    novosUnicos.stream().anyMatch(a -> a.getTipo() != TipoAlertaEstatistico.OUTLIER_VENDA));
         }
 
-        List<AlertaEstatistico> salvos = novos.isEmpty() ? List.of() : alertas.saveAll(novos);
-        Map<String, AlertaEstatistico> novosPorRegistro = salvos.stream()
-                .collect(Collectors.toMap(this::chaveRegistro, a -> a, (a, b) -> a));
-        atuais.forEach(atual -> {
-            AlertaEstatistico substituto = novosPorRegistro.get(chaveRegistro(atual));
-            if (substituto != null) atual.substituirPor(substituto);
-            else atual.substituir();
-        });
-        if (!atuais.isEmpty()) alertas.saveAll(atuais);
+        // Marca os alertas ativos anteriores como substituídos e dá flush ANTES de inserir os novos
+        // para respeitar o índice único parcial (lote_preparacao_id, assinatura) WHERE substituido_em IS NULL
+        if (!atuais.isEmpty()) {
+            atuais.forEach(AlertaEstatistico::substituir);
+            alertas.saveAllAndFlush(atuais);
+        }
+
+        List<AlertaEstatistico> salvos = novosUnicos.isEmpty() ? List.of() : alertas.saveAllAndFlush(novosUnicos);
+        if (!atuais.isEmpty() && !salvos.isEmpty()) {
+            Map<String, AlertaEstatistico> novosPorRegistro = salvos.stream()
+                    .collect(Collectors.toMap(this::chaveRegistro, a -> a, (a, b) -> a));
+            atuais.forEach(atual -> {
+                AlertaEstatistico substituto = novosPorRegistro.get(chaveRegistro(atual));
+                if (substituto != null) atual.substituirPor(substituto);
+            });
+            alertas.saveAll(atuais);
+        }
         return new ReprocessamentoAlertasResponse(lote.getId(), versaoBases, salvos.size(), atuais.size(),
                 salvos.stream().anyMatch(a -> a.getTipo() != TipoAlertaEstatistico.OUTLIER_VENDA));
     }

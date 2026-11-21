@@ -1,8 +1,11 @@
 package com.bugbusters.backend.service.preparacao;
 
+import com.bugbusters.backend.auth.PapelUsuario;
+import com.bugbusters.backend.auth.Usuario;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandRepository;
 import com.bugbusters.backend.dto.alerta.AlertaEstatisticoResponse;
+import com.bugbusters.backend.dto.alerta.ReprocessamentoAlertasResponse;
 import com.bugbusters.backend.dto.preparacao.*;
 import com.bugbusters.backend.dto.preparacao.impacto.PreviaImpactoCorrecaoDTO;
 import com.bugbusters.backend.exception.ResourceConflictException;
@@ -30,13 +33,18 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -272,6 +280,15 @@ class Front6PendenciasBackendIntegrationTest {
         LotePreparacaoResponseDTO loteAmbiguo = preparacaoBaseService.iniciarPreparacaoUpload(
                 campanhaJulho.getId(), reuploadAmbiguo, "SALES", "2025-07", "MANUAL", null, "admin");
 
+        // Item D: a prévia de impacto já deve avisar sobre a linha ambígua que a efetivação vai bloquear
+        PreviaImpactoCorrecaoDTO previaAmbigua = preparacaoBaseService.consultarPreviaImpacto(
+                campanhaJulho.getId(), loteAmbiguo.id());
+        assertThat(previaAmbigua.possuiBloqueioChaveAmbigua()).isTrue();
+        assertThat(previaAmbigua.bloqueiosChaveAmbigua()).hasSize(1);
+        assertThat(previaAmbigua.bloqueiosChaveAmbigua().get(0)).contains("Linha 2").contains("MAT-KEY");
+        assertThat(previaAmbigua.resumoAlteracoesBase().registrosNovos()).isZero();
+        assertThat(previaAmbigua.mensagem()).contains("chave de venda ambígua");
+
         assertThatThrownBy(() -> preparacaoBaseService.efetivarLote(campanhaJulho.getId(), loteAmbiguo.id(),
                 new EfetivarLotePreparacaoRequestDTO("admin", "Ambiguo", true)))
                 .isInstanceOf(ResourceConflictException.class)
@@ -348,6 +365,9 @@ class Front6PendenciasBackendIntegrationTest {
         vendaJulho.setTipoVenda("IMPORTADA");
         saleRepository.save(vendaJulho);
 
+        // Aguarda análise pós-commit da efetivação antes de reprocessar com as novas vendas
+        alertaEstatisticoService.aguardarAnalisesPendentes(15_000);
+
         // Reprocessar alertas do lote HR na campanha de 07/2025
         alertaEstatisticoService.reprocessar(loteHr1.id());
 
@@ -418,6 +438,132 @@ class Front6PendenciasBackendIntegrationTest {
         assertThat(saleRepository.count()).isEqualTo(totalVendas);
         assertThat(duracaoAbrirMs).isLessThan(60_000L);
         assertThat(duracaoEf2Ms).isLessThan(60_000L);
+    }
+
+    @Test
+    @DisplayName("Item A: Efetivação e reprocessamentos concorrentes do mesmo lote nunca duplicam alertas ativos")
+    void itemA_efetivacaoEReprocessamentoConcorrentesNaoDuplicamAlertas() throws Exception {
+        MockMultipartFile hrFile = criarExcelHr(new Object[][]{
+                {"2025-07-01", 10, "PRETO", 14, "LOJA 14", "MAT-CONC-1", "2024-01-01", null, 100, "VENDEDOR LOJA"},
+                {"2025-07-01", 10, "PRETO", 14, "LOJA 14", "MAT-CONC-2", "2024-01-01", null, 100, "VENDEDOR LOJA"},
+                {"2025-07-01", 10, "PRETO", 14, "LOJA 14", "MAT-CONC-3", "2024-01-01", null, 100, "VENDEDOR LOJA"}
+        });
+
+        LotePreparacaoResponseDTO lote = preparacaoBaseService.iniciarPreparacaoUpload(
+                campanhaJulho.getId(), hrFile, "HR", null, "MANUAL", null, "admin");
+        preparacaoBaseService.efetivarLote(campanhaJulho.getId(), lote.id(),
+                new EfetivarLotePreparacaoRequestDTO("admin", "Teste concorrencia", true));
+
+        // Dispara múltiplos reprocessamentos em paralelo imediatamente após a efetivação (enquanto o pós-commit roda)
+        int threads = 4;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch largada = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            futures.add(pool.submit(() -> {
+                largada.await(5, TimeUnit.SECONDS);
+                alertaEstatisticoService.reprocessar(lote.id());
+                return null;
+            }));
+        }
+        largada.countDown();
+        for (Future<?> f : futures) {
+            f.get(15, TimeUnit.SECONDS);
+        }
+        pool.shutdownNow();
+        alertaEstatisticoService.aguardarAnalisesPendentes(15_000);
+
+        Integer totalAtivos = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_alerta_estatistico WHERE lote_preparacao_id = ? AND substituido_em IS NULL",
+                Integer.class, lote.id());
+        Integer assinaturasDistintas = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT assinatura) FROM tb_alerta_estatistico WHERE lote_preparacao_id = ? AND substituido_em IS NULL",
+                Integer.class, lote.id());
+
+        assertThat(totalAtivos).isEqualTo(3);
+        assertThat(assinaturasDistintas).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("Item B: Reprocessamento limpa alertas ativos duplicados pré-existentes com a mesma assinatura")
+    void itemB_reprocessarLimpaAlertasAtivosDuplicadosExistentes() throws Exception {
+        MockMultipartFile hrFile = criarExcelHr(new Object[][]{
+                {"2025-07-01", 10, "PRETO", 14, "LOJA 14", "MAT-DUP-ALERT", "2024-01-01", null, 100, "VENDEDOR LOJA"}
+        });
+
+        LotePreparacaoResponseDTO lote = preparacaoBaseService.iniciarPreparacaoUpload(
+                campanhaJulho.getId(), hrFile, "HR", null, "MANUAL", null, "admin");
+        preparacaoBaseService.efetivarLote(campanhaJulho.getId(), lote.id(),
+                new EfetivarLotePreparacaoRequestDTO("admin", "Teste limpeza duplicatas", true));
+        alertaEstatisticoService.aguardarAnalisesPendentes(15_000);
+
+        // Simula duplicata pré-existente no banco com a mesma assinatura e substituido_em IS NULL
+        jdbcTemplate.update("""
+                INSERT INTO tb_alerta_estatistico (
+                    id, lote_preparacao_id, venda_id, matricula, data_referencia, tipo, metodo,
+                    grupo_comparavel, tamanho_amostra, valor_observado, media_grupo, desvio_padrao,
+                    score, versao_bases, assinatura, gerado_em
+                )
+                SELECT ?, lote_preparacao_id, venda_id, matricula, data_referencia, tipo, metodo,
+                       grupo_comparavel, tamanho_amostra, valor_observado, media_grupo, desvio_padrao,
+                       score, versao_bases, assinatura, gerado_em
+                FROM tb_alerta_estatistico
+                WHERE lote_preparacao_id = ? AND substituido_em IS NULL
+                """, UUID.randomUUID(), lote.id());
+
+        Integer antes = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_alerta_estatistico WHERE lote_preparacao_id = ? AND substituido_em IS NULL",
+                Integer.class, lote.id());
+        assertThat(antes).isEqualTo(2);
+
+        ReprocessamentoAlertasResponse resp = alertaEstatisticoService.reprocessar(lote.id());
+        assertThat(resp.alertasSubstituidos()).isEqualTo(2);
+        assertThat(resp.alertasGerados()).isEqualTo(1);
+
+        Integer depois = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_alerta_estatistico WHERE lote_preparacao_id = ? AND substituido_em IS NULL",
+                Integer.class, lote.id());
+        assertThat(depois).isEqualTo(1);
+
+        // Novo reprocessamento após a limpeza deve ser idempotente (0/0)
+        ReprocessamentoAlertasResponse idempotente = alertaEstatisticoService.reprocessar(lote.id());
+        assertThat(idempotente.alertasGerados()).isZero();
+        assertThat(idempotente.alertasSubstituidos()).isZero();
+    }
+
+    @Test
+    @DisplayName("Item F: Efetivação autenticada persiste o e-mail do usuário logado em EnvioArquivo e na auditoria (não SISTEMA)")
+    void itemF_efetivacaoAutenticadaGravaEmailDoUsuarioEmEnvioEAuditoria() throws Exception {
+        criarColaborador("MAT-AUTOR");
+        Usuario gerente = new Usuario();
+        gerente.setNome("Gerente Front6");
+        gerente.setEmail("gerente.front6@comissai.local");
+        gerente.setPapel(PapelUsuario.GERENTE_VENDAS);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        gerente, null, List.of(new SimpleGrantedAuthority("ROLE_GERENTE_VENDAS"))));
+        try {
+            MockMultipartFile sales = criarExcelSales(new Object[][]{
+                    {"2025-07-10", 10, "PRETO", 14, "LOJA 14", "MAT-AUTOR", 1800.00}
+            });
+            LotePreparacaoResponseDTO lote = preparacaoBaseService.iniciarPreparacaoUpload(
+                    campanhaJulho.getId(), sales, "SALES", "2025-07", "MANUAL", null, null);
+            EfetivacaoPreparacaoResponseDTO ef = preparacaoBaseService.efetivarLote(
+                    campanhaJulho.getId(), lote.id(),
+                    new EfetivarLotePreparacaoRequestDTO(null, "Efetivacao autenticada", true));
+
+            EnvioArquivo envio = envioArquivoRepository.findByReportId(ef.reportIdGerado()).orElseThrow();
+            assertThat(envio.getCriadoPor()).isEqualTo("gerente.front6@comissai.local");
+            assertThat(envio.getPerfilCriador()).isEqualTo("GERENTE_VENDAS");
+
+            String usuarioAuditoria = jdbcTemplate.queryForObject(
+                    "SELECT usuario FROM tb_auditoria_geral WHERE report_id = ? AND tipo_acao = 'IMPORTACAO_BASE' ORDER BY data_hora DESC LIMIT 1",
+                    String.class, ef.reportIdGerado());
+            assertThat(usuarioAuditoria).isEqualTo("gerente.front6@comissai.local");
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 
     private Page<AlertaEstatisticoResponse> aguardarAlertas(UUID loteId, int minimo) throws InterruptedException {

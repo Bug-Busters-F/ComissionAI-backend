@@ -39,6 +39,10 @@ public interface LotePreparacaoRepository extends JpaRepository<LotePreparacao, 
     Optional<LotePreparacao> findFirstByEnvioArquivoEfetivadoIdOrderByEfetivadoEmDesc(Long envioArquivoEfetivadoId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM LotePreparacao l WHERE l.id = :id")
+    Optional<LotePreparacao> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT l FROM LotePreparacao l WHERE l.id = :id AND l.campanha.id = :campanhaId")
     Optional<LotePreparacao> findByIdAndCampanhaIdForUpdate(@Param("id") UUID id, @Param("campanhaId") Long campanhaId);
 
