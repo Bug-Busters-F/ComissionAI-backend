@@ -24,7 +24,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 @Service
 public class SimulacaoPythonOrquestradorService {
@@ -45,6 +44,13 @@ public class SimulacaoPythonOrquestradorService {
 
     @Autowired(required = false)
     private UsuarioAtualProvider usuarioAtualProvider;
+
+    @Autowired
+    private SimulacaoAnaliseService analiseService;
+    @Autowired
+    private FechamentoService fechamentoService;
+    @Autowired
+    private CampanhaSimulacaoValidator simulacaoValidator;
 
     public SimulacaoPythonOrquestradorService(
             CampanhaRepository campanhaRepository,
@@ -72,8 +78,33 @@ public class SimulacaoPythonOrquestradorService {
 
     @Transactional
     public SimulacaoCenariosResponse orquestrarEPersistir(Long campanhaId, Integer versaoNumero, SimulacaoPythonRequest request) {
-        Campanha campanha = buscarCampanha(campanhaId);
+        Campanha campanha = campanhaRepository.buscarParaCalibracao(campanhaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Campanha não encontrada."));
         CampanhaVersao versao = resolverVersao(campanha, versaoNumero);
+
+        if (!java.util.Objects.equals(versao.getId(), campanha.versaoParaRevisao().getId())
+                || versao.getStatus() == StatusVersaoCampanha.CANCELADA
+                || versao.getStatus() == StatusVersaoCampanha.PUBLICADA)
+            throw new BusinessException("Execute a simulação na proposta editável atual da campanha.");
+        fechamentoService.validarPeriodoDisponivel(versao.getDataInicio(), versao.getDataFim());
+
+        String solicitacaoHash = hashSolicitacao(request, campanhaId, versao.getNumero());
+        if (request.solicitacaoId() != null) {
+            var anterior = simulacaoRepository.findBySolicitacaoPythonId(request.solicitacaoId());
+            if (anterior.isPresent()) {
+                Simulacao registrada = anterior.get();
+                if (!java.util.Objects.equals(registrada.getSolicitacaoPythonHash(), solicitacaoHash)
+                        || registrada.getInvalidadoEm() != null
+                        || !java.util.Objects.equals(registrada.getHashProposta(), simulacaoValidator.calcularHashPropostaCampanha(
+                                versao.getDataInicio(), versao.getDataFim(), regraRepository.findAllByCampanhaVersaoIdAndRemovidoEmIsNullOrderByIdAsc(versao.getId()), registrada.getCompetencia()))
+                        || versao.getOrcamento() == null || registrada.getOrcamentoCampanha() == null
+                        || versao.getOrcamento().compareTo(registrada.getOrcamentoCampanha()) != 0
+                        || versao.getProgramaPythonAprovado() == null
+                        || !java.util.Objects.equals(versao.getProgramaPythonAprovado().getChecksumSha256(), registrada.getChecksumPython()))
+                    throw new com.bugbusters.backend.exception.ResourceConflictException("A solicitação já foi usada ou está desatualizada. Inicie uma nova simulação.");
+                return simulacaoCenariosService.buscarSimulacaoPorId(registrada.getId());
+            }
+        }
 
         if (versao.getEstadoEsteira() == EstadoEsteiraCampanha.DEVOLVIDA) {
             throw new BusinessException("A versão da campanha está devolvida e precisa ser ajustada antes de executar uma nova simulação.");
@@ -119,24 +150,12 @@ public class SimulacaoPythonOrquestradorService {
         );
 
         // 4. Executa os cálculos no sandbox Python e persiste a simulação
+        AtomicReference<List<SimulacaoCenariosService.VendaCenarioParaCalculo>> itensRef = new AtomicReference<>(List.of());
         AtomicReference<AiServiceClient.ExecutarProgramaPythonResponse> pyRespRef = new AtomicReference<>();
         SimulacaoCenariosResponse resp = simulacaoCenariosService.simularEPersistirComMotorExterno(
                 cenariosRequest,
                 itens -> {
-                    List<Map<String, Object>> payloadItens = new ArrayList<>(itens.size());
-                    for (SimulacaoCenariosService.VendaCenarioParaCalculo item : itens) {
-                        Map<String, Object> entry = new LinkedHashMap<>();
-                        entry.put("id", item.itemId());
-                        entry.put("venda", CampanhaProgramaPythonService.montarVendaParaPython(
-                                item.sale(), item.valorEscalado(), item.taxaBaseContratual(), true
-                        ));
-                        Map<String, Object> ctxItem = new LinkedHashMap<>();
-                        ctxItem.put("cenario", item.nomeCenario());
-                        ctxItem.put("fator", item.fatorEscala().doubleValue());
-                        entry.put("contexto", ctxItem);
-                        payloadItens.add(entry);
-                    }
-
+                    itensRef.set(List.copyOf(itens));
                     Map<String, Object> ctxRaiz = new LinkedHashMap<>();
                     ctxRaiz.put("modo", "SIMULACAO");
                     ctxRaiz.put("campanhaId", campanhaId);
@@ -144,34 +163,37 @@ public class SimulacaoPythonOrquestradorService {
                     ctxRaiz.put("versaoProgramaPython", programa.getVersaoPrograma());
                     ctxRaiz.put("competencia", request.competencia());
 
-                    Map<String, Object> payload = new LinkedHashMap<>();
-                    payload.put("codigoFonte", programa.getCodigoFonte());
-                    payload.put("contexto", ctxRaiz);
-                    payload.put("itens", payloadItens);
-
-                    AiServiceClient.ExecutarProgramaPythonResponse pyResp = aiServiceClient.executarProgramaPython(payload);
+                    Map<String, AiServiceClient.ItemExecucaoPython> resultadosValidados;
+                    try {
+                        resultadosValidados = analiseService.executar(programa.getCodigoFonte(), itens, ctxRaiz);
+                    } catch (IllegalArgumentException erro) {
+                        throw new com.bugbusters.backend.exception.AiInvalidResponseException("Resposta incompatível com o programa aprovado ou com o recorte enviado.", erro);
+                    }
+                    AiServiceClient.ExecutarProgramaPythonResponse pyResp = new AiServiceClient.ExecutarProgramaPythonResponse(
+                            true, "PYTHON_SANDBOX", itens.size(), new ArrayList<>(resultadosValidados.values()), null, null, List.of());
                     pyRespRef.set(pyResp);
-                    return pyResp.resultados().stream()
-                            .collect(Collectors.toMap(
-                                    AiServiceClient.ItemExecucaoPython::id,
-                                    java.util.function.Function.identity(),
-                                    (a, b) -> b
-                            ));
+                    return resultadosValidados;
                 }
         );
 
         AiServiceClient.ExecutarProgramaPythonResponse pyResp = pyRespRef.get();
         String saidaRaw = serializarSaidaPython(programa, pyResp);
 
+        com.bugbusters.backend.dto.simulacao.AnaliseSimulacaoDTO analise = null;
+
         // 5. Enriquece a simulação persistida com os metadados da execução real no sandbox Python
         if (resp.id() != null) {
             Simulacao sim = simulacaoRepository.findById(resp.id()).orElse(null);
             if (sim != null) {
+                sim.setSolicitacaoPythonId(request.solicitacaoId());
+                sim.setSolicitacaoPythonHash(solicitacaoHash);
                 sim.setExecutadoViaPython(true);
                 sim.setCodigoPythonExecutado(programa.getCodigoFonte());
                 sim.setChecksumPython(programa.getChecksumSha256());
                 sim.setVersaoProgramaPython(programa.getVersaoPrograma());
                 sim.setSaidaPythonRaw(saidaRaw);
+                analise = analiseService.analisar(sim, resp, versao, programa, regrasEntidade, itensRef.get(), Boolean.TRUE.equals(request.calibrar()));
+                sim.setAnalisePythonSnapshot(SimulacaoAnaliseService.serializar(analise));
                 simulacaoRepository.save(sim);
             }
         }
@@ -254,7 +276,12 @@ public class SimulacaoPythonOrquestradorService {
                 true,
                 programa.getVersaoPrograma(),
                 programa.getChecksumSha256()
-        );
+        ).comAnalise(analise);
+    }
+
+    private String hashSolicitacao(SimulacaoPythonRequest request, Long campanhaId, Integer versao) {
+        try { return CampanhaProgramaPython.calcularChecksum(OBJECT_MAPPER.writeValueAsString(java.util.List.of(campanhaId, versao, request))); }
+        catch (Exception e) { throw new BusinessException("Solicitação de simulação inválida."); }
     }
 
     private String serializarSaidaPython(CampanhaProgramaPython programa, AiServiceClient.ExecutarProgramaPythonResponse pyResp) {
@@ -289,6 +316,9 @@ public class SimulacaoPythonOrquestradorService {
                     ));
         }
 
+        if (versao.getProgramaPythonAprovado() == null
+                || !java.util.Objects.equals(versao.getProgramaPythonAprovado().getId(), programa.getId()))
+            throw new BusinessException("Somente o programa atualmente aprovado da proposta pode ser executado.");
         if (!programa.isAprovado()) {
             throw new BusinessException(String.format(
                     "O programa Python v%d não está aprovado tecnicamente (status atual: %s). Aprove-o antes de executar a simulação.",

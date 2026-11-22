@@ -12,6 +12,7 @@ import com.bugbusters.backend.repository.CampanhaProgramaPythonRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.repository.SimulacaoRepository;
 import com.bugbusters.backend.registration.Registration;
 import com.bugbusters.backend.sales.Sale;
 import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
@@ -31,6 +32,9 @@ public class CampanhaProgramaPythonService {
 
     private static final Logger log = LoggerFactory.getLogger(CampanhaProgramaPythonService.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Autowired
+    private SimulacaoRepository simulacaoRepository;
 
     private final CampanhaRepository campanhaRepository;
     private final CampanhaVersaoRepository campanhaVersaoRepository;
@@ -121,6 +125,20 @@ public class CampanhaProgramaPythonService {
                 ? request.justificativa()
                 : (!"SISTEMA".equals(autor) ? "Atualizado por: " + autor : "Código executável atualizado"));
         novoPrograma.setStatusAprovacao(StatusAprovacaoPrograma.PENDENTE_REVISAO);
+
+        for (Simulacao anterior : simulacaoRepository.findAllByCampanhaVersaoId(versao.getId())) {
+            anterior.setStatusAceite(StatusAceiteSimulacao.INVALIDADA);
+            anterior.setInvalidadoEm(java.time.OffsetDateTime.now());
+            anterior.setMotivoInvalidacao("Programa Python alterado. Nova revisão e simulação obrigatórias.");
+        }
+        versao.setSimulacaoAceita(null);
+        versao.setStatusAprovacaoCodigo(StatusAprovacaoCodigo.INVALIDADO);
+        versao.setCodigoInvalidadoEm(OffsetDateTime.now());
+        versao.setMotivoInvalidacaoCodigo("Programa Python alterado; nova revisão obrigatória.");
+        versao.setUltimaEtapa(2); versao.setEtapaMaisAvancada(2);
+        versao.setEstadoEsteira(EstadoEsteiraCampanha.EM_REVISAO_TECNICA);
+        versao.setEncaminhadaGerente(false);
+        if (campanha.getVersaoVigente() == null) campanha.setSimulacaoAceita(null);
 
         // A alteração do código-fonte invalida a aprovação técnica prévia
         versao.setProgramaPythonAprovado(null);

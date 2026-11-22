@@ -74,8 +74,17 @@ public record SimulacaoCenariosResponse(
         Integer versaoProgramaPython,
 
         @Schema(description = "Checksum criptográfico SHA-256 do código Python executado")
-        String checksumPython
+        String checksumPython,
+        AnaliseSimulacaoDTO analise
 ) {
+    public SimulacaoCenariosResponse(java.util.UUID id, java.util.UUID protocolo, String competencia, int totalVendasRecortadas, BigDecimal valorTotalRecortado, Long campanhaId, String tituloCampanha, LocalDate dataInicioCampanha, LocalDate dataFimCampanha, long diasInclusivos, BigDecimal fatorProjecao, CenarioConsolidadoDTO cenario100, CenarioConsolidadoDTO cenario80, CenarioConsolidadoDTO cenario120, CenarioConsolidadoDTO cenario150, int totalVendasPaginadas, List<VendaSimuladaDetalheDTO> vendas, List<String> avisosGerais, String memoriaCalculoConsolidada, ResumoEnquadramentoOrcamentoDTO enquadramentoOrcamento, Boolean executadoViaPython, Integer versaoProgramaPython, String checksumPython) {
+        this(id, protocolo, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha, dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80, cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, memoriaCalculoConsolidada, enquadramentoOrcamento, executadoViaPython, versaoProgramaPython, checksumPython, null);
+    }
+
+    public SimulacaoCenariosResponse comAnalise(AnaliseSimulacaoDTO valor) {
+        return new SimulacaoCenariosResponse(id, protocolo, competencia, totalVendasRecortadas, valorTotalRecortado, campanhaId, tituloCampanha, dataInicioCampanha, dataFimCampanha, diasInclusivos, fatorProjecao, cenario100, cenario80, cenario120, cenario150, totalVendasPaginadas, vendas, avisosGerais, memoriaCalculoConsolidada, enquadramentoOrcamento, executadoViaPython, versaoProgramaPython, checksumPython, valor);
+    }
+
     public SimulacaoCenariosResponse(
             java.util.UUID id,
             java.util.UUID protocolo,

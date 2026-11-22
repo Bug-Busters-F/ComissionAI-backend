@@ -63,7 +63,10 @@ public record ProgramaPythonResponse(
                 entidade.getChecksumSha256(),
                 CampanhaProgramaPython.calcularChecksum(entidade.getCodigoFonte())
         );
-        boolean valido = entidade.isAprovado() && hashIntegro;
+        var versao = entidade.getCampanhaVersao();
+        boolean aprovadoAtual = versao != null && versao.getProgramaPythonAprovado() != null
+                && Objects.equals(versao.getProgramaPythonAprovado().getId(), entidade.getId());
+        boolean valido = entidade.isAprovado() && hashIntegro && aprovadoAtual;
 
         Long cId = entidade.getCampanhaVersao() != null && entidade.getCampanhaVersao().getCampanha() != null
                 ? entidade.getCampanhaVersao().getCampanha().getId() : null;

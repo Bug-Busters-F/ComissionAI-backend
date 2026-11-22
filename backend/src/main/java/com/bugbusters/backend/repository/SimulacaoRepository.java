@@ -16,6 +16,8 @@ import java.util.UUID;
 @Repository
 public interface SimulacaoRepository extends JpaRepository<Simulacao, UUID>, JpaSpecificationExecutor<Simulacao> {
 
+    Optional<Simulacao> findBySolicitacaoPythonId(UUID solicitacaoPythonId);
+
     Optional<Simulacao> findByProtocolo(UUID protocolo);
 
     Page<Simulacao> findAllByOrderByExecutadoEmDesc(Pageable pageable);

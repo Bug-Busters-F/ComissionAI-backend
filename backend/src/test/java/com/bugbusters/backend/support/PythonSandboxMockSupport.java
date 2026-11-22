@@ -90,10 +90,18 @@ public final class PythonSandboxMockSupport {
                     body.put("sucesso", true);
                     body.put("motor", "PYTHON_SANDBOX");
                     body.put("totalItens", resultados.size());
+                    body.put("assinaturaPrograma", com.bugbusters.backend.model.CampanhaProgramaPython.calcularChecksum(codigo));
                     body.put("resultados", resultados);
                     return withSuccess(MAPPER.writeValueAsString(body), MediaType.APPLICATION_JSON)
                             .createResponse(request);
                 });
+        return this;
+    }
+
+    public PythonSandboxMockSupport registrarSugestoes(java.util.function.Function<JsonNode, Map<String,Object>> resposta) {
+        server.expect(ExpectedCount.manyTimes(), requestTo(Matchers.endsWith("/api/v2/simular")))
+                .andRespond(request -> withSuccess(MAPPER.writeValueAsString(resposta.apply(MAPPER.readTree(
+                        ((MockClientHttpRequest)request).getBodyAsBytes()))), MediaType.APPLICATION_JSON).createResponse(request));
         return this;
     }
 
