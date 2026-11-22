@@ -94,6 +94,12 @@ class SimulacaoPythonIntegrationTest {
     @Autowired
     private AiServiceClient aiServiceClient;
 
+    @Autowired private jakarta.persistence.EntityManager entityManager;
+    @Autowired private org.springframework.security.web.FilterChainProxy securityFilterChain;
+    @Autowired private com.bugbusters.backend.auth.UsuarioRepository usuarios;
+    @Autowired private com.bugbusters.backend.auth.AuthService auth;
+    @Autowired private org.springframework.security.crypto.password.PasswordEncoder encoder;
+
     private PythonSandboxMockSupport sandboxMock;
 
     @BeforeEach
@@ -370,4 +376,109 @@ class SimulacaoPythonIntegrationTest {
                 .andExpect(jsonPath("$[0].responsavel").value("orquestrador-python"))
                 .andExpect(jsonPath("$[0].motivo", containsString("programa Python")));
     }
+    @Test
+    void preservaAnaliseAposConsultaERetomaSolicitacaoSemDuplicar() throws Exception {
+        Long id=criarCampanhaComRegra();aprovarProgramaPython(id);
+        UUID solicitacao=UUID.randomUUID();
+        var req=new SimulacaoPythonRequest("2026-07",null,50,0,false,false,false,solicitacao);
+        String body=objectMapper.writeValueAsString(req);
+        var res=mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python",id).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.analise.statusSugestoes").value("NAO_SOLICITADA"))
+            .andExpect(jsonPath("$.analise.explicacoes.length()").value(4)).andReturn();
+        String simId=objectMapper.readTree(res.getResponse().getContentAsString()).path("id").asText();
+        entityManager.flush();entityManager.clear();
+        mockMvc.perform(get("/api/v1/simulacoes/{id}",simId)).andExpect(status().isOk()).andExpect(jsonPath("$.analise.execucaoId").value(simId));
+        mockMvc.perform(get("/api/v1/simulacoes/{id}/analise-python",simId)).andExpect(status().isOk()).andExpect(jsonPath("$.execucaoId").value(simId));
+        long quantidade=simulacaoRepository.count();
+        mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python",id).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.id").value(simId));
+        assertThat(simulacaoRepository.count()).isEqualTo(quantidade);
+        var outra=new SimulacaoPythonRequest("2026-08",null,50,0,false,false,false,solicitacao);
+        mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python",id).contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(outra)))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void aplicaAlternativaSomenteNoRascunhoEExigeNovaRevisaoESimulacao() throws Exception {
+        Long id=criarCampanhaComRegra();
+        Campanha c=campanhaRepository.findById(id).orElseThrow();
+        c.setOrcamento(new BigDecimal("450"));c.getVersaoProposta().setOrcamento(new BigDecimal("450"));
+        campanhaRepository.saveAndFlush(c);aprovarProgramaPython(id);
+        sandboxMock.registrarSugestoes(payload -> {
+            String regraId=payload.path("propostas").get(0).path("idLocal").asText();
+            java.util.List<java.util.Map<String,Object>> resultados=new java.util.ArrayList<>(), alternativas=new java.util.ArrayList<>();
+            int idx=0;
+            for(String fator:List.of("0.8","1","1.2","1.5")) {
+                BigDecimal f=new BigDecimal(fator);String taxa=List.of("0.05","0.04","0.035","0.03").get(idx++);
+                resultados.add(java.util.Map.of("multiplicadorVendas",fator,"totalComissao",new BigDecimal("500").multiply(f),"custoContratual",new BigDecimal("300").multiply(f)));
+                alternativas.add(java.util.Map.of("multiplicadorVendas",fator,"status",fator.equals("0.8")?"NAO_NECESSARIA":"ENQUADRADA",
+                    "custoPropostoRecalculado",new BigDecimal("10000").multiply(f).multiply(new BigDecimal(taxa)),
+                    "alteracoes",List.of(java.util.Map.of("idLocal",regraId,"campo","taxa","antes","0.05","depois",taxa))));
+            } return java.util.Map.of("resultados",resultados,"calibracoes",alternativas);
+        });
+        var res=mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python",id).contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(new SimulacaoPythonRequest("2026-07",null,50,0,false,false,true))))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.analise.statusSugestoes").value("OK"))
+            .andExpect(jsonPath("$.analise.calibracoes[1].status").value("ENQUADRADA")).andReturn();
+        JsonNode resultado=objectMapper.readTree(res.getResponse().getContentAsString());
+        UUID sid=UUID.fromString(resultado.path("id").asText());
+        var sim=simulacaoRepository.findById(sid).orElseThrow();
+        assertThat(sim.getCampanhaVersao().getProgramaPythonAprovado()).isNotNull();
+        var req=new com.bugbusters.backend.dto.simulacao.AplicarCalibracaoRequest("100%",c.getVersaoControle(),resultado.path("checksumPython").asText());
+        var aplicacao=mockMvc.perform(post("/api/v1/simulacoes/{id}/calibracoes/aplicar",sid).contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(req))).andReturn();
+        assertThat(aplicacao.getResponse().getStatus()).withFailMessage(aplicacao.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(objectMapper.readTree(aplicacao.getResponse().getContentAsString()).path("statusAprovacao").asText()).isEqualTo("PENDENTE_REVISAO");
+        assertThat(sim.getStatusAceite()).isEqualTo(StatusAceiteSimulacao.INVALIDADA);
+        assertThat(c.getVersaoProposta().getProgramaPythonAprovado()).isNull();
+        assertThat(c.getVersaoProposta().getUltimaEtapa()).isEqualTo(2);
+        mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python",id).contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(new SimulacaoPythonRequest("2026-07",null,50,0,false,false))))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/simulacoes/{id}/calibracoes/aplicar",sid).contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(req)))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void contratoRealComIaPr18QuandoConfigurado() throws Exception {
+        String url=System.getProperty("back11.ia-url");
+        org.junit.jupiter.api.Assumptions.assumeTrue(url!=null,"Teste opt-in: requer instância isolada da IA do PR #18");
+        Long id=criarCampanhaComRegra(); Campanha c=campanhaRepository.findById(id).orElseThrow();
+        c.setOrcamento(new BigDecimal("450"));c.getVersaoProposta().setOrcamento(new BigDecimal("450"));
+        c.setDataInicio(LocalDate.of(2026,7,1));c.setDataFim(LocalDate.of(2026,7,31));
+        c.getVersaoProposta().setDataInicio(c.getDataInicio());c.getVersaoProposta().setDataFim(c.getDataFim());
+        campanhaRepository.saveAndFlush(c);aprovarProgramaPython(id);
+        sandboxMock.restaurar();
+        RestClient original=aiServiceClient.getAiRestClient();
+        Object chave=org.springframework.test.util.ReflectionTestUtils.getField(aiServiceClient,"authKey");
+        try {
+            aiServiceClient.setAiRestClient(RestClient.builder().baseUrl(url).requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory()).build());
+            org.springframework.test.util.ReflectionTestUtils.setField(aiServiceClient,"authKey","back11-integration");
+            var res=mockMvc.perform(post("/api/v1/campanhas/{id}/simulacao-python",id).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new SimulacaoPythonRequest("2026-07",null,50,0,false,false,true))))
+                .andReturn();
+            assertThat(res.getResponse().getStatus()).withFailMessage(res.getResponse().getContentAsString()).isEqualTo(201);
+            var json=objectMapper.readTree(res.getResponse().getContentAsString());
+            assertThat(json.path("analise").path("statusSugestoes").asText()).withFailMessage(json.toString()).isEqualTo("OK");
+            assertThat(json.path("analise").path("calibracoes").get(1).path("status").asText()).isEqualTo("ENQUADRADA");
+            assertThat(json.path("analise").path("calibracoes").get(1).path("custoProjetadoRecalculado").decimalValue()).isLessThanOrEqualTo(new BigDecimal("450"));
+        } finally {aiServiceClient.setAiRestClient(original);org.springframework.test.util.ReflectionTestUtils.setField(aiServiceClient,"authKey",chave);}
+    }
+
+    @Test
+    void somenteNegociosEAdministradorPodemAplicarCalibracao() throws Exception {
+        var mvc=MockMvcBuilders.webAppContextSetup(webApplicationContext).addFilters(securityFilterChain).build();
+        UUID inexistente=UUID.randomUUID();String body="{\"cenario\":\"100%\",\"revisaoEsperada\":0,\"assinaturaProgramaEsperada\":\"hash\"}";
+        mvc.perform(post("/api/v1/simulacoes/{id}/calibracoes/aplicar",inexistente).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        for(var papel:com.bugbusters.backend.auth.PapelUsuario.values()) {
+            var u=new com.bugbusters.backend.auth.Usuario();u.setNome("Teste calibração");u.setEmail("calibracao-"+UUID.randomUUID()+"@teste.local");u.setPapel(papel);u.setSenhaHash(encoder.encode("Senha@123"));usuarios.saveAndFlush(u);
+            String token=auth.login(new com.bugbusters.backend.auth.dto.LoginRequest(u.getEmail(),"Senha@123")).token();
+            boolean permitido=papel==com.bugbusters.backend.auth.PapelUsuario.ADMINISTRADOR || papel==com.bugbusters.backend.auth.PapelUsuario.ANALISTA_NEGOCIOS;
+            mvc.perform(post("/api/v1/simulacoes/{id}/calibracoes/aplicar",inexistente).header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().is(permitido?404:403));
+            mvc.perform(get("/api/v1/simulacoes/{id}/analise-python",inexistente).header("Authorization","Bearer "+token))
+                .andExpect(status().isNotFound());
+        }
+    }
+
 }

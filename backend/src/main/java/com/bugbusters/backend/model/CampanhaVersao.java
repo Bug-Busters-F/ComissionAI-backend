@@ -8,6 +8,10 @@ import java.time.OffsetDateTime;
 @Entity
 @Table(name = "tb_campanha_versao", uniqueConstraints = @UniqueConstraint(name = "uk_campanha_versao_numero", columnNames = {"campanha_id", "numero"}))
 public class CampanhaVersao {
+    @jakarta.persistence.Version
+    @jakarta.persistence.Column(name = "revisao_execucao", nullable = false)
+    private Long revisaoExecucao = 0L;
+
     @Column(name = "ultima_etapa", nullable = false) private Integer ultimaEtapa = 1;
     @Column(name = "etapa_mais_avancada", nullable = false) private Integer etapaMaisAvancada = 1;
     public Integer getUltimaEtapa() { return ultimaEtapa; }

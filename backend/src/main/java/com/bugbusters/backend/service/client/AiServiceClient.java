@@ -50,8 +50,14 @@ public class AiServiceClient {
             List<ItemExecucaoPython> resultados,
             String erro,
             String detalhe,
-            List<String> violacoes
-    ) {}
+            List<String> violacoes,
+            String assinaturaPrograma
+    ) {
+        public ExecutarProgramaPythonResponse(boolean sucesso, String motor, int totalItens,
+                List<ItemExecucaoPython> resultados, String erro, String detalhe, List<String> violacoes) {
+            this(sucesso, motor, totalItens, resultados, erro, detalhe, violacoes, null);
+        }
+    }
 
     private RestClient aiRestClient;
     private final String endpoint;

@@ -85,6 +85,21 @@ public class Simulacao {
     @Column(name = "valor_total_recortado", nullable = false, precision = 15, scale = 2)
     private BigDecimal valorTotalRecortado;
 
+    @Column(name = "solicitacao_python_id", unique = true)
+    private UUID solicitacaoPythonId;
+    @Column(name = "solicitacao_python_hash", length = 64)
+    private String solicitacaoPythonHash;
+    public UUID getSolicitacaoPythonId() { return solicitacaoPythonId; }
+    public void setSolicitacaoPythonId(UUID valor) { solicitacaoPythonId = valor; }
+    public String getSolicitacaoPythonHash() { return solicitacaoPythonHash; }
+    public void setSolicitacaoPythonHash(String valor) { solicitacaoPythonHash = valor; }
+
+    @Column(name = "analise_python_snapshot", columnDefinition = "TEXT")
+    private String analisePythonSnapshot;
+
+    public String getAnalisePythonSnapshot() { return analisePythonSnapshot; }
+    public void setAnalisePythonSnapshot(String valor) { analisePythonSnapshot = valor; }
+
     // --- Cenário 100% (Proposta Revisada vs Base) ---
     @Column(name = "total_comissao_base", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalComissaoBase;

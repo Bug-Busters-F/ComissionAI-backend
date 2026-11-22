@@ -731,7 +731,7 @@ public class SimulacaoCenariosService {
                 s.isExecutadoViaPython(),
                 s.getVersaoProgramaPython(),
                 s.getChecksumPython()
-        );
+        ).comAnalise(SimulacaoAnaliseService.ler(s));
     }
 
     /**

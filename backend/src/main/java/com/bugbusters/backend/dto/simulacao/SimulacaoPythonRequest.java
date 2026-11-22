@@ -24,6 +24,17 @@ public record SimulacaoPythonRequest(
         Boolean apenasComAlteracao,
 
         @Schema(description = "Filtrar no detalhamento apenas vendas com transição de faixa monetária")
-        Boolean apenasComMudancaFaixa
-) {}
+        Boolean apenasComMudancaFaixa,
+        @Schema(description = "Solicitar alternativas verificadas de calibração; padrão false") Boolean calibrar,
+        @Schema(description = "Identificador único da solicitação, reutilizado em tentativas da mesma operação") java.util.UUID solicitacaoId
+) {
+    public SimulacaoPythonRequest(String competencia, Integer versaoPrograma, Integer limite, Integer pagina,
+            Boolean apenasComAlteracao, Boolean apenasComMudancaFaixa, Boolean calibrar) {
+        this(competencia, versaoPrograma, limite, pagina, apenasComAlteracao, apenasComMudancaFaixa, calibrar, null);
+    }
+    public SimulacaoPythonRequest(String competencia, Integer versaoPrograma, Integer limite, Integer pagina,
+            Boolean apenasComAlteracao, Boolean apenasComMudancaFaixa) {
+        this(competencia, versaoPrograma, limite, pagina, apenasComAlteracao, apenasComMudancaFaixa, false, null);
+    }
+}
 
