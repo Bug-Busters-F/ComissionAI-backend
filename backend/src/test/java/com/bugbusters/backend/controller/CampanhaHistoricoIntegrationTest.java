@@ -49,6 +49,7 @@ class CampanhaHistoricoIntegrationTest {
         ObjectNode c = json.createObjectNode();
         c.put("titulo", titulo); c.put("textoOriginal", "Campanha de teste " + titulo);
         c.put("estado", "DRAFT"); c.put("dataInicio", "2038-01-01"); c.put("dataFim", "2038-01-31");
+        c.put("orcamento", 100000.0); c.put("orcamentoConfirmado", true);
         var collection = c.putArray("regras"); for (var r : regras) collection.add(r);
         return c;
     }
@@ -70,6 +71,9 @@ class CampanhaHistoricoIntegrationTest {
         ObjectNode aceite = json.createObjectNode().put("aceitoPor", "Gestor histórico").put("campanhaId",id);
         if (esperada != null) aceite.put("versaoEsperada",esperada);
         mvc.perform(post("/api/v1/simulacoes/"+sim.path("id").asText()+"/aceite").contentType(MediaType.APPLICATION_JSON).content(aceite.toString()))
+            .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/campanhas/"+id+"/aprovacao-codigo").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"aprovado\":true,\"motivo\":\"Código revisado para publicação\"}"))
             .andExpect(status().isOk());
         ObjectNode ativacao = json.createObjectNode(); if (esperada != null) ativacao.put("versaoEsperada",esperada);
         mvc.perform(post("/api/v1/campanhas/"+id+"/ativar").header("X-Campanha-Revisao", consultar("/api/v1/campanhas/"+id).path("revisaoControle").asLong()).contentType(MediaType.APPLICATION_JSON).content(ativacao.toString()))

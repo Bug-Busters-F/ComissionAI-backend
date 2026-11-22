@@ -124,6 +124,25 @@ public class Regra {
     @Column(nullable = false)
     private Boolean completa = true;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_aprovacao_codigo", nullable = false, length = 30)
+    private StatusAprovacaoCodigo statusAprovacaoCodigo = StatusAprovacaoCodigo.PENDENTE;
+
+    @Column(name = "hash_artefatos_codigo", length = 64)
+    private String hashArtefatosCodigo;
+
+    @Column(name = "codigo_aprovado_em")
+    private OffsetDateTime codigoAprovadoEm;
+
+    @Column(name = "codigo_aprovado_por", length = 150)
+    private String codigoAprovadoPor;
+
+    @Column(name = "codigo_invalidado_em")
+    private OffsetDateTime codigoInvalidadoEm;
+
+    @Column(name = "motivo_invalidacao_codigo", columnDefinition = "TEXT")
+    private String motivoInvalidacaoCodigo;
+
     @Column(name = "removido_em")
     private OffsetDateTime removidoEm;
 
@@ -285,6 +304,24 @@ public class Regra {
 
     public Boolean getCompleta() { return completa; }
     public void setCompleta(Boolean completa) { this.completa = completa; }
+
+    public StatusAprovacaoCodigo getStatusAprovacaoCodigo() { return statusAprovacaoCodigo; }
+    public void setStatusAprovacaoCodigo(StatusAprovacaoCodigo statusAprovacaoCodigo) { this.statusAprovacaoCodigo = statusAprovacaoCodigo; }
+
+    public String getHashArtefatosCodigo() { return hashArtefatosCodigo; }
+    public void setHashArtefatosCodigo(String hashArtefatosCodigo) { this.hashArtefatosCodigo = hashArtefatosCodigo; }
+
+    public OffsetDateTime getCodigoAprovadoEm() { return codigoAprovadoEm; }
+    public void setCodigoAprovadoEm(OffsetDateTime codigoAprovadoEm) { this.codigoAprovadoEm = codigoAprovadoEm; }
+
+    public String getCodigoAprovadoPor() { return codigoAprovadoPor; }
+    public void setCodigoAprovadoPor(String codigoAprovadoPor) { this.codigoAprovadoPor = codigoAprovadoPor; }
+
+    public OffsetDateTime getCodigoInvalidadoEm() { return codigoInvalidadoEm; }
+    public void setCodigoInvalidadoEm(OffsetDateTime codigoInvalidadoEm) { this.codigoInvalidadoEm = codigoInvalidadoEm; }
+
+    public String getMotivoInvalidacaoCodigo() { return motivoInvalidacaoCodigo; }
+    public void setMotivoInvalidacaoCodigo(String motivoInvalidacaoCodigo) { this.motivoInvalidacaoCodigo = motivoInvalidacaoCodigo; }
 
     public OffsetDateTime getRemovidoEm() { return removidoEm; }
     public void setRemovidoEm(OffsetDateTime removidoEm) { this.removidoEm = removidoEm; }

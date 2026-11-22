@@ -134,14 +134,22 @@ class ControllerRoutesTest {
             r.setAdmissDate(java.time.LocalDate.now().minusMonths(6));
             registrationRepository.save(r);
         }
-        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, java.time.LocalDate.of(2026, 10, 1)).isEmpty()) {
+        java.time.LocalDate competenciaOutubro = java.time.LocalDate.of(2026, 10, 1);
+        java.time.LocalDate competenciaAtual = java.time.LocalDate.now().withDayOfMonth(1);
+        if (baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, competenciaOutubro).isEmpty()) {
             com.bugbusters.backend.basecomiss.BaseComiss bc = new com.bugbusters.backend.basecomiss.BaseComiss(
                     brandRepository.findByCode(10).get(),
                     positionRepository.findByCode(150).get(),
                     new java.math.BigDecimal("0.1000"),
-                    java.time.LocalDate.of(2026, 10, 1)
+                    competenciaOutubro
             );
             baseComissRepository.save(bc);
+        }
+        if (!competenciaAtual.equals(competenciaOutubro)
+                && baseComissRepository.findByBrandCodeAndPositionCodeAndReferenceMonth(10, 150, competenciaAtual).isEmpty()) {
+            baseComissRepository.save(new com.bugbusters.backend.basecomiss.BaseComiss(
+                    brandRepository.findByCode(10).get(), positionRepository.findByCode(150).get(),
+                    new java.math.BigDecimal("0.1000"), competenciaAtual));
         }
     }
 
@@ -836,6 +844,9 @@ class ControllerRoutesTest {
                 "textoOriginal": "Comissão de 4.5%",
                 "dataInicio": "2026-10-01",
                 "dataFim": "2026-10-31",
+                "orcamento": 50000.00,
+                "orcamentoConfirmado": true,
+                "orcamentoConfirmadoPor": "analista",
                 "regras": [
                     {
                         "canal": "ECOMMERCE",
@@ -866,6 +877,11 @@ class ControllerRoutesTest {
         mockMvc.perform(post("/api/v1/simulacoes/" + simId + "/aceite")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"aceitoPor\":\"diretoria@empresa.com\",\"motivo\":\"Aprovado no teste\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanhaId + "/aprovacao-codigo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"aprovado\":true,\"motivo\":\"Código aprovado no teste\"}"))
                 .andExpect(status().isOk());
 
         // 2. Alterar para ATIVA

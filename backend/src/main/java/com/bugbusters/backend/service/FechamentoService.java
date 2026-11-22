@@ -1,13 +1,18 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.calculo.CalculoCompetenciaResponseDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoRequestDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoResponseDTO;
 import com.bugbusters.backend.dto.fechamento.FechamentoStatusDTO;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.FechamentoCompetencia;
+import com.bugbusters.backend.model.ImpedimentoFechamento;
 import com.bugbusters.backend.model.StatusFechamento;
+import com.bugbusters.backend.model.TipoAcaoAuditoria;
+import com.bugbusters.backend.model.TipoEntidadeAuditoria;
 import com.bugbusters.backend.repository.FechamentoCompetenciaRepository;
+import com.bugbusters.backend.repository.ImpedimentoFechamentoRepository;
 import com.bugbusters.backend.service.lock.TravaCompetencia;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,14 +50,26 @@ public class FechamentoService {
     private final CalculoService calculoService;
     private final TravaCompetencia travaCompetencia;
     private final TransactionTemplate transacaoIsolada;
+    private final AuditoriaGeralService auditoriaService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ImpedimentoFechamentoRepository impedimentoFechamentoRepository;
 
     public FechamentoService(FechamentoCompetenciaRepository repository, CalculoService calculoService,
                              TravaCompetencia travaCompetencia, PlatformTransactionManager transactionManager) {
+        this(repository, calculoService, travaCompetencia, transactionManager, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public FechamentoService(FechamentoCompetenciaRepository repository, CalculoService calculoService,
+                             TravaCompetencia travaCompetencia, PlatformTransactionManager transactionManager,
+                             @org.springframework.beans.factory.annotation.Autowired(required = false) AuditoriaGeralService auditoriaService) {
         this.fechamentoCompetenciaRepository = repository;
         this.calculoService = calculoService;
         this.travaCompetencia = travaCompetencia;
         this.transacaoIsolada = new TransactionTemplate(transactionManager);
         this.transacaoIsolada.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.auditoriaService = auditoriaService;
     }
 
     /** Persist the processing marker before calculating; rollback calculations independently from audit status. */
@@ -90,6 +107,41 @@ public class FechamentoService {
                 fechamento.setStatus(StatusFechamento.CONCLUIDO);
                 fechamento.setConcluidoEm(OffsetDateTime.now());
                 fechamentoCompetenciaRepository.save(fechamento);
+
+                if (impedimentoFechamentoRepository != null && apuracao.impedimentos() != null && !apuracao.impedimentos().isEmpty()) {
+                    var impedimentosPersistir = apuracao.impedimentos().stream()
+                            .map(dto -> new ImpedimentoFechamento(
+                                    UUID.randomUUID(),
+                                    fechamento.getId(),
+                                    competencia,
+                                    dto.idVenda(),
+                                    dto.matricula(),
+                                    dto.codMarca(),
+                                    dto.dataVenda(),
+                                    dto.valorVenda(),
+                                    dto.motivo() != null ? dto.motivo() : "Impedimento durante apuração",
+                                    dto.tipoImpedimento()
+                            ))
+                            .toList();
+                    impedimentoFechamentoRepository.saveAll(impedimentosPersistir);
+                }
+
+                if (auditoriaService != null) {
+                    auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                            .usuario(fechamento.getExecutadoPor())
+                            .tipoAcao(TipoAcaoAuditoria.FECHAMENTO_COMPETENCIA)
+                            .tipoEntidade(TipoEntidadeAuditoria.FECHAMENTO)
+                            .entidadeId(fechamento.getId().toString())
+                            .fechamentoId(fechamento.getId())
+                            .protocoloCalculo(fechamento.getProtocolo())
+                            .competencia(competencia)
+                            .descricao(String.format("Fechamento oficial de competência %s concluído com sucesso. Protocolo: %s, Vendas: %d",
+                                    competencia, fechamento.getProtocolo(), fechamento.getTotalVendasProcessadas()))
+                            .dadosNovos(String.format("{\"protocolo\": \"%s\", \"competencia\": \"%s\", \"totalVendas\": %d}",
+                                    fechamento.getProtocolo(), competencia, fechamento.getTotalVendasProcessadas()))
+                            .sucesso(true));
+                }
+
                 return new FechamentoResponseDTO(fechamento.getId(), fechamento.getProtocolo(), competencia,
                         fechamento.getStatus(), fechamento.getTipo(), fechamento.getTotalVendasProcessadas(),
                         fechamento.getTotalCalculados(), fechamento.getTotalImpedimentos(), fechamento.getValorTotalVendas(),
@@ -108,6 +160,19 @@ public class FechamentoService {
                     fechamento.setMotivoFalha(ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
                     fechamento.setConcluidoEm(OffsetDateTime.now());
                     fechamentoCompetenciaRepository.save(fechamento);
+                    if (auditoriaService != null) {
+                        auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                                .usuario(fechamento.getExecutadoPor())
+                                .tipoAcao(TipoAcaoAuditoria.FECHAMENTO_COMPETENCIA)
+                                .tipoEntidade(TipoEntidadeAuditoria.FECHAMENTO)
+                                .entidadeId(fechamento.getId().toString())
+                                .fechamentoId(fechamento.getId())
+                                .protocoloCalculo(fechamento.getProtocolo())
+                                .competencia(competencia)
+                                .descricao(String.format("Falha no fechamento da competência %s.", competencia))
+                                .sucesso(false)
+                                .detalheErro(fechamento.getMotivoFalha()));
+                    }
                 }
             });
             if (ex instanceof BusinessException be) throw be;

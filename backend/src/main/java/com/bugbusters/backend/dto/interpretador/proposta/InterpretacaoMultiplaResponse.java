@@ -26,11 +26,23 @@ public record InterpretacaoMultiplaResponse(
         BigDecimal confiancaGeral,
 
         @Schema(description = "Pendências que não pertencem a uma proposta: falha ou limite do agente e trechos do texto que não viraram regra")
-        List<PendenciaPropostaDTO> pendenciasGerais
+        List<PendenciaPropostaDTO> pendenciasGerais,
+
+        @Schema(description = "Orçamento monetário sugerido/extraído da campanha", example = "50000.00")
+        BigDecimal orcamentoSugerido,
+
+        @Schema(description = "Detalhes estruturados da extração do orçamento")
+        OrcamentoExtraidoDTO orcamentoExtraido
 ) {
     public InterpretacaoMultiplaResponse(String tituloSugerido, List<PropostaRegraDTO> propostas, Integer quantidadeBlocos,
                                          Boolean possuiPendencias, Boolean todasCompletas, BigDecimal confiancaGeral) {
-        this(tituloSugerido, propostas, quantidadeBlocos, possuiPendencias, todasCompletas, confiancaGeral, null);
+        this(tituloSugerido, propostas, quantidadeBlocos, possuiPendencias, todasCompletas, confiancaGeral, null, null, null);
+    }
+
+    public InterpretacaoMultiplaResponse(String tituloSugerido, List<PropostaRegraDTO> propostas, Integer quantidadeBlocos,
+                                         Boolean possuiPendencias, Boolean todasCompletas, BigDecimal confiancaGeral,
+                                         List<PendenciaPropostaDTO> pendenciasGerais) {
+        this(tituloSugerido, propostas, quantidadeBlocos, possuiPendencias, todasCompletas, confiancaGeral, pendenciasGerais, null, null);
     }
 
     public InterpretacaoMultiplaResponse {
@@ -49,6 +61,9 @@ public record InterpretacaoMultiplaResponse(
         if (todasCompletas == null) {
             boolean temImpeditivaGeral = pendenciasGerais.stream().anyMatch(PendenciaPropostaDTO::isImpeditiva);
             todasCompletas = !propostas.isEmpty() && !temImpeditivaGeral && propostas.stream().allMatch(p -> Boolean.TRUE.equals(p.completa()));
+        }
+        if (orcamentoSugerido == null && orcamentoExtraido != null) {
+            orcamentoSugerido = orcamentoExtraido.valor();
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.bugbusters.backend.dto.calculo;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
@@ -21,5 +22,15 @@ public record CalculoImpedimentoDTO(
     BigDecimal valorVenda,
 
     @Schema(description = "Motivo detalhado do impedimento", example = "Taxa base de comissão não encontrada para Marca 10 e Cargo 200")
-    String motivo
-) {}
+    String motivo,
+
+    @Schema(description = "Classificação padronizada do impedimento", example = "BASE_COMISS_AUSENTE")
+    String tipoImpedimento,
+
+    @JsonIgnore
+    Integer codMarca
+) {
+    public CalculoImpedimentoDTO(UUID idVenda, String matricula, LocalDate dataVenda, BigDecimal valorVenda, String motivo) {
+        this(idVenda, matricula, dataVenda, valorVenda, motivo, "IMPEDIMENTO_CALCULO", null);
+    }
+}

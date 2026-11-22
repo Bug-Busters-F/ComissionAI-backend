@@ -29,12 +29,34 @@ public class EnvioArquivoTxService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public EnvioArquivo criarLotePendente(String idLote, String nomeArquivo, ImportType tipoBase, String competencia, String hashConteudo) {
+        return criarLotePendente(idLote, nomeArquivo, tipoBase, competencia, hashConteudo, null);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public EnvioArquivo criarLotePendente(String idLote, String nomeArquivo, ImportType tipoBase, String competencia, String hashConteudo, java.util.UUID arquivoImportacaoId) {
+        return criarLotePendente(idLote, nomeArquivo, tipoBase, competencia, hashConteudo, arquivoImportacaoId, "SISTEMA", null);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public EnvioArquivo criarLotePendente(
+            String idLote,
+            String nomeArquivo,
+            ImportType tipoBase,
+            String competencia,
+            String hashConteudo,
+            java.util.UUID arquivoImportacaoId,
+            String criadoPor,
+            String perfilCriador
+    ) {
         EnvioArquivo envio = new EnvioArquivo();
         envio.setIdLote(idLote);
         envio.setNomeArquivo(nomeArquivo != null ? nomeArquivo : "arquivo");
         envio.setTipoBase(tipoBase.name());
         envio.setCompetencia(competencia);
         envio.setHashConteudo(hashConteudo);
+        envio.setArquivoImportacaoId(arquivoImportacaoId);
+        envio.setCriadoPor(criadoPor);
+        envio.setPerfilCriador(perfilCriador);
         envio.setStatus(ImportStatus.PENDENTE.name());
         envio.setTotalLinhas(0);
         envio.setLinhasValidas(0);
@@ -115,6 +137,11 @@ public class EnvioArquivoTxService {
             }
             inconsistenciaRepository.saveAll(inconsistencias);
         });
+    }
+
+    @Transactional(readOnly = true)
+    public boolean existeInconsistenciaParaLote(String idLote) {
+        return idLote != null && !idLote.isBlank() && inconsistenciaRepository.existsByEnvioIdLote(idLote);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

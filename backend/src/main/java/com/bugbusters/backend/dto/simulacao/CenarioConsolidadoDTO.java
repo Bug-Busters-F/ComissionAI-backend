@@ -45,5 +45,19 @@ public record CenarioConsolidadoDTO(
         int qtdVendasComRegraAplicada,
 
         @Schema(description = "Quantidade de vendas que recorreram ao fallback na base contratual", example = "50")
-        int qtdVendasComFallbackBase
-) {}
+        int qtdVendasComFallbackBase,
+
+        @Schema(description = "Indicadores de enquadramento orçamentário para este cenário (BACK-8)")
+        EnquadramentoOrcamentoCenarioDTO enquadramento
+) {
+    public CenarioConsolidadoDTO(
+            BigDecimal fatorEscala, String descricao, BigDecimal totalVendas, BigDecimal totalComissaoBase,
+            BigDecimal totalComissaoProposta, BigDecimal deltaComissao, BigDecimal deltaPercentual,
+            BigDecimal taxaMediaEfetivaBase, BigDecimal taxaMediaEfetivaProposta, BigDecimal comissaoProjetada,
+            BigDecimal deltaProjetado, int qtdVendasComMudancaFaixa, int qtdVendasComRegraAplicada, int qtdVendasComFallbackBase
+    ) {
+        this(fatorEscala, descricao, totalVendas, totalComissaoBase, totalComissaoProposta, deltaComissao,
+                deltaPercentual, taxaMediaEfetivaBase, taxaMediaEfetivaProposta, comissaoProjetada, deltaProjetado,
+                qtdVendasComMudancaFaixa, qtdVendasComRegraAplicada, qtdVendasComFallbackBase, null);
+    }
+}

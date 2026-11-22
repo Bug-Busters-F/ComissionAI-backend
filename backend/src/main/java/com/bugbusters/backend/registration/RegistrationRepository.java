@@ -14,6 +14,8 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
 
     boolean existsByRegistration(String registration);
 
+    java.util.List<Registration> findByRegistrationIn(java.util.Collection<String> registrations);
+
     public Optional<Registration> findByRegistrationIgnoreCase(String registration);
 
     @org.springframework.data.jpa.repository.Query("""
@@ -33,6 +35,8 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
     boolean existsByPositionId(UUID positionId);
 
     java.util.List<Registration> findByIdLoteOrigem(String idLoteOrigem);
+
+    java.util.List<Registration> findByIdLoteUltimaAlteracao(String idLoteUltimaAlteracao);
 
     long countByIdLoteOrigem(String idLoteOrigem);
 

@@ -17,12 +17,17 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.importbase.EnvioArquivoTxService;
 import com.bugbusters.backend.importbase.ImportInconsistencySeverity;
 import com.bugbusters.backend.importbase.ImportType;
 import com.bugbusters.backend.importbase.reader.*;
+import com.bugbusters.backend.importbase.validation.ErroValidacaoLinhaDTO;
+import com.bugbusters.backend.importbase.validation.HrRowValidator;
+import com.bugbusters.backend.importbase.validation.SalesRowValidator;
 import com.bugbusters.backend.model.InconsistenciaImportacao;
 import com.bugbusters.backend.registration.*;
 import com.bugbusters.backend.sales.*;
@@ -42,12 +47,16 @@ public class ImportTasklet implements Tasklet {
     private final BaseComissRepository commissions;
     private final EntityManager entityManager;
     private final EnvioArquivoTxService txService;
+    private final HrRowValidator hrRowValidator;
+    private final SalesRowValidator salesRowValidator;
 
     public ImportTasklet(HrFileReader hrReader, SalesFileReader salesReader, CommissFileReader commissReader,
             RegistrationMapper registrationMapper, RegistrationRepository registrations,
             SaleMapper saleMapper, SaleRepository sales, BaseComissMapper commissMapper,
             BaseComissRepository commissions, EntityManager entityManager,
-            EnvioArquivoTxService txService) {
+            EnvioArquivoTxService txService,
+            HrRowValidator hrRowValidator,
+            SalesRowValidator salesRowValidator) {
         this.hrReader = hrReader;
         this.salesReader = salesReader;
         this.commissReader = commissReader;
@@ -59,7 +68,11 @@ public class ImportTasklet implements Tasklet {
         this.commissions = commissions;
         this.entityManager = entityManager;
         this.txService = txService;
+        this.hrRowValidator = hrRowValidator;
+        this.salesRowValidator = salesRowValidator;
     }
+
+    private static final Pattern PATTERN_LINHA_MENSAGEM = Pattern.compile("^Linha\\s+(\\d+):\\s*(.+)$", Pattern.DOTALL);
 
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext context) throws Exception {
@@ -69,139 +82,195 @@ public class ImportTasklet implements Tasklet {
         var executionContext = contribution.getStepExecution().getJobExecution().getExecutionContext();
 
         try (InputStream input = Files.newInputStream(Path.of(parameters.getString("filePath")))) {
-            switch (type) {
-                case HR -> {
-                    Set<String> matriculasProcessadasNoArquivo = new HashSet<>();
-                    int[] ignoradasExistentes = new int[]{0};
+            try {
+                switch (type) {
+                    case HR -> {
+                        Set<String> matriculasProcessadasNoArquivo = new HashSet<>();
+                        int[] ignoradasExistentes = new int[]{0};
 
-                    hrReader.forEach(input, row -> {
-                        required(row.getRegistration(), "matrícula");
-                        required(row.getStoreCode(), "código da loja");
-                        required(row.getPositionCode(), "código do cargo");
-                        required(row.getAdmissDate(), "data de admissão");
+                        hrReader.forEach(input, row -> {
+                            List<ErroValidacaoLinhaDTO> erros = hrRowValidator.validar(row);
+                            boolean temImpeditivo = erros.stream()
+                                    .anyMatch(e -> e.severidade() == ImportInconsistencySeverity.IMPEDITIVO);
+                            if (temImpeditivo) {
+                                int numLinha = row.getLinha() > 0 ? row.getLinha() : (int) (contribution.getReadCount() + 2);
+                                List<InconsistenciaImportacao> falhas = erros.stream()
+                                        .map(e -> new InconsistenciaImportacao(null, numLinha, e.campo(), e.motivo(), e.severidade().name()))
+                                        .toList();
+                                txService.salvarInconsistenciasPorIdLote(requestId, falhas);
+                                String motivoPrimeiro = erros.stream()
+                                        .filter(e -> e.severidade() == ImportInconsistencySeverity.IMPEDITIVO)
+                                        .map(ErroValidacaoLinhaDTO::motivo)
+                                        .findFirst()
+                                        .orElse("Erro de validação impeditivo.");
+                                throw new BusinessException(motivoPrimeiro);
+                            }
 
-                        contribution.incrementReadCount();
+                            contribution.incrementReadCount();
 
-                        String matricula = row.getRegistration().trim();
-                        if (!matriculasProcessadasNoArquivo.add(matricula) || registrations.existsByRegistration(matricula)) {
-                            ignoradasExistentes[0]++;
-                            return;
+                            String matricula = row.getRegistration().trim();
+                            if (!matriculasProcessadasNoArquivo.add(matricula) || registrations.existsByRegistration(matricula)) {
+                                ignoradasExistentes[0]++;
+                                return;
+                            }
+
+                            Registration registration = registrationMapper.toEntity(row);
+                            registration.setIdLoteOrigem(requestId);
+                            registrations.save(registration);
+                            recordWrite(contribution);
+                        });
+
+                        long writeCount = contribution.getWriteCount();
+                        if (writeCount == 0) {
+                            String msg = String.format("Arquivo processado com sucesso. Nenhuma nova matrícula cadastrada (%d matrículas já existiam no banco).",
+                                    ignoradasExistentes[0]);
+                            executionContext.putString("warningMessage", msg);
+                        } else if (ignoradasExistentes[0] > 0) {
+                            String msg = String.format("Importação concluída com sucesso: %d novas matrículas cadastradas, %d ignoradas por já existirem.",
+                                    writeCount, ignoradasExistentes[0]);
+                            executionContext.putString("warningMessage", msg);
                         }
-
-                        Registration registration = registrationMapper.toEntity(row);
-                        registration.setIdLoteOrigem(requestId);
-                        registrations.save(registration);
-                        recordWrite(contribution);
-                    });
-
-                    long writeCount = contribution.getWriteCount();
-                    if (writeCount == 0) {
-                        String msg = String.format("Arquivo processado com sucesso. Nenhuma nova matrícula cadastrada (%d matrículas já existiam no banco).",
-                                ignoradasExistentes[0]);
-                        executionContext.putString("warningMessage", msg);
-                    } else if (ignoradasExistentes[0] > 0) {
-                        String msg = String.format("Importação concluída com sucesso: %d novas matrículas cadastradas, %d ignoradas por já existirem.",
-                                writeCount, ignoradasExistentes[0]);
-                        executionContext.putString("warningMessage", msg);
                     }
-                }
-                case SALES -> {
-                    String compParam = parameters.getString("competencia");
-                    if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
-                        throw new BusinessException("Competência não informada ou inválida para importação de vendas.");
-                    }
-                    YearMonth compYm = YearMonth.parse(compParam);
-                    List<InconsistenciaImportacao> inconsistencias = new ArrayList<>();
+                    case SALES -> {
+                        String compParam = parameters.getString("competencia");
+                        if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                            throw new BusinessException("Competência não informada ou inválida para importação de vendas.");
+                        }
+                        YearMonth compYm = YearMonth.parse(compParam);
+                        List<InconsistenciaImportacao> inconsistencias = new ArrayList<>();
 
-                    salesReader.forEach(input, row -> {
-                        required(row.getRegistration(), "matrícula");
-                        required(row.getStoreCode(), "código da loja");
-                        required(row.getBrandCode(), "código da marca");
-                        required(row.getReferenceDate(), "data de referência");
-                        required(row.getSaleValue(), "valor da venda");
+                        salesReader.forEach(input, row -> {
+                            List<ErroValidacaoLinhaDTO> erros = salesRowValidator.validar(row, compYm);
+                            boolean temImpeditivo = erros.stream()
+                                    .anyMatch(e -> e.severidade() == ImportInconsistencySeverity.IMPEDITIVO);
+                            if (temImpeditivo) {
+                                int numLinha = row.getLinha() > 0 ? row.getLinha() : (int) (contribution.getReadCount() + 2);
+                                List<InconsistenciaImportacao> paraSalvar = new ArrayList<>(inconsistencias);
+                                for (ErroValidacaoLinhaDTO erro : erros) {
+                                    paraSalvar.add(new InconsistenciaImportacao(
+                                            null, numLinha, erro.campo(), erro.motivo(), erro.severidade().name()));
+                                }
+                                txService.salvarInconsistenciasPorIdLote(requestId, paraSalvar);
+                                String motivoPrimeiro = erros.stream()
+                                        .filter(e -> e.severidade() == ImportInconsistencySeverity.IMPEDITIVO)
+                                        .map(ErroValidacaoLinhaDTO::motivo)
+                                        .findFirst()
+                                        .orElse("Erro de validação impeditivo.");
+                                throw new BusinessException(motivoPrimeiro);
+                            }
 
-                        if (!YearMonth.from(row.getReferenceDate()).equals(compYm)) {
-                            throw new BusinessException(String.format(
-                                    "Linha com data de referência '%s' diverge da competência informada '%s' para o lote de vendas.",
-                                    row.getReferenceDate(), compParam
-                            ));
+                            contribution.incrementReadCount();
+
+                            Sale sale = saleMapper.toEntity(row);
+                            if (sale == null) {
+                                int numLinha = row.getLinha() > 0 ? row.getLinha() : (int) (contribution.getReadCount() + 1);
+                                inconsistencias.add(new InconsistenciaImportacao(
+                                        null,
+                                        numLinha,
+                                        "matricula",
+                                        "Matrícula não cadastrada: " + row.getRegistration(),
+                                        ImportInconsistencySeverity.ADVERTENCIA.name()
+                                ));
+                                return;
+                            }
+                            sale.setIdLoteOrigem(requestId);
+                            sales.save(sale);
+                            recordWrite(contribution);
+                        });
+
+                        if (contribution.getWriteCount() == 0) {
+                            if (!inconsistencias.isEmpty()) {
+                                txService.salvarInconsistenciasPorIdLote(requestId, inconsistencias);
+                                InconsistenciaImportacao prim = inconsistencias.get(0);
+                                throw new BusinessException("Linha " + prim.getLinha() + ": " + prim.getMotivo());
+                            }
+                            throw new BusinessException("Nenhuma venda válida encontrada no arquivo.");
                         }
 
-                        contribution.incrementReadCount();
-
-                        Sale sale = saleMapper.toEntity(row);
-                        if (sale == null) {
-                            int numLinha = row.getLinha() > 0 ? row.getLinha() : (int) (contribution.getReadCount() + 1);
-                            inconsistencias.add(new InconsistenciaImportacao(
-                                    null,
-                                    numLinha,
-                                    "matricula",
-                                    "Matrícula não cadastrada: " + row.getRegistration(),
-                                    ImportInconsistencySeverity.ADVERTENCIA.name()
-                            ));
-                            return;
-                        }
-                        sale.setIdLoteOrigem(requestId);
-                        sales.save(sale);
-                        recordWrite(contribution);
-                    });
-
-                    if (contribution.getWriteCount() == 0) {
                         if (!inconsistencias.isEmpty()) {
-                            InconsistenciaImportacao prim = inconsistencias.get(0);
-                            throw new BusinessException("Linha " + prim.getLinha() + ": " + prim.getMotivo());
+                            txService.salvarInconsistenciasPorIdLote(requestId, inconsistencias);
+                            String msg = String.format("Importação concluída com advertências: %d vendas importadas com sucesso, %d linhas ignoradas por inconsistência.",
+                                    contribution.getWriteCount(), inconsistencias.size());
+                            executionContext.putString("warningMessage", msg);
                         }
-                        throw new BusinessException("Nenhuma venda válida encontrada no arquivo.");
                     }
+                    case COMISSIONS -> {
+                        String compParam = parameters.getString("competencia");
+                        if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+                            throw new BusinessException("Competência não informada ou inválida para importação de comissões.");
+                        }
+                        LocalDate referenceMonth = YearMonth.parse(compParam).atDay(1);
+                        Set<String> paresArquivo = new HashSet<>();
 
-                    if (!inconsistencias.isEmpty()) {
-                        txService.salvarInconsistenciasPorIdLote(requestId, inconsistencias);
-                        String msg = String.format("Importação concluída com advertências: %d vendas importadas com sucesso, %d linhas ignoradas por inconsistência.",
-                                contribution.getWriteCount(), inconsistencias.size());
-                        executionContext.putString("warningMessage", msg);
+                        commissReader.forEach(input, row -> {
+                            required(row.getBrandCode(), "código da marca");
+                            required(row.getPositionCode(), "código do cargo");
+                            required(row.getPercentage(), "percentual");
+
+                            contribution.incrementReadCount();
+
+                            String par = row.getBrandCode() + ":" + row.getPositionCode();
+                            if (!paresArquivo.add(par)) {
+                                throw new BusinessException(String.format(
+                                        "Linha duplicada na planilha para marca %d e cargo %d na competência %s.",
+                                        row.getBrandCode(), row.getPositionCode(), compParam
+                                ));
+                            }
+
+                            if (commissions.existsByBrandCodeAndPositionCodeAndReferenceMonth(
+                                    row.getBrandCode(), row.getPositionCode(), referenceMonth)) {
+                                throw new BusinessException(String.format(
+                                        "Já existe taxa base cadastrada para a marca %d e cargo %d na competência %s.",
+                                        row.getBrandCode(), row.getPositionCode(), compParam
+                                ));
+                            }
+
+                            BaseComiss baseComiss = commissMapper.toEntity(row, referenceMonth);
+                            baseComiss.setIdLoteOrigem(requestId);
+                            commissions.save(baseComiss);
+                            recordWrite(contribution);
+                        });
                     }
                 }
-                case COMISSIONS -> {
-                    String compParam = parameters.getString("competencia");
-                    if (compParam == null || !compParam.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
-                        throw new BusinessException("Competência não informada ou inválida para importação de comissões.");
-                    }
-                    LocalDate referenceMonth = YearMonth.parse(compParam).atDay(1);
-                    Set<String> paresArquivo = new HashSet<>();
-
-                    commissReader.forEach(input, row -> {
-                        required(row.getBrandCode(), "código da marca");
-                        required(row.getPositionCode(), "código do cargo");
-                        required(row.getPercentage(), "percentual");
-
-                        contribution.incrementReadCount();
-
-                        String par = row.getBrandCode() + ":" + row.getPositionCode();
-                        if (!paresArquivo.add(par)) {
-                            throw new BusinessException(String.format(
-                                    "Linha duplicada na planilha para marca %d e cargo %d na competência %s.",
-                                    row.getBrandCode(), row.getPositionCode(), compParam
-                            ));
-                        }
-
-                        if (commissions.existsByBrandCodeAndPositionCodeAndReferenceMonth(
-                                row.getBrandCode(), row.getPositionCode(), referenceMonth)) {
-                            throw new BusinessException(String.format(
-                                    "Já existe taxa base cadastrada para a marca %d e cargo %d na competência %s.",
-                                    row.getBrandCode(), row.getPositionCode(), compParam
-                            ));
-                        }
-
-                        BaseComiss baseComiss = commissMapper.toEntity(row, referenceMonth);
-                        baseComiss.setIdLoteOrigem(requestId);
-                        commissions.save(baseComiss);
-                        recordWrite(contribution);
-                    });
+            } catch (BusinessException ex) {
+                if (!txService.existeInconsistenciaParaLote(requestId)) {
+                    persistirErroFallback(requestId, ex.getMessage());
                 }
+                throw ex;
             }
         }
         entityManager.flush();
         return RepeatStatus.FINISHED;
+    }
+
+    private void persistirErroFallback(String requestId, String mensagem) {
+        if (requestId == null || requestId.isBlank()) {
+            return;
+        }
+        int linha = 0;
+        String detalhe = mensagem != null && !mensagem.isBlank() ? mensagem : "Falha na validação do arquivo.";
+        Matcher m = PATTERN_LINHA_MENSAGEM.matcher(detalhe);
+        if (m.matches()) {
+            try {
+                linha = Integer.parseInt(m.group(1));
+                detalhe = m.group(2);
+            } catch (NumberFormatException ignored) {}
+        }
+        String campo = inferirCampo(detalhe);
+        txService.salvarInconsistenciasPorIdLote(requestId, List.of(
+                new InconsistenciaImportacao(null, linha, campo, detalhe, ImportInconsistencySeverity.IMPEDITIVO.name())
+        ));
+    }
+
+    private String inferirCampo(String mensagem) {
+        if (mensagem == null) return "arquivo";
+        String lower = mensagem.toLowerCase();
+        if (lower.contains("marca") && lower.contains("cargo")) return "regraBase";
+        if (lower.contains("marca")) return "codigoMarca";
+        if (lower.contains("cargo")) return "codigoCargo";
+        if (lower.contains("percentual")) return "percentual";
+        if (lower.contains("competência") || lower.contains("competencia")) return "competencia";
+        return "arquivo";
     }
 
     private void recordWrite(StepContribution contribution) {

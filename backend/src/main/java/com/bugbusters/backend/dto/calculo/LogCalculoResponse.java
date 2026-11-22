@@ -5,6 +5,9 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import com.bugbusters.backend.dto.auditoria.AuditoriaRelacionamentosDTO;
+import com.bugbusters.backend.dto.auditoria.RelacionamentoArquivoResumoDTO;
+import com.bugbusters.backend.dto.auditoria.RelacionamentoCampanhaResumoDTO;
 import com.bugbusters.backend.model.LogCalculoImutavel;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -74,8 +77,37 @@ public record LogCalculoResponse(
     String versaoRegra,
 
     @Schema(description = "Cópia dos parâmetros efetivamente aplicados no momento da execução em formato estruturado", example = "{\"taxaAplicada\":0.1000,...}")
-    String parametrosAplicados
+    String parametrosAplicados,
+
+    @Schema(description = "Perfil de acesso do usuário executor no momento do cálculo", example = "GERENTE_VENDAS")
+    String perfilExecutor,
+
+    @Schema(description = "Identificador da apuração definitiva de campanha vinculada, quando aplicável")
+    UUID apuracaoCampanhaId,
+
+    @Schema(description = "Identificador do fechamento de competência vinculado, quando aplicável")
+    UUID fechamentoId,
+
+    @Schema(description = "Relacionamentos resolvidos do cálculo com campanha, arquivo/lote e contexto")
+    AuditoriaRelacionamentosDTO relacionamentos
 ) {
+
+    /**
+     * Construtor de compatibilidade com os 22 parâmetros anteriores.
+     */
+    public LogCalculoResponse(
+            UUID idLog, UUID protocolo, UUID idVenda, String matricula, Integer codCargo,
+            Integer codLoja, Integer codMarca, BigDecimal valorOriginal, BigDecimal valorVenda,
+            BigDecimal taxaAplicada, BigDecimal valorComissao, Long idRegra, String origemTaxa,
+            LocalDate dataVenda, String canal, String origemExecucao, String usuarioExecutor,
+            OffsetDateTime executadoEm, String tipoVenda, String idLoteOrigem,
+            String versaoRegra, String parametrosAplicados
+    ) {
+        this(idLog, protocolo, idVenda, matricula, codCargo, codLoja, codMarca, valorOriginal, valorVenda,
+                taxaAplicada, valorComissao, idRegra, origemTaxa, dataVenda, canal, origemExecucao,
+                usuarioExecutor, executadoEm, tipoVenda, idLoteOrigem, versaoRegra, parametrosAplicados,
+                null, null, null, null);
+    }
 
     /**
      * Construtor de compatibilidade para código ou testes com 17 parâmetros.
@@ -102,9 +134,22 @@ public record LogCalculoResponse(
      * Constrói o DTO completo preservando todos os valores históricos e referências da entidade imutável de log.
      */
     public static LogCalculoResponse fromEntity(LogCalculoImutavel log) {
+        return fromEntity(log, null, null, null, null);
+    }
+
+    public static LogCalculoResponse fromEntity(
+            LogCalculoImutavel log,
+            RelacionamentoCampanhaResumoDTO campanha,
+            RelacionamentoArquivoResumoDTO arquivo,
+            UUID apuracaoCampanhaId,
+            UUID fechamentoId
+    ) {
         if (log == null) {
             return null;
         }
+        AuditoriaRelacionamentosDTO relacionamentos = (campanha != null || arquivo != null)
+                ? new AuditoriaRelacionamentosDTO(campanha, arquivo, null)
+                : null;
         return new LogCalculoResponse(
                 log.getId(),
                 log.getProtocolo(),
@@ -127,7 +172,11 @@ public record LogCalculoResponse(
                 log.getTipoVenda(),
                 log.getIdLoteOrigem(),
                 log.getVersaoOuReferenciaRegra(),
-                log.getParametrosAplicados()
+                log.getParametrosAplicados(),
+                log.getPerfilExecutor(),
+                apuracaoCampanhaId,
+                fechamentoId,
+                relacionamentos
         );
     }
 }

@@ -4,6 +4,7 @@ import com.bugbusters.backend.basecomiss.BaseComiss;
 import com.bugbusters.backend.basecomiss.BaseComissRepository;
 import com.bugbusters.backend.brand.Brand;
 import com.bugbusters.backend.brand.BrandRepository;
+import com.bugbusters.backend.dto.campanha.AprovacaoCodigoCampanhaRequest;
 import com.bugbusters.backend.dto.campanha.CampanhaRequest;
 import com.bugbusters.backend.dto.campanha.RegraItemRequest;
 import com.bugbusters.backend.dto.interpretador.proposta.TipoOperacaoBase;
@@ -171,7 +172,8 @@ class SimulacaoAceiteAtivacaoTest {
         CampanhaRequest req = new CampanhaRequest(
                 "Campanha Teste BACK-8", "Texto original",
                 LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30),
-                EstadoCampanha.DRAFT, List.of(regraDTO)
+                EstadoCampanha.DRAFT, List.of(regraDTO),
+                new BigDecimal("50000.00"), null, true, "analista", null
         );
 
         var resp = campanhaService.criarCampanha(req);
@@ -246,7 +248,8 @@ class SimulacaoAceiteAtivacaoTest {
         CampanhaRequest reqCamp = new CampanhaRequest(
                 "Campanha Com Impedimento", "Texto",
                 LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31),
-                EstadoCampanha.DRAFT, List.of(regraComImpedimento)
+                EstadoCampanha.DRAFT, List.of(regraComImpedimento),
+                new BigDecimal("50000.00"), null, true, "analista", null
         );
         var respCamp = campanhaService.criarCampanha(reqCamp);
 
@@ -407,7 +410,17 @@ class SimulacaoAceiteAtivacaoTest {
         SimulacaoCenariosResponse simResp = simulacaoService.simularEPersistir(simReq);
         simulacaoService.aceitarSimulacao(simResp.id(), new AceiteSimulacaoRequest("gestor@empresa.com", "Aceite"));
 
-        // Após aceite: aptaParaAtivacao deve ser true
+        // Após aceite mas antes da aprovação do código: aptaParaAtivacao deve permanecer false (FRONT-9)
+        mockMvc.perform(get("/api/v1/campanhas/" + campanha.getId() + "/conferencia-simulacao"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.aptaParaAtivacao").value(false))
+                .andExpect(jsonPath("$.statusAceite").value("ACEITA"))
+                .andExpect(jsonPath("$.divergencias", hasItem(containsString("código"))));
+
+        // Após aprovação do código: aptaParaAtivacao deve ser true
+        campanhaService.aprovarCodigoCampanha(campanha.getId(),
+                new AprovacaoCodigoCampanhaRequest(true, "Código aprovado", "revisor@empresa.com"));
+
         mockMvc.perform(get("/api/v1/campanhas/" + campanha.getId() + "/conferencia-simulacao"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.aptaParaAtivacao").value(true))
@@ -416,7 +429,7 @@ class SimulacaoAceiteAtivacaoTest {
     }
 
     @Test
-    @DisplayName("Fluxo completo homologado: DRAFT -> Simulação -> Aceite -> Ativação")
+    @DisplayName("Fluxo completo homologado: DRAFT -> Simulação -> Aceite -> Aprovação de Código -> Ativação")
     void deveExecutarFluxoCompletoDeAtivacaoComSucesso() throws Exception {
         // 1. Simular e persistir
         SimulacaoCenariosRequest simReq = new SimulacaoCenariosRequest(
@@ -429,6 +442,16 @@ class SimulacaoAceiteAtivacaoTest {
         mockMvc.perform(post("/api/v1/simulacoes/" + simResp.id() + "/aceite")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AceiteSimulacaoRequest("comite@empresa.com", "Homologado"))))
+                .andExpect(status().isOk());
+
+        // 2.5. Tentar ativar sem aprovação de código deve ser bloqueado (400)
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar"))
+                .andExpect(status().isBadRequest());
+
+        // 2.6. Aprovar código Python da proposta (FRONT-9)
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Código revisado\"}"))
                 .andExpect(status().isOk());
 
         // 3. Ativar campanha
@@ -480,6 +503,9 @@ class SimulacaoAceiteAtivacaoTest {
         aceitar(segunda.id());
         assertThat(campanha.getVersaoVigente()).isSameAs(vigente);
         assertThat(regrasVigentes).allMatch(r -> r.getStatus() == StatusRegra.ATIVA && r.getTaxa().compareTo(new BigDecimal("0.0500")) == 0);
+        assertThat(campanhaService.conferirSimulacao(campanha.getId()).aptaParaAtivacao()).isFalse();
+        campanhaService.aprovarCodigoCampanha(campanha.getId(),
+                new AprovacaoCodigoCampanhaRequest(true, "Código v2 aprovado", "revisor@empresa.com"));
         assertThat(campanhaService.conferirSimulacao(campanha.getId()).aptaParaAtivacao()).isTrue();
         assertThat(simulacaoRepository.findById(primeira.id()).orElseThrow().getStatusAceite()).isEqualTo(StatusAceiteSimulacao.ACEITA);
     }
@@ -498,6 +524,8 @@ class SimulacaoAceiteAtivacaoTest {
         mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":99}"))
                 .andExpect(status().isConflict());
+        campanhaService.aprovarCodigoCampanha(campanha.getId(),
+                new AprovacaoCodigoCampanhaRequest(true, "Código v2 aprovado", "revisor@empresa.com"));
         mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar")
                         .header("X-Campanha-Revisao", campanha.getVersaoControle())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"versaoEsperada\":1}"))
@@ -554,6 +582,60 @@ class SimulacaoAceiteAtivacaoTest {
         assertThat(campanha.getVersaoVigente().getNumero()).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("FRONT-9: Deve bloquear ativação quando código estiver REJEITADO ou artefato for alterado após aprovação")
+    void deveBloquearAtivacaoQuandoCodigoRejeitadoOuArtefatoAlterado() throws Exception {
+        var sim = simularAtual();
+        aceitar(sim.id());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":false,\"motivo\":\"Lógica incorreta\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/aprovacao-codigo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"aprovado\":true,\"motivo\":\"Corrigido\"}"))
+                .andExpect(status().isOk());
+
+        // Simula alteração direta de artefato após aprovação do código
+        List<Regra> regras = regraRepository.findAllByCampanhaIdAndRemovidoEmIsNullOrderByIdAsc(campanha.getId());
+        regras.get(0).setPythonEquivalente("taxa = 0.9999");
+        regraRepository.save(regras.get(0));
+
+        mockMvc.perform(get("/api/v1/campanhas/" + campanha.getId() + "/conferencia-simulacao"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.aptaParaAtivacao").value(false));
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("FRONT-9: Deve bloquear ativação quando cenário base 100% exceder teto orçamentário")
+    void deveBloquearAtivacaoQuandoCenario100ExcederOrcamento() throws Exception {
+        var sim = simularAtual();
+        aceitar(sim.id());
+        campanhaService.aprovarCodigoCampanha(campanha.getId(),
+                new AprovacaoCodigoCampanhaRequest(true, "Código aprovado", "revisor@empresa.com"));
+
+        Simulacao simEntity = simulacaoRepository.findById(sim.id()).orElseThrow();
+        simEntity.setEnquadrado100(false);
+        simEntity.setStatusEnquadramento100(StatusEnquadramentoOrcamento.ACIMA_DO_TETO);
+        simulacaoRepository.save(simEntity);
+
+        mockMvc.perform(get("/api/v1/campanhas/" + campanha.getId() + "/conferencia-simulacao"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.aptaParaAtivacao").value(false))
+                .andExpect(jsonPath("$.divergencias", hasItem(containsString("orçamento"))));
+
+        mockMvc.perform(post("/api/v1/campanhas/" + campanha.getId() + "/ativar"))
+                .andExpect(status().isBadRequest());
+    }
+
     private SimulacaoCenariosResponse simularAtual() {
         // Omite datas para verificar a resolução da vigência da proposta, sem usar a versão vigente.
         return simulacaoService.simularEPersistir(new SimulacaoCenariosRequest(
@@ -573,6 +655,8 @@ class SimulacaoAceiteAtivacaoTest {
     private SimulacaoCenariosResponse publicarInicial() {
         var sim = simularAtual();
         aceitar(sim.id());
+        campanhaService.aprovarCodigoCampanha(campanha.getId(),
+                new AprovacaoCodigoCampanhaRequest(true, "Código aprovado para publicação", "revisor@empresa.com"));
         campanhaService.ativarCampanha(campanha.getId());
         return sim;
     }
@@ -583,7 +667,8 @@ class SimulacaoAceiteAtivacaoTest {
                 TipoOperacaoBase.DEFINIR_TAXA, null, null, null, null,
                 new BigDecimal(taxa), null, null, List.of(), true, StatusRegra.DRAFT);
         return new CampanhaRequest("Campanha revisada", "Texto revisado", campanha.getDataInicio(),
-                campanha.getDataFim(), EstadoCampanha.DRAFT, List.of(regra));
+                campanha.getDataFim(), EstadoCampanha.DRAFT, List.of(regra),
+                new BigDecimal("50000.00"), null, true, "analista", null);
     }
 
 }

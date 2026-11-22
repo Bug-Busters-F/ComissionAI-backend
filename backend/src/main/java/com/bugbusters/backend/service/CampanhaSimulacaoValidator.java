@@ -5,9 +5,12 @@ import com.bugbusters.backend.dto.simulacao.ConferenciaSimulacaoResponse;
 import com.bugbusters.backend.dto.simulacao.SimulacaoCenariosRequest;
 import com.bugbusters.backend.exception.BusinessException;
 import com.bugbusters.backend.model.Campanha;
+import com.bugbusters.backend.model.CampanhaVersao;
 import com.bugbusters.backend.model.Regra;
 import com.bugbusters.backend.model.Simulacao;
 import com.bugbusters.backend.model.StatusAceiteSimulacao;
+import com.bugbusters.backend.model.StatusAprovacaoCodigo;
+import com.bugbusters.backend.model.StatusEnquadramentoOrcamento;
 import com.bugbusters.backend.repository.RegraRepository;
 import com.bugbusters.backend.repository.SimulacaoRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -82,7 +85,65 @@ public class CampanhaSimulacaoValidator {
                     String.join("\n- ", divergencias)));
         }
 
+        List<String> divergenciasCodigo = detectarDivergenciasAprovacaoCodigo(campanha);
+        if (!divergenciasCodigo.isEmpty()) {
+            throw new BusinessException(divergenciasCodigo.get(0));
+        }
+
         return simulacaoAceita;
+    }
+
+    /**
+     * Valida se o código Python da versão e todas as regras vinculadas estão formalmente aprovados e íntegros (BACK-8 / FRONT-9).
+     */
+    public List<String> detectarDivergenciasAprovacaoCodigo(Campanha campanha) {
+        List<String> divergencias = new ArrayList<>();
+        if (campanha == null) {
+            return divergencias;
+        }
+        CampanhaVersao versao = campanha.versaoParaRevisao();
+        // The campaign-wide executable approval supersedes the legacy per-rule approvals.
+        if (versao != null && versao.getProgramaPythonAprovado() != null) {
+            var programa = versao.getProgramaPythonAprovado();
+            if (!programa.isAprovado() || programa.getCampanhaVersao() == null
+                    || !Objects.equals(versao.getId(), programa.getCampanhaVersao().getId())) {
+                divergencias.add("O programa atual precisa ser aprovado pelo Analista de Código antes da publicação.");
+            } else {
+                try {
+                    CampanhaProgramaPythonService.validarIntegridadePrograma(programa);
+                } catch (BusinessException ex) {
+                    divergencias.add("O programa aprovado foi alterado. Solicite uma nova revisão técnica.");
+                }
+            }
+            return divergencias;
+        }
+        List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
+
+        boolean versaoNaoAprovada = versao != null && versao.getStatusAprovacaoCodigo() != StatusAprovacaoCodigo.APROVADO;
+        boolean regraNaoAprovadaOuAlterada = regrasAtuais.stream().anyMatch(r -> {
+            if (r.getStatusAprovacaoCodigo() != StatusAprovacaoCodigo.APROVADO) {
+                return true;
+            }
+            String hashAtual = CampanhaService.calcularHashArtefatos(r);
+            return r.getHashArtefatosCodigo() != null && !r.getHashArtefatosCodigo().equals(hashAtual);
+        });
+
+        boolean hashVersaoAlterado = false;
+        if (versao != null && !regrasAtuais.isEmpty() && versao.getHashArtefatosCodigo() != null) {
+            StringBuilder hashVersaoBuilder = new StringBuilder();
+            for (Regra r : regrasAtuais) {
+                hashVersaoBuilder.append(CampanhaService.calcularHashArtefatos(r)).append(";");
+            }
+            String currentVersaoHash = CampanhaService.calcularHashString(hashVersaoBuilder.toString());
+            if (!versao.getHashArtefatosCodigo().equals(currentVersaoHash)) {
+                hashVersaoAlterado = true;
+            }
+        }
+
+        if (versaoNaoAprovada || regraNaoAprovadaOuAlterada || hashVersaoAlterado) {
+            divergencias.add("Ativação bloqueada: o código Python da versão precisa ser aprovado pelo Analista de Código antes da publicação. Regras invalidadas ou pendentes encontradas.");
+        }
+        return divergencias;
     }
 
     /**
@@ -129,6 +190,7 @@ public class CampanhaSimulacaoValidator {
         }
 
         divergencias.addAll(conferirDivergencias(campanha, simulacaoAceita));
+        divergencias.addAll(detectarDivergenciasAprovacaoCodigo(campanha));
 
         boolean apta = divergencias.isEmpty() && simulacaoAceita.getStatusAceite() == StatusAceiteSimulacao.ACEITA;
         String mensagem = apta
@@ -173,6 +235,14 @@ public class CampanhaSimulacaoValidator {
             divergencias.add("A simulação não possui assinatura da proposta.");
         }
 
+        var versaoAtual = campanha.versaoParaRevisao();
+        var programaAtual = versaoAtual != null ? versaoAtual.getProgramaPythonAprovado() : null;
+        if (programaAtual != null && (!simulacao.isExecutadoViaPython()
+                || !Objects.equals(programaAtual.getVersaoPrograma(), simulacao.getVersaoProgramaPython())
+                || !Objects.equals(programaAtual.getChecksumSha256(), simulacao.getChecksumPython()))) {
+            divergencias.add("A simulação não corresponde ao programa atualmente aprovado. Execute e aceite uma nova simulação.");
+        }
+
         // 1. Período
         if (!Objects.equals(campanha.inicioParaRevisao(), simulacao.getDataInicioCampanha())) {
             divergencias.add(String.format("Data de início atual (%s) difere da data simulada (%s).",
@@ -198,6 +268,30 @@ public class CampanhaSimulacaoValidator {
 
         if (hashSimulado != null && !hashSimulado.equalsIgnoreCase(hashCampanha)) {
             divergencias.add("Assinatura canônica (fingerprint) das regras e premissas difere do snapshot aprovado.");
+        }
+
+        // 3. Orçamento e Regras de Enquadramento (BACK-8)
+        BigDecimal orcamentoCampanha = campanha.orcamentoParaRevisao();
+        boolean orcamentoConfirmado = campanha.orcamentoConfirmadoParaRevisao();
+
+        if (orcamentoCampanha == null || orcamentoCampanha.compareTo(BigDecimal.ZERO) <= 0) {
+            divergencias.add("A campanha não possui orçamento monetário definido. Confirme ou informe o orçamento através da rota PATCH /api/v1/campanhas/{id}/orcamento antes de prosseguir.");
+        } else if (!orcamentoConfirmado) {
+            divergencias.add("O orçamento monetário da campanha ainda não foi confirmado explicitamente. Confirme o orçamento através da rota PATCH /api/v1/campanhas/{id}/orcamento antes de prosseguir.");
+        } else {
+            if (simulacao.getOrcamentoCampanha() != null && simulacao.getOrcamentoCampanha().compareTo(orcamentoCampanha) != 0) {
+                divergencias.add(String.format("O orçamento atual da proposta (R$ %s) difere do orçamento considerado na simulação (R$ %s).",
+                        orcamentoCampanha, simulacao.getOrcamentoCampanha()));
+            }
+            if (simulacao.getComissaoProjetada() != null && simulacao.getComissaoProjetada().compareTo(orcamentoCampanha) > 0) {
+                BigDecimal excedente = simulacao.getComissaoProjetada().subtract(orcamentoCampanha);
+                divergencias.add(String.format("O custo total projetado de comissões no cenário 100%% (R$ %s) excede o teto orçamentário da campanha (R$ %s) em R$ %s. Encaminhamento ao gerente e ativação bloqueados.",
+                        simulacao.getComissaoProjetada(), orcamentoCampanha, excedente));
+            }
+            if (Boolean.FALSE.equals(simulacao.getEnquadrado100())
+                    || StatusEnquadramentoOrcamento.ACIMA_DO_TETO.equals(simulacao.getStatusEnquadramento100())) {
+                divergencias.add("O cenário base de 100% da meta excede o orçamento confirmado da campanha.");
+            }
         }
 
         return divergencias;

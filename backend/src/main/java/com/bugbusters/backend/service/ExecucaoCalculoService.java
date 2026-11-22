@@ -1,13 +1,20 @@
 package com.bugbusters.backend.service;
 
+import com.bugbusters.backend.auth.Usuario;
+import com.bugbusters.backend.dto.auditoria.AuditoriaEventoContexto;
 import com.bugbusters.backend.dto.execucao.*;
 import com.bugbusters.backend.exception.*;
 import com.bugbusters.backend.model.*;
 import com.bugbusters.backend.repository.ExecucaoCalculoRepository;
 import com.bugbusters.backend.service.lock.TravaCompetencia;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -18,6 +25,7 @@ import java.util.*;
 
 @Service
 public class ExecucaoCalculoService {
+    private static final Logger log = LoggerFactory.getLogger(ExecucaoCalculoService.class);
     private final ExecucaoCalculoRepository repository;
     private final ReferenciasExecucaoCalculoService referencias;
     private final ExecucaoCalculoWorker worker;
@@ -26,6 +34,10 @@ public class ExecucaoCalculoService {
     private final TransactionTemplate isolated;
     private static final List<StatusExecucaoCalculo> ATIVAS=List.of(StatusExecucaoCalculo.SOLICITADA,StatusExecucaoCalculo.PROCESSANDO);
 
+    @Autowired(required = false)
+    private AuditoriaGeralService auditoriaService;
+
+    @Autowired
     public ExecucaoCalculoService(ExecucaoCalculoRepository repository, ReferenciasExecucaoCalculoService referencias,
             ExecucaoCalculoWorker worker,@Qualifier("execucaoCalculoExecutor") TaskExecutor executor,
             TravaCompetencia trava,PlatformTransactionManager manager) {
@@ -36,6 +48,9 @@ public class ExecucaoCalculoService {
         String competencia=normalizar(request.competencia());
         String chave=normalizarChave(request.chaveIdempotencia(),chaveCabecalho);
         boolean recalcular=Boolean.TRUE.equals(request.recalcular());
+        Usuario solicitante = usuarioAutenticado();
+        String usuarioSolicitante = solicitante != null ? solicitante.getEmail() : "SISTEMA";
+        String perfilSolicitante = solicitante != null && solicitante.getPapel() != null ? solicitante.getPapel().name() : null;
         Envio envio;
         try {
             envio=isolated.execute(tx -> {
@@ -54,6 +69,7 @@ public class ExecucaoCalculoService {
                 var refs=referencias.validar(competencia);
                 ExecucaoCalculo e=new ExecucaoCalculo(); e.setCompetencia(competencia); e.setChaveIdempotencia(chave); e.setRecalcular(recalcular);
                 e.setReferenciaDados(refs.dados()); e.setReferenciaRegras(refs.regras()); e.setTotalItens(refs.totalItens());
+                e.setSolicitadoPor(usuarioSolicitante); e.setPerfilSolicitante(perfilSolicitante);
                 repository.saveAndFlush(e);
                 return new Envio(resposta(e),e.getTentativa(),true);
             });
@@ -63,7 +79,10 @@ public class ExecucaoCalculoService {
                 .map(e -> existente(e,competencia,recalcular))
                 .orElseThrow(() -> new ResourceConflictException("Já existe uma execução ativa para esta competência.")));
         }
-        if (envio.enfileirar() && !enfileirar(envio)) return consultar(envio.resposta().id());
+        if (envio.enfileirar()) {
+            registrarAuditoriaSolicitacao(envio.resposta(), usuarioSolicitante, perfilSolicitante, false);
+            if (!enfileirar(envio)) return consultar(envio.resposta().id());
+        }
         return envio.resposta();
     }
     @Transactional(readOnly=true)
@@ -71,6 +90,9 @@ public class ExecucaoCalculoService {
         return resposta(repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Execução não encontrada: "+id)));
     }
     public ExecucaoCalculoResponse retomar(UUID id) {
+        Usuario solicitante = usuarioAutenticado();
+        String usuarioSolicitante = solicitante != null ? solicitante.getEmail() : "SISTEMA";
+        String perfilSolicitante = solicitante != null && solicitante.getPapel() != null ? solicitante.getPapel().name() : null;
         Envio envio=isolated.execute(tx -> {
             String competencia=repository.competencia(id).orElseThrow(() -> new ResourceNotFoundException("Execução não encontrada: "+id));
             validarSemExecucaoAtiva(competencia);
@@ -81,11 +103,41 @@ public class ExecucaoCalculoService {
             var refs=referencias.validar(competencia);
             e.setTentativa(UUID.randomUUID()); e.setReferenciaDados(refs.dados()); e.setReferenciaRegras(refs.regras()); e.setTotalItens(refs.totalItens());
             e.setItensProcessados(0); e.setFalha(null); e.setResultado(null); e.setIniciadoEm(null); e.setConcluidoEm(null); e.setStatus(StatusExecucaoCalculo.SOLICITADA);
+            e.setSolicitadoPor(usuarioSolicitante); e.setPerfilSolicitante(perfilSolicitante);
             repository.saveAndFlush(e);
             return new Envio(resposta(e),e.getTentativa(),true);
         });
+        registrarAuditoriaSolicitacao(envio.resposta(), usuarioSolicitante, perfilSolicitante, true);
         if (!enfileirar(envio)) return consultar(envio.resposta().id());
         return envio.resposta();
+    }
+
+    private Usuario usuarioAutenticado() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getPrincipal() instanceof Usuario u ? u : null;
+    }
+
+    private void registrarAuditoriaSolicitacao(ExecucaoCalculoResponse resp, String usuario, String perfil, boolean retomada) {
+        if (auditoriaService == null || resp == null) {
+            return;
+        }
+        try {
+            auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
+                    .usuario(usuario)
+                    .perfilUsuario(perfil)
+                    .tipoAcao(TipoAcaoAuditoria.SOLICITACAO_CALCULO)
+                    .tipoEntidade(TipoEntidadeAuditoria.EXECUCAO_CALCULO)
+                    .entidadeId(resp.id().toString())
+                    .execucaoCalculoId(resp.id())
+                    .competencia(resp.competencia())
+                    .descricao((retomada ? "Execução assíncrona de cálculo retomada" : "Execução assíncrona de cálculo solicitada")
+                            + " para competência " + resp.competencia() + " (" + resp.totalItens() + " itens).")
+                    .dadosNovos(String.format("{\"competencia\":\"%s\",\"recalcular\":%s,\"totalItens\":%d}",
+                            resp.competencia(), resp.recalcular(), resp.totalItens()))
+                    .sucesso(true));
+        } catch (Exception ex) {
+            log.warn("Falha ao auditar solicitação de execução {}: {}", resp.id(), ex.getMessage());
+        }
     }
     private void validarSemExecucaoAtiva(String competencia) {
         if (repository.findFirstByCompetenciaAndStatusInOrderBySolicitadoEmDesc(competencia,ATIVAS).isPresent())
@@ -114,7 +166,8 @@ public class ExecucaoCalculoService {
         int percentual=e.getStatus()==StatusExecucaoCalculo.CONCLUIDA ? 100 : e.getTotalItens()==0 ? 0 :
             (int)Math.min(99,((long)e.getItensProcessados()*100)/e.getTotalItens());
         return new ExecucaoCalculoResponse(e.getId(),e.getCompetencia(),e.isRecalcular(),e.getStatus(),e.getTotalItens(),e.getItensProcessados(),
-            percentual,e.getReferenciaDados(),e.getReferenciaRegras(),e.getSolicitadoEm(),e.getIniciadoEm(),e.getConcluidoEm(),e.getFalha(),e.getResultado());
+            percentual,e.getReferenciaDados(),e.getReferenciaRegras(),e.getSolicitadoEm(),e.getIniciadoEm(),e.getConcluidoEm(),e.getFalha(),e.getResultado(),
+            e.getOrcamentoTotalCampanhas(),e.getComissaoTotalApurada(),e.getStatusEnquadramentoExecucao(),e.getResumoOrcamentoJson());
     }
     private record Envio(ExecucaoCalculoResponse resposta,UUID tentativa,boolean enfileirar) {}
 }

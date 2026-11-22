@@ -85,6 +85,21 @@ public class Simulacao {
     @Column(name = "valor_total_recortado", nullable = false, precision = 15, scale = 2)
     private BigDecimal valorTotalRecortado;
 
+    @Column(name = "solicitacao_python_id", unique = true)
+    private UUID solicitacaoPythonId;
+    @Column(name = "solicitacao_python_hash", length = 64)
+    private String solicitacaoPythonHash;
+    public UUID getSolicitacaoPythonId() { return solicitacaoPythonId; }
+    public void setSolicitacaoPythonId(UUID valor) { solicitacaoPythonId = valor; }
+    public String getSolicitacaoPythonHash() { return solicitacaoPythonHash; }
+    public void setSolicitacaoPythonHash(String valor) { solicitacaoPythonHash = valor; }
+
+    @Column(name = "analise_python_snapshot", columnDefinition = "TEXT")
+    private String analisePythonSnapshot;
+
+    public String getAnalisePythonSnapshot() { return analisePythonSnapshot; }
+    public void setAnalisePythonSnapshot(String valor) { analisePythonSnapshot = valor; }
+
     // --- Cenário 100% (Proposta Revisada vs Base) ---
     @Column(name = "total_comissao_base", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalComissaoBase;
@@ -205,6 +220,52 @@ public class Simulacao {
 
     @Column(name = "mudanca_faixa_150", nullable = false)
     private int mudancaFaixa150;
+
+    @Column(name = "executado_via_python", nullable = false)
+    private boolean executadoViaPython = false;
+
+    @Column(name = "codigo_python_executado", columnDefinition = "TEXT")
+    private String codigoPythonExecutado;
+
+    @Column(name = "checksum_python", length = 64)
+    private String checksumPython;
+
+    @Column(name = "versao_programa_python")
+    private Integer versaoProgramaPython;
+
+    @Column(name = "saida_python_raw", columnDefinition = "TEXT")
+    private String saidaPythonRaw;
+
+    @Column(name = "orcamento_campanha", precision = 18, scale = 2)
+    private BigDecimal orcamentoCampanha;
+
+    @Column(name = "enquadrado_100")
+    private Boolean enquadrado100;
+
+    @Column(name = "enquadrado_80")
+    private Boolean enquadrado80;
+
+    @Column(name = "enquadrado_120")
+    private Boolean enquadrado120;
+
+    @Column(name = "enquadrado_150")
+    private Boolean enquadrado150;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_enquadramento_100", length = 30)
+    private StatusEnquadramentoOrcamento statusEnquadramento100;
+
+    @Column(name = "saldo_orcamento_100", precision = 18, scale = 2)
+    private BigDecimal saldoOrcamento100;
+
+    @Column(name = "excedente_orcamento_100", precision = 18, scale = 2)
+    private BigDecimal excedenteOrcamento100;
+
+    @Column(name = "percentual_uso_orcamento_100", precision = 10, scale = 2)
+    private BigDecimal percentualUsoOrcamento100;
+
+    @Column(name = "escopo_total_vendas")
+    private Integer escopoTotalVendas;
 
     @OneToMany(mappedBy = "simulacao", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SimulacaoVenda> vendas = new ArrayList<>();
@@ -416,4 +477,49 @@ public class Simulacao {
 
     public List<SimulacaoVenda> getVendas() { return vendas; }
     public void setVendas(List<SimulacaoVenda> vendas) { this.vendas = vendas; }
+
+    public boolean isExecutadoViaPython() { return executadoViaPython; }
+    public void setExecutadoViaPython(boolean executadoViaPython) { this.executadoViaPython = executadoViaPython; }
+
+    public String getCodigoPythonExecutado() { return codigoPythonExecutado; }
+    public void setCodigoPythonExecutado(String codigoPythonExecutado) { this.codigoPythonExecutado = codigoPythonExecutado; }
+
+    public String getChecksumPython() { return checksumPython; }
+    public void setChecksumPython(String checksumPython) { this.checksumPython = checksumPython; }
+
+    public Integer getVersaoProgramaPython() { return versaoProgramaPython; }
+    public void setVersaoProgramaPython(Integer versaoProgramaPython) { this.versaoProgramaPython = versaoProgramaPython; }
+
+    public String getSaidaPythonRaw() { return saidaPythonRaw; }
+    public void setSaidaPythonRaw(String saidaPythonRaw) { this.saidaPythonRaw = saidaPythonRaw; }
+
+    public BigDecimal getOrcamentoCampanha() { return orcamentoCampanha; }
+    public void setOrcamentoCampanha(BigDecimal orcamentoCampanha) { this.orcamentoCampanha = orcamentoCampanha; }
+
+    public Boolean getEnquadrado100() { return enquadrado100; }
+    public void setEnquadrado100(Boolean enquadrado100) { this.enquadrado100 = enquadrado100; }
+
+    public Boolean getEnquadrado80() { return enquadrado80; }
+    public void setEnquadrado80(Boolean enquadrado80) { this.enquadrado80 = enquadrado80; }
+
+    public Boolean getEnquadrado120() { return enquadrado120; }
+    public void setEnquadrado120(Boolean enquadrado120) { this.enquadrado120 = enquadrado120; }
+
+    public Boolean getEnquadrado150() { return enquadrado150; }
+    public void setEnquadrado150(Boolean enquadrado150) { this.enquadrado150 = enquadrado150; }
+
+    public StatusEnquadramentoOrcamento getStatusEnquadramento100() { return statusEnquadramento100; }
+    public void setStatusEnquadramento100(StatusEnquadramentoOrcamento statusEnquadramento100) { this.statusEnquadramento100 = statusEnquadramento100; }
+
+    public BigDecimal getSaldoOrcamento100() { return saldoOrcamento100; }
+    public void setSaldoOrcamento100(BigDecimal saldoOrcamento100) { this.saldoOrcamento100 = saldoOrcamento100; }
+
+    public BigDecimal getExcedenteOrcamento100() { return excedenteOrcamento100; }
+    public void setExcedenteOrcamento100(BigDecimal excedenteOrcamento100) { this.excedenteOrcamento100 = excedenteOrcamento100; }
+
+    public BigDecimal getPercentualUsoOrcamento100() { return percentualUsoOrcamento100; }
+    public void setPercentualUsoOrcamento100(BigDecimal percentualUsoOrcamento100) { this.percentualUsoOrcamento100 = percentualUsoOrcamento100; }
+
+    public Integer getEscopoTotalVendas() { return escopoTotalVendas; }
+    public void setEscopoTotalVendas(Integer escopoTotalVendas) { this.escopoTotalVendas = escopoTotalVendas; }
 }
