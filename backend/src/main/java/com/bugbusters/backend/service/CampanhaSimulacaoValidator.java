@@ -102,6 +102,21 @@ public class CampanhaSimulacaoValidator {
             return divergencias;
         }
         CampanhaVersao versao = campanha.versaoParaRevisao();
+        // The campaign-wide executable approval supersedes the legacy per-rule approvals.
+        if (versao != null && versao.getProgramaPythonAprovado() != null) {
+            var programa = versao.getProgramaPythonAprovado();
+            if (!programa.isAprovado() || programa.getCampanhaVersao() == null
+                    || !Objects.equals(versao.getId(), programa.getCampanhaVersao().getId())) {
+                divergencias.add("O programa atual precisa ser aprovado pelo Analista de Código antes da publicação.");
+            } else {
+                try {
+                    CampanhaProgramaPythonService.validarIntegridadePrograma(programa);
+                } catch (BusinessException ex) {
+                    divergencias.add("O programa aprovado foi alterado. Solicite uma nova revisão técnica.");
+                }
+            }
+            return divergencias;
+        }
         List<Regra> regrasAtuais = carregarRegrasAtuais(campanha);
 
         boolean versaoNaoAprovada = versao != null && versao.getStatusAprovacaoCodigo() != StatusAprovacaoCodigo.APROVADO;
@@ -218,6 +233,14 @@ public class CampanhaSimulacaoValidator {
         }
         if (simulacao.getHashProposta() == null || simulacao.getHashProposta().isBlank()) {
             divergencias.add("A simulação não possui assinatura da proposta.");
+        }
+
+        var versaoAtual = campanha.versaoParaRevisao();
+        var programaAtual = versaoAtual != null ? versaoAtual.getProgramaPythonAprovado() : null;
+        if (programaAtual != null && (!simulacao.isExecutadoViaPython()
+                || !Objects.equals(programaAtual.getVersaoPrograma(), simulacao.getVersaoProgramaPython())
+                || !Objects.equals(programaAtual.getChecksumSha256(), simulacao.getChecksumPython()))) {
+            divergencias.add("A simulação não corresponde ao programa atualmente aprovado. Execute e aceite uma nova simulação.");
         }
 
         // 1. Período
