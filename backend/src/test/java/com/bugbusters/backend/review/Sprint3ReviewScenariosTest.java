@@ -110,8 +110,13 @@ public class Sprint3ReviewScenariosTest {
     private Position position;
     private Registration colaborador;
 
+    @Autowired
+    private com.bugbusters.backend.service.AlertaEstatisticoService alertas;
+
     @BeforeEach
     void setUp() {
+        // A carga anterior pode ainda estar gerando alertas que referenciam os lotes das fixtures.
+        alertas.aguardarAnalisesPendentes(5000);
         CampaignDataCleanup.clear(jdbcTemplate);
         jdbcTemplate.update("DELETE FROM tb_resultado_calculo");
         jdbcTemplate.update("DELETE FROM tb_simulacao");

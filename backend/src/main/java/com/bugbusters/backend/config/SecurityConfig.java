@@ -68,7 +68,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/aprovar", "/api/v1/campanhas/*/versoes/*/esteira/aprovar").hasAnyRole(ADMIN, GERENTE)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/devolver").hasAnyRole(ADMIN, GERENTE)
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/devolver", "/api/v1/campanhas/*/versoes/*/esteira/devolver").hasAnyRole(ADMIN, GERENTE, CODIGO)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/avancar", "/api/v1/campanhas/*/versoes/*/esteira/avancar").hasAnyRole(ADMIN, NEGOCIOS, CODIGO, GERENTE)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/*/esteira/avancar", "/api/v1/campanhas/*/versoes/*/esteira/avancar").hasAnyRole(ADMIN, NEGOCIOS, GERENTE)
                         // Programa Python versionado e homologação técnica na Etapa 2 (BACK-9):
                         .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/*/programa-python", "/api/v1/campanhas/*/versoes/*/programa-python").hasAnyRole(ADMIN, CODIGO)
                         .requestMatchers(HttpMethod.POST,
@@ -93,10 +93,10 @@ public class SecurityConfig {
                         // Etapa 1 e 3: analista de negócios cria/ajusta campanha e simula.
                         .requestMatchers(HttpMethod.POST, "/api/v1/campanhas/**", "/api/v1/simulacoes/**",
                                 "/api/v1/referencias/**", "/api/v1/regras/**").hasAnyRole(ADMIN, NEGOCIOS)
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/**").hasAnyRole(ADMIN, NEGOCIOS, CODIGO)
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/campanhas/**").hasAnyRole(ADMIN, NEGOCIOS)
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/campanhas/**", "/api/v1/regras/**").hasAnyRole(ADMIN, NEGOCIOS)
-                        // Etapa 2: revisão do programa e artefatos de código.
-                        .requestMatchers("/api/v1/interpretador/**").hasAnyRole(ADMIN, CODIGO, NEGOCIOS)
+                        // Interpretação e atualização das regras pertencem ao analista de negócios.
+                        .requestMatchers("/api/v1/interpretador/**").hasAnyRole(ADMIN, NEGOCIOS)
                         .requestMatchers("/api/v1/**").hasRole(ADMIN)
                         .anyRequest().denyAll())
                 .addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class)

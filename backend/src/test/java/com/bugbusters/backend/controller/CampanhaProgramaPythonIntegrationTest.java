@@ -41,6 +41,8 @@ class CampanhaProgramaPythonIntegrationTest {
     @Autowired
     private WebApplicationContext webApplicationContext;
 
+    @Autowired private com.bugbusters.backend.service.CampanhaSimulacaoValidator simulacaoValidator;
+    @Autowired private com.bugbusters.backend.repository.CampanhaRepository campanhas;
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
@@ -174,6 +176,8 @@ class CampanhaProgramaPythonIntegrationTest {
                 .andExpect(jsonPath("$.aprovadoPor", is("Auditor Tecnico")))
                 .andExpect(jsonPath("$.aprovadoEm", notNullValue()))
                 .andExpect(jsonPath("$.validoParaExecucao", is(true)));
+
+        assertThat(simulacaoValidator.detectarDivergenciasAprovacaoCodigo(campanhas.findById(campanhaId).orElseThrow())).isEmpty();
 
         // Verifica se a campanha avançou a esteira (etapaMaisAvancada >= 3)
         mockMvc.perform(get("/api/v1/campanhas/{id}", campanhaId))

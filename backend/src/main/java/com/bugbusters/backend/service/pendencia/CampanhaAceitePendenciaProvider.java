@@ -66,13 +66,13 @@ public class CampanhaAceitePendenciaProvider implements AceitePendenciaProvider 
 
     private List<CampanhaPendenciaAceite> carregarAceitesAtivosDaVersaoOuCampanha(Long campanhaId) {
         Campanha campanha = campanhaRepository.findByIdAndRemovidoEmIsNull(campanhaId).orElse(null);
-        CampanhaVersao versaoAlvo = campanha != null ? campanha.versaoParaRevisao() : null;
+        CampanhaVersao versaoAlvo = campanha == null ? null : campanha.getVersaoVigente() != null
+                ? campanha.getVersaoVigente() : campanha.versaoParaRevisao();
         if (versaoAlvo != null) {
             List<CampanhaPendenciaAceite> daVersao = aceiteRepository.findAllByCampanhaVersaoIdAndStatus(
                     versaoAlvo.getId(), StatusAceitePendencia.ACEITA);
-            if (!daVersao.isEmpty()) {
-                return daVersao;
-            }
+            // Nunca empresta aceite de uma proposta ou de uma versão histórica à vigente.
+            return daVersao;
         }
         return aceiteRepository.findAllByCampanhaIdAndStatus(campanhaId, StatusAceitePendencia.ACEITA);
     }

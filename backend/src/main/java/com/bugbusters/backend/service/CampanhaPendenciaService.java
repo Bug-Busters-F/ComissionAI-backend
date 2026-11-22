@@ -12,6 +12,11 @@ import com.bugbusters.backend.repository.CampanhaPendenciaAceiteRepository;
 import com.bugbusters.backend.repository.CampanhaRepository;
 import com.bugbusters.backend.repository.CampanhaVersaoRepository;
 import com.bugbusters.backend.repository.RegraRepository;
+import com.bugbusters.backend.repository.InconsistenciaImportacaoRepository;
+import com.bugbusters.backend.repository.CampanhaAnexoBaseRepository;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.access.AccessDeniedException;
+import java.time.YearMonth;
 import com.bugbusters.backend.service.auth.UsuarioAtualProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +41,9 @@ public class CampanhaPendenciaService {
     private final RegraRepository regraRepository;
     private final CampanhaPendenciaAceiteRepository aceiteRepository;
     private final AuditoriaGeralService auditoriaService;
+    private final InconsistenciaImportacaoRepository inconsistenciaRepository;
+    private final CampanhaAnexoBaseRepository anexoRepository;
+    private final FechamentoService fechamentoService;
 
     @Autowired(required = false)
     private UsuarioAtualProvider usuarioAtualProvider = (paliativo) -> (paliativo != null && !paliativo.isBlank()) ? paliativo.trim() : "SISTEMA";
@@ -45,23 +53,42 @@ public class CampanhaPendenciaService {
             CampanhaVersaoRepository campanhaVersaoRepository,
             RegraRepository regraRepository,
             CampanhaPendenciaAceiteRepository aceiteRepository,
-            @Autowired(required = false) AuditoriaGeralService auditoriaService
+            @Autowired(required = false) AuditoriaGeralService auditoriaService,
+            InconsistenciaImportacaoRepository inconsistenciaRepository,
+            CampanhaAnexoBaseRepository anexoRepository,
+            FechamentoService fechamentoService
     ) {
         this.campanhaRepository = campanhaRepository;
         this.campanhaVersaoRepository = campanhaVersaoRepository;
         this.regraRepository = regraRepository;
         this.aceiteRepository = aceiteRepository;
         this.auditoriaService = auditoriaService;
+        this.inconsistenciaRepository = inconsistenciaRepository;
+        this.anexoRepository = anexoRepository;
+        this.fechamentoService = fechamentoService;
     }
 
     /**
      * Registra o aceite formal e fundamentado de uma pendência/risco para a campanha ou regra.
      */
     @Transactional
-    public PendenciaAceiteResponse aceitarPendencia(Long campanhaId, Integer versaoNumero, AceitarPendenciaRequest request) {
+    public PendenciaAceiteResponse aceitarPendencia(Long campanhaId, Integer versaoNumero, AceitarPendenciaRequest input) {
         Campanha campanha = buscarCampanha(campanhaId);
-        CampanhaVersao versao = resolverVersao(campanha, versaoNumero);
-        validarImutabilidadeVersao(versao);
+        boolean deImportacao = input.inconsistenciaImportacaoId() != null;
+        CampanhaVersao versao = deImportacao && versaoNumero == null && campanha.getVersaoVigente() != null
+                ? campanha.getVersaoVigente() : resolverVersao(campanha, versaoNumero);
+        final AceitarPendenciaRequest request;
+        if (deImportacao) {
+            if (input.regraId() != null) throw new BusinessException("O aceite de uma inconsistência do arquivo não pode alterar uma regra da campanha.");
+            InconsistenciaImportacao inconsistencia = validarAceiteImportacao(campanha, versao, input.inconsistenciaImportacaoId(), input.envioArquivoId());
+            request = new AceitarPendenciaRequest(null, "inconsistencia:" + inconsistencia.getId(),
+                    "INCONSISTENCIA_IMPORTACAO", inconsistencia.getCampo(), inconsistencia.getMotivo(),
+                    SeveridadePendencia.AVISO, input.aceitoPor(), input.motivo(),
+                    inconsistencia.getEnvio().getId(), inconsistencia.getId());
+        } else {
+            validarImutabilidadeVersao(versao);
+            request = input;
+        }
 
         String aceitoPor = usuarioAtualProvider.obterUsuarioAtual(request.aceitoPor());
         if (aceitoPor == null || aceitoPor.isBlank() || ("SISTEMA".equals(aceitoPor) && (request.aceitoPor() == null || request.aceitoPor().isBlank()))) {
@@ -122,8 +149,8 @@ public class CampanhaPendenciaService {
 
         aceite = aceiteRepository.save(aceite);
 
-        // Reavalia a completude das regras impactadas
-        reavaliarCompletudeRegras(versao);
+        // Aceites de arquivos não modificam regras, código ou resultados publicados.
+        if (!deImportacao) reavaliarCompletudeRegras(versao);
 
         if (auditoriaService != null) {
             auditoriaService.registrarEvento(AuditoriaEventoContexto.builder()
@@ -173,7 +200,9 @@ public class CampanhaPendenciaService {
         }
 
         CampanhaVersao versao = aceite.getCampanhaVersao();
-        if (versao != null) {
+        if (aceite.getInconsistenciaImportacaoId() != null) {
+            validarAceiteImportacao(campanha, versao, aceite.getInconsistenciaImportacaoId(), aceite.getEnvioArquivoId());
+        } else if (versao != null) {
             validarImutabilidadeVersao(versao);
         }
 
@@ -181,7 +210,7 @@ public class CampanhaPendenciaService {
         aceite = aceiteRepository.save(aceite);
 
         // Reavalia a completude das regras caso algum impedimento volte a ficar em aberto
-        if (versao != null) {
+        if (versao != null && aceite.getInconsistenciaImportacaoId() == null) {
             reavaliarCompletudeRegras(versao);
         }
 
@@ -438,6 +467,52 @@ public class CampanhaPendenciaService {
         }
         return campanhaVersaoRepository.findFirstByCampanhaIdOrderByNumeroDesc(campanha.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Nenhuma versão encontrada para a campanha " + campanha.getId()));
+    }
+
+    /** Valida a fonte original: a severidade e o vínculo não vêm de declarações do cliente. */
+    private InconsistenciaImportacao validarAceiteImportacao(Campanha campanha, CampanhaVersao versao,
+                                                            Long inconsistenciaId, Long envioEsperado) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated() || authentication.getAuthorities().stream()
+                .noneMatch(a -> Set.of("ROLE_ADMINISTRADOR", "ROLE_GERENTE_VENDAS").contains(a.getAuthority()))) {
+            throw new AccessDeniedException("Somente gerente ou administrador pode gerenciar aceites das bases.");
+        }
+        if (campanha.getVersaoVigente() != null && (versao == null
+                || !Objects.equals(campanha.getVersaoVigente().getId(), versao.getId()))) {
+            throw new BusinessException("O aceite de bases deve se referir à versão vigente da campanha.");
+        }
+        InconsistenciaImportacao inconsistencia = inconsistenciaRepository.findById(inconsistenciaId)
+                .orElseThrow(() -> new ResourceNotFoundException("A inconsistência do arquivo não foi encontrada."));
+        if (!Set.of("ADVERTENCIA", "AVISO").contains(String.valueOf(inconsistencia.getSeveridade()).toUpperCase(Locale.ROOT))) {
+            throw new BusinessException("Erros impeditivos exigem correção do dado e não admitem aceite de risco.");
+        }
+        EnvioArquivo envio = inconsistencia.getEnvio();
+        if (envio == null || (envioEsperado != null && !Objects.equals(envioEsperado, envio.getId()))) {
+            throw new BusinessException("A inconsistência não pertence ao arquivo informado.");
+        }
+        if (envio.getExcluidoEm() != null || envio.isRejeicaoIntegral()) {
+            throw new BusinessException("Este arquivo foi removido ou rejeitado. Confira as bases vinculadas à campanha.");
+        }
+        if (versao == null || versao.getDataInicio() == null || versao.getDataFim() == null) {
+            throw new BusinessException("A vigência da campanha precisa estar definida antes do aceite.");
+        }
+        if (envio.getCompetencia() != null && !envio.getCompetencia().isBlank()) {
+            YearMonth mes;
+            try { mes = YearMonth.parse(envio.getCompetencia()); }
+            catch (java.time.DateTimeException error) { throw new BusinessException("A competência do arquivo não é válida para este aceite."); }
+            if (mes.isBefore(YearMonth.from(versao.getDataInicio())) || mes.isAfter(YearMonth.from(versao.getDataFim()))) {
+                throw new BusinessException("A competência do arquivo não pertence à vigência da campanha.");
+            }
+            fechamentoService.validarPeriodoDisponivel(mes.atDay(1), mes.atEndOfMonth());
+        } else {
+            // RH global pode influenciar todos os meses da vigência.
+            fechamentoService.validarPeriodoDisponivel(versao.getDataInicio(), versao.getDataFim());
+        }
+        // Verifica após adquirir as travas de fechamento, evitando aceitar lote já desanexado.
+        if (!anexoRepository.existsByCampanhaIdAndEnvioArquivoIdAndDesanexadoEmIsNull(campanha.getId(), envio.getId())) {
+            throw new BusinessException("O arquivo desta inconsistência não está vinculado à campanha. Atualize as bases antes de continuar.");
+        }
+        return inconsistencia;
     }
 
     private void validarImutabilidadeVersao(CampanhaVersao versao) {

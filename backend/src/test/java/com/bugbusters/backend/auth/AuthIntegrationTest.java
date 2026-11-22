@@ -179,14 +179,31 @@ class AuthIntegrationTest {
         }
 
         @Test
-        void codigoSalvaENegociosRegistraProgressoSemPublicar() throws Exception {
+        void somenteNegociosEditaRegrasECodigoMantemRevisaoDoPrograma() throws Exception {
                 for (PapelUsuario papel : new PapelUsuario[] { PapelUsuario.ANALISTA_CODIGO,
                                 PapelUsuario.ANALISTA_NEGOCIOS }) {
                         String t = token(user(papel.name() + "@teste.local", papel));
-                        // A requisição chega à validação do domínio, em vez de ser barrada com 403.
+                        // Negócios altera parâmetros; código atua somente no programa.
                         mvc.perform(put("/api/v1/campanhas/999999").header("Authorization", "Bearer " + t)
                                         .contentType("application/json").content("{}"))
-                                        .andExpect(status().isBadRequest());
+                                        .andExpect(papel == PapelUsuario.ANALISTA_CODIGO ? status().isForbidden() : status().isBadRequest());
+                        for (String path : new String[] {"/api/v1/campanhas/999999/programa-python", "/api/v1/campanhas/999999/versoes/1/programa-python"}) {
+                            mvc.perform(put(path).header("Authorization", "Bearer " + t)
+                                    .contentType("application/json").content("{}"))
+                                    .andExpect(papel == PapelUsuario.ANALISTA_CODIGO ? status().isBadRequest() : status().isForbidden());
+                            mvc.perform(post(path + "/aprovar").header("Authorization", "Bearer " + t)
+                                    .contentType("application/json").content("{}"))
+                                    .andExpect(papel == PapelUsuario.ANALISTA_CODIGO ? status().isBadRequest() : status().isForbidden());
+                        }
+                        mvc.perform(post("/api/v1/interpretador/extrair-propostas").header("Authorization", "Bearer " + t)
+                                .contentType("application/json").content("{}"))
+                                .andExpect(papel == PapelUsuario.ANALISTA_CODIGO ? status().isForbidden() : status().isBadRequest());
+                        if (papel == PapelUsuario.ANALISTA_CODIGO) {
+                            mvc.perform(post("/api/v1/campanhas/999999/esteira/avancar")
+                                    .header("Authorization", "Bearer " + t)
+                                    .contentType("application/json").content("{\"etapaAlvo\":3}"))
+                                    .andExpect(status().isForbidden());
+                        }
                         mvc.perform(patch("/api/v1/campanhas/999999/progresso").header("Authorization", "Bearer " + t)
                                         .contentType("application/json")
                                         .content("{\"ultimaEtapa\":2,\"etapaMaisAvancada\":2,\"versaoProposta\":1}"))
