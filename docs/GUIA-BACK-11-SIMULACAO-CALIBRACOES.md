@@ -2,7 +2,7 @@
 
 ## Escopo e dependências
 
-Implementação somente no backend, em `feat/simulacao-python-calibracoes`, a partir da dev `a8ffb6c`. Depende das operações `/api/v2/executar-programa` e `/api/v2/simular` do PR #18 da IA (`374e913`). O frontend continua acessando apenas o backend. Aplique a migração V45 na próxima reconstrução; não apague o banco nem volumes.
+Implementação somente no backend, em `feat/simulacao-python-calibracoes`, a partir da dev `a8ffb6c`. Depende das operações `/api/v2/executar-programa` e `/api/v2/simular` do PR #18 da IA (`374e913`). O frontend continua acessando apenas o backend. Aplique a migração V46 na próxima reconstrução; não apague o banco nem volumes.
 
 A simulação principal executa o código exato atualmente aprovado para a proposta. Confere a assinatura SHA-256 devolvida pela IA, a quantidade e os identificadores de todos os itens, duplicidades, comissões ausentes/negativas e o uso explícito do fallback contratual. Uma falha nessa execução não produz resultado persistido parcial ou sucesso fictício.
 
@@ -90,9 +90,22 @@ Os testes cobrem persistência após limpar a sessão JPA, repetição sem dupli
 - Suíte completa no estado final: **561 testes, 552 aprovados, 9 ignorados, nenhuma falha ou erro**, em Java 21/H2. Um dos ignorados é a integração opt-in com a IA; os demais são os cenários já ignorados pelo projeto.
 - Rodada específica com a IA real do PR #18: **25 testes aprovados**, sem ignorados. Foram executados o programa completo e a geração de sugestões, seguidos de três reexecuções de candidatos no sandbox. A vigência de 31 dias foi validada, sem usar LLM ou outro executor no lugar do Python.
 - Pacote de produção gerado com sucesso.
-- V45 aplicada com sucesso em PostgreSQL 16 descartável, sobre uma cópia somente da estrutura V44. Nenhum dado do banco local foi alterado. O contêiner temporário foi removido.
+- A migração de calibrações (originalmente V45, renumerada para V46 em 22/11/2026) foi aplicada com sucesso em PostgreSQL 16 descartável, sobre uma cópia somente da estrutura V44. Nenhum dado do banco local foi alterado. O contêiner temporário foi removido.
 - Instância temporária da IA encerrada após o teste; o serviço habitual do usuário não foi substituído.
 - `git diff --check` aprovado.
 - Registros locais de teste em `/tmp/comissionai-back11-*`; não são arquivos da aplicação.
 
-A integração manual nas telas fica para a implementação da FRONT-7/FRONT-8. Antes de usar os novos endpoints no ambiente habitual, integrar/atualizar a IA com o PR #18 e reconstruir o backend para aplicar V45, preservando os volumes.
+A integração manual nas telas fica para a implementação da FRONT-7/FRONT-8. Antes de usar os novos endpoints no ambiente habitual, integrar/atualizar a IA com o PR #18 e reconstruir o backend para aplicar V46, preservando os volumes.
+
+
+## Correção da numeração após integração na dev (22/11/2026)
+
+A migração de alertas do outro PR mantém `V45__blindar_unicidade_alertas_e_corrigir_dados_legados.sql`. Nossa migração passa a ser `V46__persistir_analise_calibracoes_simulacao.sql`, executada por último. Seu conteúdo SQL foi preservado integralmente; somente o nome mudou.
+
+Bancos novos ou que tenham chegado até V44 executam V45 e V46 normalmente. Bancos que já executaram a V45 de alertas também recebem V46 normalmente.
+
+**Ambientes que aplicaram a antiga V45 de calibrações antes da integração:** a simples renomeação do arquivo não altera o histórico que já está no banco. Antes de reconstruir/iniciar o backend, faça backup e confira `flyway_schema_history`. Somente se a linha de versão 45 corresponder ao script `V45__persistir_analise_calibracoes_simulacao.sql`, estiver bem-sucedida, não houver versão 46 e as cinco alterações de estrutura estiverem presentes, a versão e o nome desse registro podem ser reconciliados para 46 e `V46__persistir_analise_calibracoes_simulacao.sql`, preservando checksum, descrição e demais campos. O conteúdo não mudou, portanto o checksum deve permanecer o mesmo.
+
+O projeto já usa `spring.flyway.out-of-order: true`; após essa reconciliação específica, o Flyway poderá executar a V45 de alertas que ainda estiver pendente, sem reaplicar as alterações de calibrações da V46. Não use `repair` genérico para atribuir ao script de alertas o histórico de outro script, não altere checksums arbitrariamente e não apague tabelas nem volumes para resolver a colisão. A reconciliação depende da inspeção do banco de cada ambiente.
+
+Validação da correção: Flyway real e PostgreSQL 16 descartável aprovaram três caminhos — banco novo até V46, banco com V45 de alertas seguido de V46, e banco com antiga V45 de calibrações após reconciliação específica do histórico seguido da V45 de alertas fora de ordem. Os três concluíram `validate()` sem erros; a estrutura esperada foi conferida e um registro de controle permaneceu preservado no caminho legado. O banco do usuário não foi alterado. Faça uma compilação limpa (`mvn clean package` ou a reconstrução Docker, cujo Dockerfile já usa `clean`) para não manter o antigo arquivo V45 em `target/classes`.
