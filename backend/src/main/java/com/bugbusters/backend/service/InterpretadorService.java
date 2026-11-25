@@ -1306,8 +1306,12 @@ public class InterpretadorService {
     }
 
     private static final Pattern PATTERN_ORCAMENTO = Pattern.compile(
-            "(?i)(?:or[çc]amento|teto(?:\\s+or[çc]ament[áa]rio)?|verba)(?:\\s+(?:m[áa]ximo|total|previsto|estimado|de|em|da\\s+campanha|no\\s+valor\\s+de))*\\s*[:=]?\\s*(?:R\\$\\s*|BRL\\s*)?(\\d{1,3}(?:\\.\\d{3})*(?:,\\d{2})?|\\d+(?:,\\d{2})?|\\d+)\\s*(mil(?:h[õo]es)?)?",
-            Pattern.CASE_INSENSITIVE
+            "\\b(?:or[çc]amento|teto(?:\\s+or[çc]ament[áa]rio)?|verba)"
+                    + "(?:\\s+(?:m[áa]ximo|total|previsto|estimado|para\\s+(?:a\\s+)?campanha|d[ao]\\s+campanha|[ée]|ser[áa]|de|em|no\\s+valor\\s+de))*"
+                    + "\\s*[:=]?\\s*(?:R\\$\\s*|BRL\\s*)?"
+                    + "((?:\\d{1,3}(?:\\.\\d{3})+|\\d+)(?:,\\d{1,2})?)(?!\\d|[.,]\\d)"
+                    + "\\s*(mil(?:h[õo]es|h[ãa]o)?)?",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
     public static OrcamentoExtraidoDTO extrairOrcamento(Map<String, Object> resposta, String texto) {
